@@ -381,7 +381,7 @@ async function renderDashboard(){
   const[targetRes,windowsRes,ordersRes]=await Promise.all([
     sb.from('targets').select('target_usd').eq('user_id',cUser.id).eq('year',FISCAL_YEAR).single(),
     sb.from('windows').select('*').eq('year',FISCAL_YEAR).order('window_number'),
-    sb.from('orders').select('id,reference,total_usd,price_type,created_at,order_items(pn,description,unit_price,quantity)')
+    sb.from('orders').select('id,reference,total_usd,price_type,created_at,requested_delivery_date,status,order_items(pn,description,unit_price,quantity)')
       .eq('user_id',cUser.id).gte('created_at',FISCAL_START.toISOString()).order('created_at',{ascending:false})
   ]);
 
@@ -557,6 +557,13 @@ async function renderDashboard(){
         </div>`;
       }).join('')}
     </div>
+    \${cNoDate.length?`
+      <div style="margin-top:10px;padding:8px 10px;background:var(--g50);border-radius:var(--r-md);border:1px dashed var(--border-md)">
+        <p style="font-size:11px;color:var(--tm);font-weight:500">Sem data de entrega definida (\${cNoDate.length} pedido(s)):</p>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">
+          \${cNoDate.map(o=>`<span style="background:var(--g200);color:var(--t2);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace">\${o.reference}</span>`).join('')}
+        </div>
+      </div>`:''}
   </div>`:'' ;
 
   const ordersHtml=orders.length?`
