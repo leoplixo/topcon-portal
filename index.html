@@ -373,79 +373,194 @@ async function renderDashboard(){
   if(!el)return;
   el.innerHTML=`<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando dashboard…</div></div>`;
 
-  const year=new Date().getFullYear();
+  const FISCAL_YEAR=2026;
+  const FISCAL_START=new Date('2026-04-01');
+  const today=new Date();
 
-  // Fetch target
-  const{data:targetData}=await sb.from('targets')
-    .select('target_usd')
-    .eq('group_id',cGroup.id)
-    .eq('year',year)
-    .single();
+  // Fetch in parallel
+  const[targetRes,windowsRes,ordersRes]=await Promise.all([
+    sb.from('targets').select('target_usd').eq('group_id',cGroup.id).eq('year',FISCAL_YEAR).single(),
+    sb.from('windows').select('*').eq('year',FISCAL_YEAR).order('window_number'),
+    sb.from('orders').select('id,reference,total_usd,price_type,created_at,order_items(pn,description,unit_price,quantity)')
+      .eq('user_id',cUser.id).gte('created_at',FISCAL_START.toISOString()).order('created_at',{ascending:false})
+  ]);
 
-  // Fetch orders this year
-  const yearStart=`${year}-01-01`;
-  const{data:orders}=await sb.from('orders')
-    .select('id,reference,total_usd,price_type,created_at,order_items(pn,description,unit_price,quantity)')
-    .eq('user_id',cUser.id)
-    .gte('created_at',yearStart)
-    .order('created_at',{ascending:false});
+  const annualTarget=targetRes.data?.target_usd||0;
+  const windows=windowsRes.data||[];
+  const orders=ordersRes.data||[];
+  const purchased=orders.reduce((s,o)=>s+Number(o.total_usd||0),0);
 
-  const purchased=(orders||[]).reduce((s,o)=>s+Number(o.total_usd||0),0);
-  const target=targetData?.target_usd||0;
-  const pct=target>0?Math.min(100,(purchased/target*100)).toFixed(1):null;
+  // Current window (open right now)
+  const currentWindow=windows.find(w=>today>=new Date(w.open_date)&&today<=new Date(w.close_date));
+  // Closed windows (ended before today)
+  const closedWindows=windows.filter(w=>new Date(w.close_date)<today);
+  // Next upcoming window
+  const nextWindow=windows.find(w=>new Date(w.open_date)>today);
 
-  const targetHtml=target>0?`
-    <div class="dash-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <p style="font-size:13px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em">Meta anual ${year}</p>
-        <span style="font-size:13px;font-weight:600;color:var(--blue)">${pct}% atingido</span>
-      </div>
-      <div class="target-bar-bg"><div class="target-bar-fill" style="width:${pct}%"></div></div>
-      <div class="dash-grid" style="margin-top:12px;margin-bottom:0">
-        <div class="stat-block" style="background:var(--g50);border-radius:var(--r-md)">
-          <div class="stat-num">${fmt(purchased)}</div>
-          <div class="stat-lbl">Comprado em ${year}</div>
+  // Accumulated target = sum of closed windows' monthly allocation
+  const TOTAL_MONTHS=12;
+  const closedMonths=closedWindows.reduce((s,w)=>s+w.months_covered,0);
+  const accumulatedTarget=annualTarget*(closedMonths/TOTAL_MONTHS);
+  const minThreshold=accumulatedTarget*0.75;
+
+  // Eligibility
+  let eligible,statusText,statusColor;
+  if(!annualTarget){
+    eligible=null; statusText='Meta não configurada'; statusColor='var(--tm)';
+  } else if(currentWindow){
+    eligible=true;
+    statusText=`${currentWindow.name} aberta até ${new Date(currentWindow.close_date).toLocaleDateString('pt-BR')}`;
+    statusColor='var(--blue)';
+  } else if(closedWindows.length===0){
+    eligible=true; statusText='Aguardando início da Janela 1'; statusColor='var(--tm)';
+  } else {
+    eligible=purchased>=minThreshold;
+    statusText=eligible
+      ?`${((purchased/accumulatedTarget)*100).toFixed(0)}% do objetivo acumulado — elegível ao preço programado`
+      :`${((purchased/accumulatedTarget)*100).toFixed(0)}% do objetivo acumulado — abaixo do mínimo de 75%`;
+    statusColor=eligible?'#3A8C4C':'#C0392B';
+  }
+
+  // Progress bar values
+  const barMax=Math.max(accumulatedTarget,purchased,1);
+  const purchasedPct=Math.min(100,(purchased/barMax)*100);
+  const thresholdPct=accumulatedTarget>0?Math.min(100,(minThreshold/barMax)*100):75;
+  const targetPct=Math.min(100,(accumulatedTarget/barMax)*100);
+
+  // Annual progress
+  const annualPct=annualTarget>0?Math.min(100,(purchased/annualTarget)*100):0;
+
+  // Status card
+  const statusCard=annualTarget?`
+  <div class="dash-card" style="border:2px solid ${eligible===null?'var(--border)':eligible?'#3A8C4C':'#C0392B'}">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="width:48px;height:48px;border-radius:50%;background:${eligible===null?'var(--g100)':eligible?'#E8F5EC':'#FDECEA'};display:flex;align-items:center;justify-content:center;font-size:22px">
+          ${eligible===null?'⏳':eligible?'✅':'⚠️'}
         </div>
-        <div class="stat-block" style="background:var(--g50);border-radius:var(--r-md)">
-          <div class="stat-num">${fmt(target)}</div>
-          <div class="stat-lbl">Meta ${year}</div>
+        <div>
+          <p style="font-size:16px;font-weight:700;color:${statusColor};margin-bottom:2px">
+            ${eligible===null?'Configure sua meta':eligible?'Preço Programado ativo':'Preço Spot aplicado'}
+          </p>
+          <p style="font-size:13px;color:var(--tm)">${statusText}</p>
         </div>
       </div>
-    </div>`:`
-    <div class="dash-card" style="border:1px dashed var(--border-md);background:var(--g50);text-align:center;padding:28px">
-      <p style="font-size:14px;font-weight:500;color:var(--tm)">Meta anual não definida</p>
-      <p style="font-size:13px;color:var(--tm);margin-top:4px">Entre em contato com sua equipe Topcon para configurar sua meta.</p>
-    </div>`;
+      ${nextWindow?`<div style="text-align:right"><p style="font-size:11px;color:var(--tm)">Próxima janela</p><p style="font-size:13px;font-weight:600;color:var(--blue)">${nextWindow.name}</p><p style="font-size:12px;color:var(--tm)">${new Date(nextWindow.open_date).toLocaleDateString('pt-BR')}</p></div>`:''}
+    </div>
+  </div>`:'';
 
-  const ordersHtml=(orders&&orders.length)?`
-    <div class="dash-card">
-      <p style="font-size:13px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Histórico de pedidos ${year}</p>
-      ${orders.map(o=>`
-        <div class="order-row">
+  // Accumulation progress card
+  const progressCard=annualTarget&&accumulatedTarget>0?`
+  <div class="dash-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <p style="font-size:13px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em">Progresso acumulado — FY2026</p>
+      <span style="font-size:12px;color:var(--tm)">${closedWindows.length} janela(s) fechada(s)</span>
+    </div>
+    <div style="position:relative;margin-bottom:6px">
+      <div style="background:var(--g100);border-radius:20px;height:14px;overflow:visible;position:relative">
+        <div style="height:100%;border-radius:20px;background:${eligible?'#3A8C4C':purchased>0?'#E67E22':'var(--g300)'};width:${purchasedPct}%;transition:width .6s ease;position:relative"></div>
+        <!-- 75% threshold marker -->
+        <div style="position:absolute;top:-6px;left:${thresholdPct}%;transform:translateX(-50%);width:2px;height:26px;background:#C0392B;border-radius:2px">
+          <div style="position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:600;color:#C0392B;white-space:nowrap">mín 75%</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px">
+      <div style="background:var(--g50);border-radius:var(--r-md);padding:12px;text-align:center">
+        <p style="font-size:18px;font-weight:700;color:${eligible?'#3A8C4C':'#C0392B'};letter-spacing:-.02em">${fmt(purchased)}</p>
+        <p style="font-size:11px;color:var(--tm);margin-top:2px">Comprado (FY26)</p>
+      </div>
+      <div style="background:var(--g50);border-radius:var(--r-md);padding:12px;text-align:center">
+        <p style="font-size:18px;font-weight:700;color:#C0392B;letter-spacing:-.02em">${fmt(minThreshold)}</p>
+        <p style="font-size:11px;color:var(--tm);margin-top:2px">Mínimo 75%</p>
+      </div>
+      <div style="background:var(--g50);border-radius:var(--r-md);padding:12px;text-align:center">
+        <p style="font-size:18px;font-weight:700;letter-spacing:-.02em">${fmt(accumulatedTarget)}</p>
+        <p style="font-size:11px;color:var(--tm);margin-top:2px">Objetivo acumulado</p>
+      </div>
+    </div>
+    ${!eligible&&purchased<minThreshold?`<div style="margin-top:12px;padding:10px 14px;background:#FDECEA;border-radius:var(--r-md);font-size:13px;color:#C0392B">
+      ⚠️ Faltam <strong>${fmt(minThreshold-purchased)}</strong> para atingir o mínimo de 75% e recuperar o preço programado.
+    </div>`:''}
+  </div>`:'';
+
+  // Windows timeline
+  const windowsCard=windows.length?`
+  <div class="dash-card">
+    <p style="font-size:13px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Janelas de programação FY2026</p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+    ${windows.map(w=>{
+      const open=new Date(w.open_date),close=new Date(w.close_date);
+      const isOpen=today>=open&&today<=close;
+      const isPast=close<today;
+      const isFuture=open>today;
+      const wTarget=annualTarget*(w.months_covered/TOTAL_MONTHS);
+      const dot=isOpen?'🟢':isPast?'⚫':'⚪';
+      const bg=isOpen?'var(--blue-100)':isPast?'var(--g50)':'var(--g50)';
+      const borderCol=isOpen?'var(--blue)':isPast?'var(--border)':'var(--border)';
+      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:${bg};border:1px solid ${borderCol};border-radius:var(--r-md)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:16px">${dot}</span>
           <div>
-            <p style="font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace;color:var(--blue)">${o.reference}</p>
-            <p style="font-size:12px;color:var(--tm);margin-top:2px">${new Date(o.created_at).toLocaleDateString('pt-BR')} · ${o.order_items?.length||0} item(s) · ${o.price_type==='scheduled'?'Scheduled':'SPOT'}</p>
+            <p style="font-size:13px;font-weight:600">${w.name} ${isOpen?'<span style="font-size:11px;color:var(--blue);font-weight:600"> ABERTA</span>':''}</p>
+            <p style="font-size:11px;color:var(--tm)">${open.toLocaleDateString('pt-BR')} – ${close.toLocaleDateString('pt-BR')}</p>
           </div>
-          <div style="text-align:right">
-            <p style="font-size:15px;font-weight:700;letter-spacing:-.02em">${fmt(o.total_usd)}</p>
-            <p style="font-size:11px;color:var(--tm);margin-top:2px">${o.order_items?.slice(0,2).map(i=>i.pn).join(', ')||''}</p>
-          </div>
-        </div>`).join('')}
-    </div>`:`
-    <div class="dash-card" style="text-align:center;padding:32px">
-      <p style="font-size:14px;font-weight:500;color:var(--tm)">Nenhum pedido em ${year}</p>
-      <button class="btn btn-primary" style="margin-top:14px" onclick="goBack()">Ver catálogo</button>
-    </div>`;
+        </div>
+        <div style="text-align:right">
+          <p style="font-size:13px;font-weight:600">${fmt(wTarget)}</p>
+          <p style="font-size:11px;color:var(--tm)">${w.months_covered} meses · objetivo janela</p>
+        </div>
+      </div>`;
+    }).join('')}
+    </div>
+    <p style="font-size:11px;color:var(--tm);margin-top:10px">Durante a janela todos têm acesso ao preço programado. Após o encerramento, é necessário ≥75% do objetivo acumulado.</p>
+  </div>`:'' ;
+
+  // Annual overview
+  const annualCard=annualTarget?`
+  <div class="dash-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <p style="font-size:13px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em">Meta anual FY2026</p>
+      <span style="font-size:13px;font-weight:600;color:var(--blue)">${annualPct.toFixed(0)}%</span>
+    </div>
+    <div class="target-bar-bg"><div class="target-bar-fill" style="width:${annualPct}%"></div></div>
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--tm);margin-top:6px">
+      <span>${fmt(purchased)} comprado</span>
+      <span>Meta: ${fmt(annualTarget)}</span>
+    </div>
+  </div>`:'';
+
+  // Recent orders
+  const ordersHtml=orders.length?`
+  <div class="dash-card">
+    <p style="font-size:13px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">Histórico de pedidos FY2026</p>
+    ${orders.map(o=>`<div class="order-row">
+      <div>
+        <p style="font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace;color:var(--blue)">${o.reference}</p>
+        <p style="font-size:12px;color:var(--tm);margin-top:2px">${new Date(o.created_at).toLocaleDateString('pt-BR')} · ${o.order_items?.length||0} item(s) · ${o.price_type==='scheduled'?'Scheduled':'SPOT'}</p>
+      </div>
+      <div style="text-align:right">
+        <p style="font-size:15px;font-weight:700;letter-spacing:-.02em">${fmt(o.total_usd)}</p>
+      </div>
+    </div>`).join('')}
+  </div>`:`
+  <div class="dash-card" style="text-align:center;padding:32px">
+    <p style="font-size:14px;font-weight:500;color:var(--tm)">Nenhum pedido registrado no FY2026</p>
+    <button class="btn btn-primary" style="margin-top:14px" onclick="goBack()">Ver catálogo →</button>
+  </div>`;
 
   el.innerHTML=`
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
       <div>
-        <h1 class="page-title">Olá, ${cProfile.full_name} 👋</h1>
-        <p class="page-sub" style="margin-bottom:0">${cGroup?.label||''} · ${year}</p>
+        <h1 class="page-title">Olá, ${cProfile.full_name}</h1>
+        <p class="page-sub" style="margin-bottom:0">${cGroup?.label||''} · FY2026</p>
       </div>
       <button class="btn btn-primary" onclick="goBack()">Ver catálogo →</button>
     </div>
-    ${targetHtml}
+    ${statusCard}
+    ${progressCard}
+    ${windowsCard}
+    ${annualCard}
     ${ordersHtml}`;
 }
 
