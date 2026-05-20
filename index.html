@@ -745,12 +745,28 @@ function renderQuote(){
       <div class="sum-row"><span>Frete</span><span>A consultar</span></div>
       <div class="sum-total"><span>Total estimado</span><span>${fmt(total)}</span></div>
     </div>
-    <div style="margin-top:16px;padding:16px;background:var(--g50);border:1px solid var(--border);border-radius:var(--r-md)">
-      <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:6px">Data de entrega solicitada <span style="color:var(--tm);font-weight:400">(opcional — informe o mês desejado para entrega)</span></label>
-      <input type="month" id="delivery-date"
-        min="2026-04" max="2027-03"
-        style="padding:8px 12px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit;background:#fff;color:var(--t1)"/>
-      <p style="font-size:11px;color:var(--tm);margin-top:5px">Pedidos com data futura são tratados como programados — contam para o objetivo da janela mas serão entregues na data solicitada.</p>
+    <div style="margin-top:16px;padding:16px;background:#FEF9EC;border:1px solid #FAC775;border-radius:var(--r-md)">
+      <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:8px">
+        📦 Mês de retirada na Topcon
+      </label>
+      <select id="delivery-date" style="padding:9px 12px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit;background:#fff;color:var(--t1);width:100%;max-width:320px">
+        <option value="">— Selecione o mês desejado —</option>
+        <option value="2026-05-01">Maio 2026</option>
+        <option value="2026-06-01">Junho 2026</option>
+        <option value="2026-07-01">Julho 2026</option>
+        <option value="2026-08-01">Agosto 2026</option>
+        <option value="2026-09-01">Setembro 2026</option>
+        <option value="2026-10-01">Outubro 2026</option>
+        <option value="2026-11-01">Novembro 2026</option>
+        <option value="2026-12-01">Dezembro 2026</option>
+        <option value="2027-01-01">Janeiro 2027</option>
+        <option value="2027-02-01">Fevereiro 2027</option>
+        <option value="2027-03-01">Março 2027</option>
+      </select>
+      <p style="font-size:11px;color:#854F0B;margin-top:8px;line-height:1.5">
+        ⚠️ <strong>Atenção ao tempo de logística:</strong> o mês selecionado representa quando os itens estarão prontos para <strong>retirada na Topcon</strong>. 
+        Considere o tempo de transporte até o seu destino final ao escolher a data.
+      </p>
     </div>
     <div class="actions" style="margin-top:12px">
       <button class="btn btn-outline" onclick="exportPDF()">📄 Exportar PDF</button>
@@ -764,8 +780,7 @@ async function sendOrder(){
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Enviando…';}
   const items=getItems();const total=getTotal();
   const ref='TOP-'+Date.now().toString().slice(-7);
-  const deliveryVal=document.getElementById('delivery-date')?.value;
-  const deliveryDate=deliveryVal?deliveryVal+'-01':null;
+  const deliveryDate=document.getElementById('delivery-date')?.value||null;
   const {data:order,error:oErr}=await sb.from('orders').insert({
     reference:ref,user_id:cUser.id,group_id:cGroup.id,price_type:priceType,
     total_usd:total,requested_delivery_date:deliveryDate
@@ -974,9 +989,14 @@ async function renderAdminTab(tab){
               <option value="shipped" ${o.status==='shipped'?'selected':''}>Enviado</option>
               <option value="cancelled" ${o.status==='cancelled'?'selected':''}>Cancelado</option>
             </select>
-            <input type="month" id="del-${o.id}" value="${o.requested_delivery_date?o.requested_delivery_date.slice(0,7):''}"
-              min="2026-04" max="2027-03"
-              style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit"/>
+            <select id="del-${o.id}" style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit">
+              <option value="">Sem data</option>
+              ${['2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'].map(m=>{
+                const sel=o.requested_delivery_date&&o.requested_delivery_date.startsWith(m)?'selected':'';
+                const lbl=new Date(m+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+                return `<option value="${m}-01" ${sel}>${lbl}</option>`;
+              }).join('')}
+            </select>
             <input type="text" id="notes-${o.id}" value="${o.edit_notes||''}" placeholder="Observações internas…"
               style="flex:1;min-width:180px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit"/>
             <button class="btn btn-primary btn-sm" onclick="saveOrderEdit('${o.id}')">Salvar alterações</button>
