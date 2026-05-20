@@ -390,7 +390,7 @@ async function doLogout(){
 async function loadCatalog(){
   showLoader('parts-grid','Carregando catálogo…');
   const {data,error}=await sb.from('part_prices')
-    .select('scheduled_price,spot_price,parts!inner(id,seg,product,pn,description,list_price,stock_status,active)')
+    .select('scheduled_price,spot_price,parts!inner(id,seg,product,pn,description,list_price,active)')
     .eq('group_id',cGroup.id)
     .eq('parts.active',true);
   if(error){showLoader('parts-grid','⚠ Erro ao carregar catálogo.');return;}
@@ -433,7 +433,6 @@ function renderCatalog(){
   grid.innerHTML=filtered.map(p=>{
     const price=priceType==='scheduled'?p.scheduled_price:p.spot_price;
     const inCart=cart[p.pn]||0;
-    const ss=p.stock_status||'ok';
     return `<div class="part-card ${inCart?'in-cart':''}">
       <div class="part-top">
         <span class="badge badge-${p.seg.toLowerCase()}">${p.seg}</span>
@@ -442,7 +441,6 @@ function renderCatalog(){
       <p class="part-pn">${p.pn}</p>
       <p class="part-product">${p.product||''}</p>
       <p class="part-desc">${p.description}</p>
-      <div style="font-size:11px;color:var(--tm);margin-bottom:12px"><span class="sdot s-${ss}"></span>${ss==='ok'?'In stock':ss==='low'?'Low stock':'Out of stock'}</div>
       <div class="part-footer">
         <div>
           <p class="part-list">List Price: ${fmt(p.list_price)}</p>
@@ -590,22 +588,22 @@ async function renderAdminTab(tab){
         ondrop="event.preventDefault();this.classList.remove('over');handleCSV(event.dataTransfer.files[0])">
         <div style="font-size:40px;margin-bottom:14px">📊</div>
         <p style="font-size:15px;font-weight:600;color:var(--t1);margin-bottom:4px">Arraste o CSV aqui ou clique para selecionar</p>
-        <p style="font-size:12px;color:var(--tm)">Colunas: seg, product, pn, description, list_price, cost, stock_status, latam_scheduled, latam_spot, mexico_scheduled, mexico_spot, tormex_scheduled, tormex_spot, kuhn_scheduled, kuhn_spot, agricien_scheduled, agricien_spot</p>
+        <p style="font-size:12px;color:var(--tm)">Colunas: seg, product, pn, description, list_price, cost, latam_scheduled, latam_spot, mexico_scheduled, mexico_spot, tormex_scheduled, tormex_spot, kuhn_scheduled, kuhn_spot, agricien_scheduled, agricien_spot</p>
         <input id="csv-in" type="file" accept=".csv" style="display:none" onchange="handleCSV(this.files[0])">
       </div>
       <div id="csv-status"></div>
       <div style="margin-top:20px;padding:16px;background:#fff;border-radius:var(--r-md);border:1px solid var(--border)">
         <p style="font-size:12px;font-weight:600;color:var(--t2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.06em">Exemplo de linha no CSV</p>
         <div style="overflow-x:auto"><table style="font-size:10px;border-collapse:collapse;white-space:nowrap">
-          <tr>${['seg','product','pn','description','list_price','cost','stock_status','latam_scheduled','latam_spot','mexico_scheduled','mexico_spot','tormex_scheduled','tormex_spot','kuhn_scheduled','kuhn_spot','agricien_scheduled','agricien_spot'].map(h=>`<th style="padding:5px 8px;background:var(--g100);border:1px solid var(--border);font-family:'JetBrains Mono',monospace">${h}</th>`).join('')}</tr>
-          <tr>${['AG','KIT Display','1036805-01','KIT AGS-2 XD+','6428.33','2100','ok','3857','3985','3857','3985','3857','3857','3857','3857','3857','3985'].map(v=>`<td style="padding:5px 8px;border:1px solid var(--border);color:var(--tm);font-family:'JetBrains Mono',monospace">${v}</td>`).join('')}</tr>
+          <tr>${['seg','product','pn','description','list_price','cost','latam_scheduled','latam_spot','mexico_scheduled','mexico_spot','tormex_scheduled','tormex_spot','kuhn_scheduled','kuhn_spot','agricien_scheduled','agricien_spot'].map(h=>`<th style="padding:5px 8px;background:var(--g100);border:1px solid var(--border);font-family:'JetBrains Mono',monospace">${h}</th>`).join('')}</tr>
+          <tr>${['AG','KIT Display','1036805-01','KIT AGS-2 XD+','6428.33','2100','3857','3985','3857','3985','3857','3857','3857','3857','3857','3985'].map(v=>`<td style="padding:5px 8px;border:1px solid var(--border);color:var(--tm);font-family:'JetBrains Mono',monospace">${v}</td>`).join('')}</tr>
         </table></div>
         <p style="font-size:11px;color:var(--tm);margin-top:10px">💡 Deixe em branco os grupos que não se aplicam ao PN. Coluna <strong>cost</strong> é interna — nunca exibida ao cliente.</p>
       </div>`;
   }
   if(tab==='catalog'){
     el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Catálogo — visão interna</h1><div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>`;
-    const {data:parts}=await sb.from('parts').select('*,part_prices(scheduled_price,spot_price,client_groups(slug,label))').eq('active',true).order('seg').order('pn');
+    const {data:parts}=await sb.from('parts').select('id,seg,product,pn,description,list_price,cost,part_prices(scheduled_price,spot_price,client_groups(slug,label))').eq('active',true).order('seg').order('pn');
     if(!parts?.length){el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Catálogo — visão interna</h1><div class="empty"><div class="empty-icon">📦</div><p style="font-size:14px;font-weight:500">Nenhum PN cadastrado.</p><p style="font-size:13px;margin-top:4px;color:var(--tm)">Faça upload de um CSV na aba "Upload CSV".</p></div>`;return;}
     el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Catálogo completo (${parts.length} PNs)</h1>
       <div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">
@@ -614,7 +612,7 @@ async function renderAdminTab(tab){
         <th style="text-align:right">List Price</th>
         <th style="text-align:right;color:#6B3FA0">Custo 🔒</th>
         <th style="text-align:right;color:#6B3FA0">Margem 🔒</th>
-        <th>Estoque</th>
+        
       </tr></thead><tbody>
       ${parts.map(p=>{
         const ref=p.part_prices?.find(x=>x.client_groups?.slug==='latam')?.spot_price||p.part_prices?.[0]?.spot_price;
@@ -628,7 +626,6 @@ async function renderAdminTab(tab){
           <td style="text-align:right">${fmt(p.list_price)}</td>
           <td style="text-align:right;color:#6B3FA0;font-weight:600">${fmt(p.cost)}</td>
           <td style="text-align:right">${mg?`<span class="mchip" style="background:${mc}18;color:${mc}">${mg}%</span>`:'—'}</td>
-          <td><span class="sdot s-${p.stock_status||'ok'}"></span>${p.stock_status||'ok'}</td>
         </tr>`;
       }).join('')}</tbody></table></div>`;
   }
@@ -742,7 +739,7 @@ async function handleCSV(file){
     description:r.description||r.pn,
     list_price:parseFloat(r.list_price)||null,
     cost:parseFloat(r.cost)||null,
-    stock_status:r.stock_status||r.stock||'ok',active:true
+    active:true
   }));
   const{data:upserted,error:pErr}=await sb.from('parts').upsert(partsData,{onConflict:'pn'}).select('id,pn');
   if(pErr){st.innerHTML=`<div class="alert alert-err">✗ Erro ao importar: ${pErr.message}</div>`;return;}
