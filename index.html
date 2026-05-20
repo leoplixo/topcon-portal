@@ -390,11 +390,16 @@ async function doLogout(){
 async function loadCatalog(){
   showLoader('parts-grid','Carregando catálogo…');
   const {data,error}=await sb.from('part_prices')
-    .select('scheduled_price,spot_price,parts!inner(id,seg,product,pn,description,list_price,active)')
-    .eq('group_id',cGroup.id)
-    .eq('parts.active',true);
-  if(error){showLoader('parts-grid','⚠ Erro ao carregar catálogo.');return;}
-  catalog=(data||[]).map(r=>({...r.parts,scheduled_price:r.scheduled_price,spot_price:r.spot_price}));
+    .select('scheduled_price,spot_price,parts!inner(id,seg,product,pn,description,list_price)')
+    .eq('group_id',cGroup.id);
+  if(error){
+    document.getElementById('parts-grid').innerHTML=
+      `<div class="empty"><div class="empty-icon">⚠️</div>
+       <p style="font-size:14px;font-weight:500">Erro ao carregar catálogo</p>
+       <p style="font-size:12px;margin-top:6px;color:var(--tm)">${error.message}</p></div>`;
+    return;
+  }
+  catalog=(data||[]).filter(r=>r.parts).map(r=>({...r.parts,scheduled_price:r.scheduled_price,spot_price:r.spot_price}));
   renderCatalog();
 }
 
@@ -734,18 +739,29 @@ async function handleCSV(file){
     {slug:'tormex',sc:'tormex_scheduled',pc:'tormex_spot'},
     {slug:'kuhn',sc:'kuhn_scheduled',pc:'kuhn_spot'},
   ];
-  const partsData=filteredRows.map(r=>({
+  // Deduplicate by PN — keep last occurrence
+  const pnSeen={};
+  const dedupedRows=filteredRows.filter(r=>{pnSeen[r.pn]=r;return true;});
+  const uniqueRows=Object.values(pnSeen);
+
+  const partsData=uniqueRows.map(r=>({
     seg:r.seg||'AG',product:r.product||null,pn:r.pn,
     description:r.description||r.pn,
     list_price:parseFloat(r.list_price)||null,
     cost:parseFloat(r.cost)||null,
     active:true
   }));
-  const{data:upserted,error:pErr}=await sb.from('parts').upsert(partsData,{onConflict:'pn'}).select('id,pn');
-  if(pErr){st.innerHTML=`<div class="alert alert-err">✗ Erro ao importar: ${pErr.message}</div>`;return;}
-  const pnId={};upserted.forEach(p=>pnId[p.pn]=p.id);
+  const{error:pErr}=await sb.from('parts').upsert(partsData,{onConflict:'pn'});
+  if(pErr){st.innerHTML=`<div class="alert alert-err">✗ Erro ao importar parts: ${pErr.message}</div>`;return;}
+
+  // Fetch IDs separately — more reliable than relying on upsert return
+  const allPns=uniqueRows.map(r=>r.pn);
+  const{data:fetchedParts,error:fErr}=await sb.from('parts').select('id,pn').in('pn',allPns);
+  if(fErr){st.innerHTML=`<div class="alert alert-err">✗ Erro ao buscar IDs: ${fErr.message}</div>`;return;}
+  const pnId={};(fetchedParts||[]).forEach(p=>pnId[p.pn]=p.id);
+  st.innerHTML=`<div class="alert alert-info">Parts OK (${fetchedParts?.length||0}). Importando preços…</div>`;
   const priceRecs=[];
-  for(const row of filteredRows){
+  for(const row of uniqueRows){
     const partId=pnId[row.pn];if(!partId)continue;
     for(const gc of GC){
       const gId=gMap[gc.slug];if(!gId)continue;
@@ -758,7 +774,7 @@ async function handleCSV(file){
     const{error:prErr}=await sb.from('part_prices').upsert(priceRecs.slice(i,i+CHUNK),{onConflict:'part_id,group_id'});
     if(prErr){st.innerHTML=`<div class="alert alert-err">✗ Erro ao importar preços: ${prErr.message}</div>`;return;}
   }
-  st.innerHTML=`<div class="alert alert-ok">✓ ${filteredRows.length} part numbers e ${priceRecs.length} registros de preço importados. Catálogo atualizado para todos os clientes.</div>`;
+  st.innerHTML=`<div class="alert alert-ok">✓ ${uniqueRows.length} part numbers (${filteredRows.length} linhas lidas, duplicatas removidas) e ${priceRecs.length} registros de preço importados. Catálogo atualizado para todos os clientes.</div>`;
 }
 
 // UTILS
