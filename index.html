@@ -673,16 +673,59 @@ async function handleCSV(file){
   if(!file)return;
   const st=document.getElementById('csv-status');
   st.innerHTML=`<div class="alert alert-info"><span class="spinner" style="border-color:rgba(5,58,100,.3);border-top-color:var(--blue-deep)"></span> Processando ${file.name}…</div>`;
-  const text=await file.text();
+
+  // Read with UTF-8, strip BOM if present
+  let text=await file.text();
+  text=text.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+
   const lines=text.trim().split('\n').filter(l=>l.trim());
-  if(lines.length<2){st.innerHTML=`<div class="alert alert-err">✗ Arquivo vazio ou inválido.</div>`;return;}
-  const headers=lines[0].split(',').map(h=>h.trim().toLowerCase().replace(/[^a-z0-9_]/g,''));
+  if(lines.length<2){st.innerHTML=`<div class="alert alert-err">✗ Arquivo vazio ou inválido. Certifique-se de que o arquivo tem cabeçalho e pelo menos uma linha de dados.</div>`;return;}
+
+  // Auto-detect delimiter: semicolon (Excel PT-BR) or comma
+  const firstLine=lines[0];
+  const delim=firstLine.split(';').length > firstLine.split(',').length ? ';' : ',';
+
+  // Smart CSV split that respects quoted fields
+  function splitLine(line, sep){
+    const result=[]; let cur=''; let inQ=false;
+    for(let i=0;i<line.length;i++){
+      const c=line[i];
+      if(c==='"'){inQ=!inQ;}
+      else if(c===sep&&!inQ){result.push(cur.trim().replace(/^"|"$/g,''));cur='';}
+      else{cur+=c;}
+    }
+    result.push(cur.trim().replace(/^"|"$/g,''));
+    return result;
+  }
+
+  const headers=splitLine(firstLine,delim).map(h=>h.trim().toLowerCase().replace(/[^a-z0-9_]/g,''));
+
+  // Show detected delimiter info
+  st.innerHTML=`<div class="alert alert-info"><span class="spinner" style="border-color:rgba(5,58,100,.3);border-top-color:var(--blue-deep)"></span> Detectado separador: "${delim}" · ${lines.length-1} linhas · Processando…</div>`;
+
   const rows=lines.slice(1).map(line=>{
-    const vals=line.split(',');const obj={};
+    const vals=splitLine(line,delim);const obj={};
     headers.forEach((h,i)=>obj[h]=(vals[i]||'').trim());
     return obj;
-  }).filter(r=>r.pn);
-  if(!rows.length){st.innerHTML=`<div class="alert alert-err">✗ Nenhum PN encontrado.</div>`;return;}
+  });
+  // Normalize PN field - handle common variations
+  rows.forEach(r=>{
+    if(!r.pn) r.pn=r['pn#']||r['partnumber']||r['part_number']||r['partno']||r['pnnumber']||'';
+    if(!r.description) r.description=r['desc']||r['descricao']||r['material_description']||r['materialdescription']||'';
+    if(!r.list_price) r.list_price=r['listprice']||r['list price']||r['preco_lista']||'';
+    // Fix PT-BR decimal separator (comma → dot)
+    ['list_price','cost','latam_scheduled','latam_spot','mexico_scheduled','mexico_spot',
+     'tormex_scheduled','tormex_spot','kuhn_scheduled','kuhn_spot','agricien_scheduled','agricien_spot',
+     'feed_latam_scheduled','feed_latam_spot','feed_mx_scheduled','feed_mx_spot'].forEach(k=>{
+      if(r[k]) r[k]=String(r[k]).replace(/\.(?=.*\.)/g,'').replace(',','.');
+    });
+  });
+  const filteredRows=rows.filter(r=>r.pn&&r.pn.length>0);
+  if(!filteredRows.length){
+    st.innerHTML=`<div class="alert alert-err">✗ Nenhum PN encontrado.<br>
+    <span style="font-size:12px;font-weight:400">Cabeçalhos detectados: <strong>${headers.join(' | ')}</strong><br>
+    Verifique se existe uma coluna chamada <strong>pn</strong> no seu arquivo.</span></div>`;return;
+  }
   if(!clientGroups.length){const{data:g}=await sb.from('client_groups').select('*');clientGroups=g||[];}
   const gMap={};clientGroups.forEach(g=>gMap[g.slug]=g.id);
   const GC=[
@@ -694,10 +737,10 @@ async function handleCSV(file){
     {slug:'tormex',sc:'tormex_scheduled',pc:'tormex_spot'},
     {slug:'kuhn',sc:'kuhn_scheduled',pc:'kuhn_spot'},
   ];
-  const partsData=rows.map(r=>({
+  const partsData=filteredRows.map(r=>({
     seg:r.seg||'AG',product:r.product||null,pn:r.pn,
-    description:r.description||r.desc||r.pn,
-    list_price:parseFloat(r.list_price||r.listprice)||null,
+    description:r.description||r.pn,
+    list_price:parseFloat(r.list_price)||null,
     cost:parseFloat(r.cost)||null,
     stock_status:r.stock_status||r.stock||'ok',active:true
   }));
@@ -705,7 +748,7 @@ async function handleCSV(file){
   if(pErr){st.innerHTML=`<div class="alert alert-err">✗ Erro ao importar: ${pErr.message}</div>`;return;}
   const pnId={};upserted.forEach(p=>pnId[p.pn]=p.id);
   const priceRecs=[];
-  for(const row of rows){
+  for(const row of filteredRows){
     const partId=pnId[row.pn];if(!partId)continue;
     for(const gc of GC){
       const gId=gMap[gc.slug];if(!gId)continue;
@@ -718,7 +761,7 @@ async function handleCSV(file){
     const{error:prErr}=await sb.from('part_prices').upsert(priceRecs.slice(i,i+CHUNK),{onConflict:'part_id,group_id'});
     if(prErr){st.innerHTML=`<div class="alert alert-err">✗ Erro ao importar preços: ${prErr.message}</div>`;return;}
   }
-  st.innerHTML=`<div class="alert alert-ok">✓ ${rows.length} part numbers e ${priceRecs.length} registros de preço importados. Catálogo atualizado para todos os clientes.</div>`;
+  st.innerHTML=`<div class="alert alert-ok">✓ ${filteredRows.length} part numbers e ${priceRecs.length} registros de preço importados. Catálogo atualizado para todos os clientes.</div>`;
 }
 
 // UTILS
