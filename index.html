@@ -557,11 +557,11 @@ async function renderDashboard(){
         </div>`;
       }).join('')}
     </div>
-    \${cNoDate.length?`
+    ${cNoDate.length?`
       <div style="margin-top:10px;padding:8px 10px;background:var(--g50);border-radius:var(--r-md);border:1px dashed var(--border-md)">
-        <p style="font-size:11px;color:var(--tm);font-weight:500">Sem data de entrega definida (\${cNoDate.length} pedido(s)):</p>
+        <p style="font-size:11px;color:var(--tm);font-weight:500">Sem data de entrega definida (${cNoDate.length} pedido(s)):</p>
         <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">
-          \${cNoDate.map(o=>`<span style="background:var(--g200);color:var(--t2);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace">\${o.reference}</span>`).join('')}
+          ${cNoDate.map(o=>`<span style="background:var(--g200);color:var(--t2);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace">\${o.reference}</span>`).join('')}
         </div>
       </div>`:''}
   </div>`:'' ;
