@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Topcon Portal</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
 :root {
@@ -304,6 +305,54 @@ const SUPA_URL = 'https://zxcwxvsciqwvhthpaazx.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp4Y3d4dnNjaXF3dmh0aHBhYXp4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyMDc5OTAsImV4cCI6MjA5NDc4Mzk5MH0.F6naQfv5QdmQlM04OnC7uW9yZy9BGOjDJfqEuWTfIII';
 const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
 
+// ── EmailJS Config ─────────────────────────────────────────────
+// TO CONFIGURE: replace with your EmailJS credentials
+const EMAILJS_PUBLIC_KEY  = 'YOUR_EMAILJS_PUBLIC_KEY';
+const EMAILJS_SERVICE_ID  = 'YOUR_EMAILJS_SERVICE_ID';
+const EMAILJS_TEMPLATE_ID = 'YOUR_EMAILJS_TEMPLATE_ID';
+const SALES_OPS_EMAIL     = 'leoplixo@gmail.com';
+
+function initEmailJS(){
+  if(EMAILJS_PUBLIC_KEY !== 'YOUR_EMAILJS_PUBLIC_KEY'){
+    emailjs.init({publicKey: EMAILJS_PUBLIC_KEY});
+  }
+}
+initEmailJS();
+
+async function sendOrderEmail(order, items, clientName, groupLabel, deliveryDate){
+  if(EMAILJS_PUBLIC_KEY === 'YOUR_EMAILJS_PUBLIC_KEY') return;
+  try {
+    const itemsText = items.map(i=>`${i.pn} | ${i.description} | Qtd: ${i.qty} | Unit: ${fmt(i.price)} | Total: ${fmt(i.total)}`).join('\n');
+    const total = items.reduce((s,i)=>s+i.total,0);
+    const delivStr = deliveryDate ? new Date(deliveryDate+'T12:00:00').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}) : 'Não definida';
+    const params = {
+      to_email:      SALES_OPS_EMAIL,
+      client_name:   clientName,
+      client_group:  groupLabel,
+      order_ref:     order.reference,
+      order_date:    new Date().toLocaleDateString('pt-BR'),
+      delivery_date: delivStr,
+      price_type:    order.price_type === 'scheduled' ? 'Scheduled' : 'SPOT',
+      items_list:    itemsText,
+      total_usd:     fmt(total),
+      portal_url:    window.location.href,
+    };
+    // Send to Sales OPS
+    await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, params);
+    // Send to all admins
+    const {data:admins} = await sb.from('user_profiles').select('id').eq('is_admin', true);
+    const {data:authUsers} = await sb.from('user_profiles').select('id,full_name').eq('is_admin',true);
+    // Note: admin emails fetched separately as Supabase auth emails require service role
+    // For now sends to SALES_OPS_EMAIL — configure individual admin emails below
+    const ADMIN_EMAILS = [SALES_OPS_EMAIL]; // add more: 'gerente@topcon.com'
+    for(const email of ADMIN_EMAILS){
+      if(email !== SALES_OPS_EMAIL){ // avoid duplicate
+        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {...params, to_email: email});
+      }
+    }
+  } catch(e){ console.warn('Email failed:', e); }
+}
+
 let cUser=null, cProfile=null, cGroup=null;
 let catalog=[], cart={}, priceType='scheduled', segFilter='ALL';
 let clientGroups=[];
@@ -350,11 +399,12 @@ async function afterLogin(){
     return;
   }
   cProfile=profile; cGroup=profile.client_groups;
-  if(profile.is_admin){
+  const role = profile.role || (profile.is_admin ? 'admin' : 'client');
+  if(role === 'admin' || profile.is_admin){
     showScreen('admin');
     const {data:g}=await sb.from('client_groups').select('*').order('label');
     clientGroups=g||[];
-    renderAdminTab('upload');
+    renderAdminTab('orders');
   } else {
     document.getElementById('u-av').textContent=profile.full_name[0].toUpperCase();
     document.getElementById('u-nm').textContent=profile.full_name;
@@ -798,6 +848,8 @@ async function sendOrder(){
   })));
   cart={};
   document.getElementById('confirm-ref').textContent='Referência: '+ref;
+  // Send email notification
+  await sendOrderEmail(order, items, cProfile.full_name, cGroup?.label||'', deliveryDate);
   showView('confirm');updBadge();
 }
 
@@ -900,152 +952,141 @@ async function renderAdminTab(tab){
   if(tab==='orders'){
     el.innerHTML=`<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando pedidos…</div></div>`;
     const{data:orders}=await sb.from('orders')
-      .select('*,user_profiles(full_name,id),client_groups(label),order_items(id,pn,description,unit_price,quantity)')
-      .order('requested_delivery_date',{ascending:true,nullsFirst:false});
-
+      .select('*,user_profiles(full_name,id),client_groups(label),order_items(id,pn,description,unit_price,quantity,additional_discount)')
+      .order('created_at',{ascending:false});
     if(!orders?.length){
       el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Pedidos</h1><div class="empty"><div class="empty-icon">📋</div><p style="font-size:14px;font-weight:500">Nenhum pedido ainda.</p></div>`;return;
     }
-
-    // Build timeline data — group by delivery month
     const MONTHS=['Abr 26','Mai 26','Jun 26','Jul 26','Ago 26','Set 26','Out 26','Nov 26','Dez 26','Jan 27','Fev 27','Mar 27'];
-    const MONTH_KEYS=['2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'];
-    const byMonth={};
-    MONTH_KEYS.forEach(k=>byMonth[k]=[]);
-    const noDate=[];
-    orders.forEach(o=>{
-      if(o.requested_delivery_date){
-        const mk=o.requested_delivery_date.slice(0,7);
-        if(byMonth[mk])byMonth[mk].push(o); else noDate.push(o);
-      } else noDate.push(o);
-    });
-    const maxInMonth=Math.max(1,...MONTH_KEYS.map(k=>byMonth[k].length));
-
-    const CLIENT_COLORS=['#0A8CFA','#3A8C4C','#E67E22','#9B59B6','#E74C3C','#16A085','#2C3E50','#F39C12'];
-    const clientColorMap={};let colorIdx=0;
-    orders.forEach(o=>{
-      const uid=o.user_profiles?.full_name||'?';
-      if(!clientColorMap[uid])clientColorMap[uid]=CLIENT_COLORS[colorIdx++%CLIENT_COLORS.length];
-    });
-
-    // Timeline HTML
-    const timelineHtml=`
-    <div class="dash-card" style="margin-bottom:16px;overflow-x:auto">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
-        <p style="font-size:13px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em">Timeline FY2026 — por data de entrega solicitada</p>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">
-          ${Object.entries(clientColorMap).map(([name,color])=>`
-            <span style="font-size:11px;display:flex;align-items:center;gap:4px">
-              <span style="width:10px;height:10px;border-radius:50%;background:${color};display:inline-block"></span>${name}
-            </span>`).join('')}
-        </div>
+    const MK=['2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'];
+    const byM={};MK.forEach(k=>byM[k]=[]);const noD=[];
+    orders.forEach(o=>{if(o.requested_delivery_date){const mk=o.requested_delivery_date.slice(0,7);if(byM[mk])byM[mk].push(o);else noD.push(o);}else noD.push(o);});
+    const CC=['#0A8CFA','#3A8C4C','#E67E22','#9B59B6','#E74C3C','#16A085','#2C3E50','#F39C12'];
+    const cMap={};let ci=0;
+    orders.forEach(o=>{const n=o.user_profiles?.full_name||'?';if(!cMap[n])cMap[n]=CC[ci++%CC.length];});
+    const tlHtml=`<div class="dash-card" style="margin-bottom:16px;overflow-x:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <p style="font-size:13px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em">Timeline — entrega solicitada</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">${Object.entries(cMap).map(([n,col])=>`<span style="font-size:11px;display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:50%;background:${col};display:inline-block"></span>${n}</span>`).join('')}</div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:6px;min-width:700px">
-        ${MONTH_KEYS.map((mk,mi)=>{
-          const mos=byMonth[mk];
-          const today=new Date();
-          const mDate=new Date(mk+'-01');
-          const isPast=mDate<new Date(today.getFullYear(),today.getMonth(),1);
-          return `<div style="text-align:center">
-            <p style="font-size:10px;color:${isPast?'var(--g600)':'var(--t2)'};font-weight:600;margin-bottom:6px">${MONTHS[mi]}</p>
-            <div style="min-height:60px;background:${isPast?'var(--g50)':'#fff'};border:1px solid var(--border);border-radius:var(--r-md);padding:4px;display:flex;flex-direction:column;gap:3px">
-              ${mos.map(o=>`<div title="${o.user_profiles?.full_name} · ${o.reference} · ${fmt(o.total_usd)}"
-                style="background:${clientColorMap[o.user_profiles?.full_name||'?']};color:#fff;border-radius:4px;padding:2px 4px;font-size:9px;font-weight:600;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-                onclick="toggleOrderEdit('${o.id}')">${o.reference}</div>`).join('')}
-              ${!mos.length?`<div style="height:30px"></div>`:''}
+        ${MK.map((mk,mi)=>{const mos=byM[mk];const isPast=new Date(mk+'-01')<new Date(new Date().getFullYear(),new Date().getMonth(),1);
+          return `<div style="text-align:center"><p style="font-size:10px;color:${isPast?'var(--g600)':'var(--t2)'};font-weight:600;margin-bottom:6px">${MONTHS[mi]}</p>
+            <div style="min-height:50px;background:${isPast?'var(--g50)':'#fff'};border:1px solid var(--border);border-radius:var(--r-md);padding:4px;display:flex;flex-direction:column;gap:3px">
+              ${mos.map(o=>`<div title="${o.user_profiles?.full_name} · ${o.reference} · ${fmt(o.total_usd)}" style="background:${cMap[o.user_profiles?.full_name||'?']};color:#fff;border-radius:4px;padding:2px 4px;font-size:9px;font-weight:600;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="toggleOrderEdit('${o.id}')">${o.reference}</div>`).join('')}
             </div>
             ${mos.length?`<p style="font-size:10px;color:var(--tm);margin-top:3px">${fmt(mos.reduce((s,o)=>s+Number(o.total_usd||0),0))}</p>`:''}
-          </div>`;
-        }).join('')}
+          </div>`;}).join('')}
       </div>
-      ${noDate.length?`<p style="font-size:12px;color:var(--tm);margin-top:10px">+ ${noDate.length} pedido(s) sem data de entrega definida</p>`:''}
     </div>`;
-
-    // Orders list with edit
-    const statusColors={pending:['#FEF3C7','#92400E'],confirmed:['#E8F5EC','#166534'],shipped:['#E6F1FB','#185FA5'],cancelled:['#FDECEA','#C0392B']};
-    const ordersListHtml=`
-    <h2 style="font-size:15px;font-weight:600;margin-bottom:12px">Todos os pedidos (${orders.length})</h2>
+    const pendingCount=orders.filter(o=>o.status==='pending').length;
+    const SC={pending:['#FEF3C7','#92400E'],confirmed:['#E8F5EC','#166534'],shipped:['#E6F1FB','#185FA5'],cancelled:['#FDECEA','#C0392B'],reviewed:['#EDE0F9','#5B2D99'],forwarded:['#E0F4F6','#0A7A8C']};
+    const listHtml=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="font-size:15px;font-weight:600">Todos os pedidos (${orders.length})</h2>
+      ${pendingCount?`<span style="background:#FEF3C7;color:#92400E;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600">⚠️ ${pendingCount} aguardando revisão</span>`:''}
+    </div>
     <div style="display:flex;flex-direction:column;gap:8px">
     ${orders.map(o=>{
-      const[sbg,stxt]=statusColors[o.status]||statusColors.pending;
+      const[sbg,stxt]=SC[o.status]||SC.pending;
       const delivStr=o.requested_delivery_date?new Date(o.requested_delivery_date+'T12:00:00').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'Não definida';
-      return `
-      <div id="order-card-${o.id}" style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden">
+      const discTotal=o.order_items.reduce((s,i)=>s+(Number(i.additional_discount||0)*Number(i.quantity)),0);
+      const finalTotal=Number(o.final_total_usd||o.total_usd||0);
+      const monthOpts=['2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'].map(m=>{const sel=o.requested_delivery_date&&o.requested_delivery_date.startsWith(m)?'selected':'';return `<option value="${m}-01" ${sel}>${new Date(m+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'})}</option>`;}).join('');
+      return `<div id="order-card-${o.id}" style="background:#fff;border:1px solid ${o.status==='pending'?'#FAC775':o.status==='reviewed'?'#C9A8F0':'var(--border)'};border-radius:var(--r-md);overflow:hidden">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;cursor:pointer" onclick="toggleOrderEdit('${o.id}')">
-          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-            <div>
-              <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--blue);font-weight:600">${o.reference}</span>
-              <span style="margin-left:8px;font-size:12px;color:var(--tm)">${o.user_profiles?.full_name||'—'} · ${o.client_groups?.label||'—'}</span>
-            </div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap">
-              <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${sbg};color:${stxt};font-weight:600">${o.status}</span>
-              <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--g100);color:var(--t2)">${o.price_type==='scheduled'?'Scheduled':'SPOT'}</span>
-              <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#E6F1FB;color:var(--blue)">Entrega: ${delivStr}</span>
-            </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--blue);font-weight:600">${o.reference}</span>
+            <span style="font-size:12px;color:var(--tm)">${o.user_profiles?.full_name||'—'} · ${o.client_groups?.label||'—'} · ${new Date(o.created_at).toLocaleDateString('pt-BR')}</span>
+            <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${sbg};color:${stxt};font-weight:600">${o.status==='pending'?'⏳ Aguardando revisão':o.status==='reviewed'?'✅ Revisado':o.status==='forwarded'?'📤 Encaminhado':o.status}</span>
+            <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${o.price_type==='scheduled'?'#E6F1FB':'#FEF3C7'};color:${o.price_type==='scheduled'?'#185FA5':'#92400E'};font-weight:600">${o.price_type==='scheduled'?'Scheduled':'SPOT'}</span>
+            <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#E6F1FB;color:var(--blue)">📦 ${delivStr}</span>
+            ${o.forwarded_to?`<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#E0F4F6;color:#0A7A8C;font-weight:600">→ ${o.forwarded_to}</span>`:''}
           </div>
-          <div style="display:flex;align-items:center;gap:12px">
-            <span style="font-size:15px;font-weight:700">${fmt(o.total_usd)}</span>
-            <span style="font-size:18px;color:var(--tm)">⌄</span>
+          <div style="text-align:right;min-width:110px">
+            ${discTotal>0?`<p style="font-size:11px;color:var(--tm);text-decoration:line-through">${fmt(o.total_usd)}</p>`:''}
+            <p style="font-size:15px;font-weight:700;color:${discTotal>0?'#3A8C4C':'var(--t1)'}">${fmt(finalTotal)}</p>
+            ${discTotal>0?`<p style="font-size:11px;color:#3A8C4C">-${fmt(discTotal)}</p>`:''}
           </div>
         </div>
-        <div id="order-edit-${o.id}" style="display:none;border-top:1px solid var(--border);padding:16px 18px;background:var(--g50)">
-          <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-            <select id="status-${o.id}" style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit">
-              <option value="pending" ${o.status==='pending'?'selected':''}>Pendente</option>
+        <div id="order-edit-${o.id}" style="display:none;border-top:1px solid var(--border);padding:18px;background:var(--g50)">
+          <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+            <select id="status-${o.id}" style="padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit">
+              <option value="pending" ${o.status==='pending'?'selected':''}>⏳ Aguardando revisão</option>
+              <option value="reviewed" ${o.status==='reviewed'?'selected':''}>✅ Revisado</option>
               <option value="confirmed" ${o.status==='confirmed'?'selected':''}>Confirmado</option>
               <option value="shipped" ${o.status==='shipped'?'selected':''}>Enviado</option>
               <option value="cancelled" ${o.status==='cancelled'?'selected':''}>Cancelado</option>
             </select>
-            <select id="del-${o.id}" style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit">
-              <option value="">Sem data</option>
-              ${['2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'].map(m=>{
-                const sel=o.requested_delivery_date&&o.requested_delivery_date.startsWith(m)?'selected':'';
-                const lbl=new Date(m+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
-                return `<option value="${m}-01" ${sel}>${lbl}</option>`;
-              }).join('')}
+            <select id="ptype-${o.id}" style="padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit">
+              <option value="scheduled" ${o.price_type==='scheduled'?'selected':''}>Scheduled</option>
+              <option value="spot" ${o.price_type==='spot'?'selected':''}>SPOT</option>
             </select>
-            <input type="text" id="notes-${o.id}" value="${o.edit_notes||''}" placeholder="Observações internas…"
-              style="flex:1;min-width:180px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit"/>
-            <button class="btn btn-primary btn-sm" onclick="saveOrderEdit('${o.id}')">Salvar alterações</button>
+            <select id="del-${o.id}" style="padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit">
+              <option value="">📦 Sem data</option>${monthOpts}
+            </select>
+            <input type="text" id="notes-${o.id}" value="${o.edit_notes||''}" placeholder="Observações…"
+              style="flex:1;min-width:160px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit"/>
+            <button class="btn btn-primary btn-sm" onclick="saveOrderEdit('${o.id}')">Salvar revisão</button>
           </div>
+          <div style="overflow:hidden;border-radius:var(--r-md);border:1px solid var(--border)">
           <table style="width:100%;border-collapse:collapse;font-size:12px">
             <thead><tr style="background:var(--g100)">
-              <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">PN</th>
-              <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">Descrição</th>
-              <th style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--border)">Preço unit.</th>
-              <th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">Qtd</th>
-              <th style="padding:6px 10px;text-align:right;border-bottom:1px solid var(--border)">Total</th>
-              <th style="padding:6px 10px;border-bottom:1px solid var(--border)"></th>
+              <th style="padding:7px 10px;text-align:left;border-bottom:1px solid var(--border)">PN</th>
+              <th style="padding:7px 10px;text-align:left;border-bottom:1px solid var(--border)">Descrição</th>
+              <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--border)">Preço original</th>
+              <th style="padding:7px 10px;text-align:center;border-bottom:1px solid var(--border)">Qtd</th>
+              <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--border);color:#C0392B">Desc. adicional/un</th>
+              <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--border);color:#3A8C4C">Preço final/un</th>
+              <th style="padding:7px 10px;text-align:right;border-bottom:1px solid var(--border)">Total linha</th>
+              <th style="padding:7px 10px;border-bottom:1px solid var(--border)"></th>
             </tr></thead>
             <tbody id="items-${o.id}">
-              ${o.order_items.map(item=>`
-              <tr id="item-row-${item.id}">
-                <td style="padding:6px 10px;font-family:'JetBrains Mono',monospace;font-size:10px">${item.pn}</td>
-                <td style="padding:6px 10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.description}</td>
-                <td style="padding:6px 10px;text-align:right">${fmt(item.unit_price)}</td>
-                <td style="padding:6px 10px;text-align:center">
-                  <div class="qty-ctrl" style="justify-content:center">
-                    <button class="qty-btn" onclick="changeItemQty('${item.id}','${o.id}',-1,${item.unit_price})">−</button>
-                    <span id="iqty-${item.id}" style="min-width:24px;text-align:center;font-weight:600">${item.quantity}</span>
-                    <button class="qty-btn" onclick="changeItemQty('${item.id}','${o.id}',1,${item.unit_price})">+</button>
-                  </div>
-                </td>
-                <td style="padding:6px 10px;text-align:right;font-weight:600" id="itotal-${item.id}">${fmt(item.unit_price*item.quantity)}</td>
-                <td style="padding:6px 10px">
-                  <button class="rm-btn" style="font-size:14px" onclick="removeOrderItem('${item.id}','${o.id}')">×</button>
-                </td>
-              </tr>`).join('')}
+              ${o.order_items.map(item=>{
+                const disc=Number(item.additional_discount||0);
+                const finalP=Number(item.unit_price)-disc;
+                const lineTotal=finalP*Number(item.quantity);
+                return `<tr id="item-row-${item.id}">
+                  <td style="padding:7px 10px;font-family:'JetBrains Mono',monospace;font-size:10px">${item.pn}</td>
+                  <td style="padding:7px 10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.description}</td>
+                  <td style="padding:7px 10px;text-align:right;color:var(--tm)">${fmt(item.unit_price)}</td>
+                  <td style="padding:7px 10px;text-align:center">
+                    <div class="qty-ctrl" style="justify-content:center">
+                      <button class="qty-btn" onclick="changeItemQty('${item.id}','${o.id}',-1,${item.unit_price})">−</button>
+                      <span id="iqty-${item.id}" style="min-width:24px;text-align:center;font-weight:600">${item.quantity}</span>
+                      <button class="qty-btn" onclick="changeItemQty('${item.id}','${o.id}',1,${item.unit_price})">+</button>
+                    </div>
+                  </td>
+                  <td style="padding:7px 10px">
+                    <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px">
+                      <span style="font-size:11px;color:var(--tm)">-USD</span>
+                      <input type="number" id="disc-${item.id}" value="${disc||''}" placeholder="0" min="0" step="0.01"
+                        style="width:80px;padding:4px 6px;border:1px solid #FECACA;border-radius:6px;font-size:12px;font-family:inherit;text-align:right;color:#C0392B"
+                        oninput="updateItemFinal('${item.id}',${item.unit_price},'${o.id}')"/>
+                    </div>
+                  </td>
+                  <td style="padding:7px 10px;text-align:right;font-weight:600;color:#3A8C4C" id="ifinal-${item.id}">${fmt(finalP)}</td>
+                  <td style="padding:7px 10px;text-align:right;font-weight:600" id="itotal-${item.id}">${fmt(lineTotal)}</td>
+                  <td style="padding:7px 10px"><button class="rm-btn" style="font-size:14px" onclick="removeOrderItem('${item.id}','${o.id}')">×</button></td>
+                </tr>`;
+              }).join('')}
             </tbody>
-          </table>
-          <div id="order-total-${o.id}" style="text-align:right;font-size:14px;font-weight:700;padding:10px 10px 0;border-top:1px solid var(--border);margin-top:6px">
-            Total: ${fmt(o.total_usd)}
+          </table></div>
+          <div style="display:flex;justify-content:flex-end;align-items:center;gap:20px;padding:10px 0;margin-top:6px">
+            <span style="font-size:13px;color:var(--tm)">Original: ${fmt(o.total_usd)}</span>
+            <span id="order-discount-total-${o.id}" style="font-size:13px;color:#C0392B">Desc.: -${fmt(discTotal)}</span>
+            <span id="order-final-total-${o.id}" style="font-size:16px;font-weight:700;color:#3A8C4C">Final: ${fmt(finalTotal)}</span>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);align-items:center;flex-wrap:wrap">
+            <span style="font-size:12px;font-weight:600;color:var(--t2)">Encaminhar para Sales OPS:</span>
+            <button class="btn btn-sm" style="background:#E0F4F6;color:#0A7A8C;border:1px solid #A0D4DC;font-weight:600" onclick="forwardOrder('${o.id}','Madri')">📤 Madri</button>
+            <button class="btn btn-sm" style="background:#E8F5EC;color:#3A8C4C;border:1px solid #B8DCBF;font-weight:600" onclick="forwardOrder('${o.id}','Fort Atkinson')">📤 Fort Atkinson</button>
+            ${o.forwarded_to?`<span style="font-size:12px;color:var(--tm)">Encaminhado para <strong>${o.forwarded_to}</strong> em ${new Date(o.forwarded_at).toLocaleDateString('pt-BR')}</span>`:''}
           </div>
         </div>
       </div>`;
     }).join('')}
     </div>`;
-
-    el.innerHTML=`<h1 class="page-title" style="margin-bottom:20px">Pedidos</h1>${timelineHtml}${ordersListHtml}`;
+    el.innerHTML=`<h1 class="page-title" style="margin-bottom:20px">Pedidos</h1>${tlHtml}${listHtml}`;
   }
   if(tab==='clients'){
     el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Clientes</h1><div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>`;
@@ -1074,6 +1115,7 @@ async function renderAdminTab(tab){
           <th>Seg.</th>
           <th style="text-align:right">Meta FY${year} (USD)</th>
           <th></th>
+          <th>E-mail gerente</th>
           <th>Status</th>
         </tr></thead>
         <tbody>${clients.map(cl=>`<tr>
@@ -1092,6 +1134,11 @@ async function renderAdminTab(tab){
           </td>
           <td>
             <button class="btn btn-primary btn-sm" onclick="saveClientTarget('${cl.id}',${year})">Salvar</button>
+          </td>
+          <td>
+            <input type="email" id="mgr-email-${cl.id}" value="${cl.manager_email||''}" placeholder="email@gerente.com"
+              style="width:170px;padding:5px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:11px;font-family:inherit"/>
+            <button class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:4px;background:var(--g100);color:var(--t2);border-color:var(--border-md)" onclick="saveMgrEmail('${cl.id}')">✓</button>
           </td>
           <td><span style="font-size:11px;color:#166534;font-weight:600">● ${cl.active?'Ativo':'Inativo'}</span></td>
         </tr>`).join('')}
@@ -1208,31 +1255,91 @@ async function handleCSV(file){
 }
 
 // UTILS
+function updateItemFinal(itemId, unitPrice, orderId){
+  const discEl=document.getElementById('disc-'+itemId);
+  const finalEl=document.getElementById('ifinal-'+itemId);
+  const totalEl=document.getElementById('itotal-'+itemId);
+  const qtyEl=document.getElementById('iqty-'+itemId);
+  if(!discEl||!finalEl||!totalEl)return;
+  const disc=parseFloat(discEl.value)||0;
+  const qty=parseInt(qtyEl?.textContent||1);
+  const finalPrice=unitPrice-disc;
+  finalEl.textContent=fmt(finalPrice);
+  totalEl.textContent=fmt(finalPrice*qty);
+  // Recalc order totals
+  let totalDisc=0,totalFinal=0,totalOrig=0;
+  document.querySelectorAll(`[id^="disc-"]`).forEach(inp=>{
+    const iid=inp.id.replace('disc-','');
+    const d=parseFloat(inp.value)||0;
+    const q=parseInt(document.getElementById('iqty-'+iid)?.textContent||1);
+    const orig=parseFloat(inp.closest('tr')?.querySelector('[id^="ifinal-"]')?.dataset?.orig||unitPrice);
+    totalDisc+=d*q;
+  });
+  document.querySelectorAll(`#items-${orderId} tr td:nth-child(7)`).forEach(td=>{
+    const v=parseFloat(td.textContent.replace(/[^0-9.]/g,''))||0;
+    totalFinal+=v;
+  });
+  const discTotEl=document.getElementById('order-discount-total-'+orderId);
+  const finTotEl=document.getElementById('order-final-total-'+orderId);
+  if(discTotEl)discTotEl.textContent='Desconto: -'+fmt(totalDisc);
+  if(finTotEl)finTotEl.textContent='Final: '+fmt(totalFinal);
+}
+
+async function forwardOrder(orderId, destination){
+  const{error}=await sb.from('orders').update({
+    forwarded_to: destination,
+    forwarded_at: new Date().toISOString(),
+    status: 'forwarded'
+  }).eq('id',orderId);
+  if(error){alert('Erro: '+error.message);return;}
+  alert(`Pedido encaminhado para ${destination}!\nEm breve: envio automático por e-mail para o time correto.`);
+  renderAdminTab('orders');
+}
+
 function toggleOrderEdit(orderId){
   const el=document.getElementById('order-edit-'+orderId);
   if(el)el.style.display=el.style.display==='none'?'block':'none';
 }
 
+async function saveMgrEmail(clientId){
+  const email=document.getElementById('mgr-email-'+clientId)?.value||'';
+  const{error}=await sb.from('user_profiles').update({manager_email:email}).eq('id',clientId);
+  if(error){alert('Erro: '+error.message);return;}
+  const btn=event.target;btn.textContent='✓';btn.style.color='#3A8C4C';
+  setTimeout(()=>{btn.textContent='✓';},1500);
+}
+
 async function saveOrderEdit(orderId){
   const status=document.getElementById('status-'+orderId)?.value;
+  const priceType=document.getElementById('ptype-'+orderId)?.value;
   const delVal=document.getElementById('del-'+orderId)?.value;
   const notes=document.getElementById('notes-'+orderId)?.value||'';
-  const deliveryDate=delVal?delVal+'-01':null;
-  const{error}=await sb.from('orders').update({status,requested_delivery_date:deliveryDate,edit_notes:notes}).eq('id',orderId);
-  if(error){alert('Erro: '+error.message);return;}
-  // Recalc total from visible rows
-  let total=0;
-  document.querySelectorAll(`#items-${orderId} tr`).forEach(row=>{
-    const qtyEl=row.querySelector('[id^="iqty-"]');
-    const totEl=row.querySelector('[id^="itotal-"]');
-    if(qtyEl&&totEl){
-      const val=parseFloat(totEl.textContent.replace(/[^0-9.]/g,''))||0;
-      total+=val;
+  // Save all item discounts
+  const itemRows=document.querySelectorAll(`#items-${orderId} tr`);
+  for(const row of itemRows){
+    const discInput=row.querySelector('[id^="disc-"]');
+    if(discInput){
+      const itemId=discInput.id.replace('disc-','');
+      const disc=parseFloat(discInput.value)||0;
+      const noteInput=document.getElementById('item-note-'+itemId);
+      await sb.from('order_items').update({additional_discount:disc}).eq('id',itemId);
     }
+  }
+  // Recalculate final total
+  let finalTotal=0;
+  document.querySelectorAll(`#items-${orderId} tr [id^="itotal-"]`).forEach(td=>{
+    finalTotal+=parseFloat(td.textContent.replace(/[^0-9.]/g,''))||0;
   });
-  await sb.from('orders').update({total_usd:total}).eq('id',orderId);
-  const btn=event.target;btn.textContent='✓ Salvo';btn.style.background='#3A8C4C';
-  setTimeout(()=>{btn.textContent='Salvar alterações';btn.style.background='';},2000);
+  const{error}=await sb.from('orders').update({
+    status,price_type:priceType,
+    requested_delivery_date:delVal||null,
+    edit_notes:notes,
+    final_total_usd:finalTotal,
+    reviewed_at:new Date().toISOString()
+  }).eq('id',orderId);
+  if(error){alert('Erro: '+error.message);return;}
+  const btn=event.target;btn.textContent='✓ Revisão salva';btn.style.background='#3A8C4C';
+  setTimeout(()=>{btn.textContent='Salvar revisão';btn.style.background='';},2000);
 }
 
 const _itemQtys={};
