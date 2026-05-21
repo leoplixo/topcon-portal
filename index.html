@@ -843,9 +843,14 @@ async function sendOrder(){
     total_usd:total,requested_delivery_date:deliveryDate
   }).select().single();
   if(oErr){alert('Erro ao enviar pedido. Tente novamente.');if(btn){btn.disabled=false;btn.textContent='Enviar pedido →';}return;}
-  await sb.from('order_items').insert(items.map(i=>({
-    order_id:order.id,part_id:i.id,pn:i.pn,description:i.description,unit_price:i.price,quantity:i.qty
-  })));
+  const itemsPayload=items.map(i=>({order_id:order.id,part_id:i.id,pn:i.pn,description:i.description,unit_price:i.price,quantity:i.qty}));
+  const{error:itemsErr}=await sb.from('order_items').insert(itemsPayload);
+  if(itemsErr){
+    await sb.from('orders').delete().eq('id',order.id);
+    alert('Erro ao salvar itens: '+itemsErr.message);
+    if(btn){btn.disabled=false;btn.innerHTML='Enviar pedido →';}
+    return;
+  }
   cart={};
   document.getElementById('confirm-ref').textContent='Referência: '+ref;
   // Send email notification
