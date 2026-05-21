@@ -952,7 +952,7 @@ async function renderAdminTab(tab){
   if(tab==='orders'){
     el.innerHTML=`<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando pedidos…</div></div>`;
     const{data:orders}=await sb.from('orders')
-      .select('*,user_profiles(full_name,id),client_groups(label),order_items(id,pn,description,unit_price,quantity,additional_discount)')
+      .select('*,user_profiles(full_name,id),client_groups(label),order_items(*)')
       .order('created_at',{ascending:false});
     if(!orders?.length){
       el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Pedidos</h1><div class="empty"><div class="empty-icon">📋</div><p style="font-size:14px;font-weight:500">Nenhum pedido ainda.</p></div>`;return;
