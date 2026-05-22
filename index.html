@@ -927,23 +927,96 @@ async function renderAdminTab(tab){
       </div>`;
   }
   if(tab==='catalog'){
-    el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Catálogo — visão interna</h1><div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>`;
-    const {data:parts}=await sb.from('parts').select('id,seg,product,pn,description,list_price,cost,part_prices(scheduled_price,spot_price,client_groups(slug,label))').eq('active',true).order('seg').order('pn');
-    if(!parts?.length){el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Catálogo — visão interna</h1><div class="empty"><div class="empty-icon">📦</div><p style="font-size:14px;font-weight:500">Nenhum PN cadastrado.</p><p style="font-size:13px;margin-top:4px;color:var(--tm)">Faça upload de um CSV na aba "Upload CSV".</p></div>`;return;}
-    el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Catálogo completo (${parts.length} PNs)</h1>
-      <div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">
-      <table class="dtbl"><thead><tr>
+    el.innerHTML=`<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando catálogo…</div></div>`;
+    const{data:parts,error}=await sb.from('parts')
+      .select('*,part_prices(*,client_groups(id,slug,label))')
+      .eq('active',true).order('seg').order('pn');
+
+    const{data:allGroups}=await sb.from('client_groups').select('*').order('label');
+
+    if(!parts?.length){
+      el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Catálogo</h1>
+        <div class="empty"><div class="empty-icon">📦</div><p>Nenhum PN cadastrado.</p></div>`;return;
+    }
+
+    // Build group price map for each part
+    const buildPriceMap=(part)=>{
+      const m={};
+      (part.part_prices||[]).forEach(pp=>{
+        if(pp.client_groups) m[pp.client_groups.slug]={
+          id:pp.id, group_id:pp.group_id,
+          scheduled:pp.scheduled_price, spot:pp.spot_price
+        };
+      });
+      return m;
+    };
+
+    el.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <h1 class="page-title">Catálogo completo (${parts.length} PNs)</h1>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" onclick="downloadCatalogCSV()" style="gap:6px">⬇ Baixar CSV</button>
+        <button class="btn btn-primary btn-sm" onclick="showNewPartForm()" id="new-pn-btn">+ Novo PN</button>
+      </div>
+    </div>
+
+    <!-- New PN form (hidden by default) -->
+    <div id="new-pn-form" style="display:none;background:#F0F8FF;border:1px solid var(--blue-200);border-radius:var(--r-lg);padding:20px;margin-bottom:16px">
+      <h3 style="font-size:14px;font-weight:600;margin-bottom:14px;color:var(--blue-dark)">+ Cadastrar novo Part Number</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:14px">
+        <div><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Segmento</label>
+          <select id="new-seg" style="width:100%;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit">
+            <option value="AG">AG · Agriculture</option>
+            <option value="FD">FD · Feed</option>
+          </select></div>
+        <div><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Part Number *</label>
+          <input id="new-pn" placeholder="ex: 1036805-01" style="width:100%;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:'JetBrains Mono',monospace"/></div>
+        <div><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Produto/Família</label>
+          <input id="new-product" placeholder="ex: KIT Display" style="width:100%;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px"/></div>
+        <div style="grid-column:span 2"><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Descrição *</label>
+          <input id="new-desc" placeholder="Descrição completa do produto" style="width:100%;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px"/></div>
+        <div><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">List Price (USD)</label>
+          <input id="new-lp" type="number" placeholder="0.00" style="width:100%;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px"/></div>
+        <div><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Custo 🔒</label>
+          <input id="new-cost" type="number" placeholder="0.00" style="width:100%;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px"/></div>
+      </div>
+      <p style="font-size:12px;color:var(--tm);margin-bottom:10px">Preços por grupo (Scheduled / SPOT):</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px;margin-bottom:14px">
+        ${(allGroups||[]).map(g=>`
+        <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:10px">
+          <p style="font-size:11px;font-weight:600;color:var(--blue-dark);margin-bottom:6px">${g.label}</p>
+          <div style="display:flex;gap:6px">
+            <div style="flex:1"><label style="font-size:10px;color:var(--tm)">Scheduled</label>
+              <input id="new-${g.slug}-s" type="number" placeholder="—" style="width:100%;padding:5px 8px;border:1px solid var(--border-md);border-radius:6px;font-size:12px"/></div>
+            <div style="flex:1"><label style="font-size:10px;color:var(--tm)">SPOT</label>
+              <input id="new-${g.slug}-p" type="number" placeholder="—" style="width:100%;padding:5px 8px;border:1px solid var(--border-md);border-radius:6px;font-size:12px"/></div>
+          </div>
+        </div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="saveNewPart(${JSON.stringify((allGroups||[]).map(g=>({id:g.id,slug:g.slug})))})">Salvar PN</button>
+        <button class="btn btn-outline" onclick="document.getElementById('new-pn-form').style.display='none'">Cancelar</button>
+      </div>
+      <div id="new-pn-status" style="margin-top:10px"></div>
+    </div>
+
+    <!-- Catalog table -->
+    <div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">
+    <table class="dtbl">
+      <thead><tr>
         <th>Seg</th><th>PN#</th><th>Produto</th><th>Descrição</th>
         <th style="text-align:right">List Price</th>
         <th style="text-align:right;color:#6B3FA0">Custo 🔒</th>
         <th style="text-align:right;color:#6B3FA0">Margem 🔒</th>
-        
-      </tr></thead><tbody>
+        <th style="text-align:center">Ação</th>
+      </tr></thead>
+      <tbody>
       ${parts.map(p=>{
         const ref=p.part_prices?.find(x=>x.client_groups?.slug==='latam')?.spot_price||p.part_prices?.[0]?.spot_price;
         const mg=ref&&p.cost?((ref-p.cost)/ref*100).toFixed(0):null;
         const mc=mg>45?'#166534':'#A16207';
-        return `<tr>
+        const priceMap=buildPriceMap(p);
+        return `<tr id="row-${p.id}">
           <td><span class="badge badge-${p.seg.toLowerCase()}">${p.seg}</span></td>
           <td style="font-family:'JetBrains Mono',monospace;font-size:10px">${p.pn}</td>
           <td style="font-size:12px;color:var(--tm)">${p.product||'—'}</td>
@@ -951,10 +1024,58 @@ async function renderAdminTab(tab){
           <td style="text-align:right">${fmt(p.list_price)}</td>
           <td style="text-align:right;color:#6B3FA0;font-weight:600">${fmt(p.cost)}</td>
           <td style="text-align:right">${mg?`<span class="mchip" style="background:${mc}18;color:${mc}">${mg}%</span>`:'—'}</td>
+          <td style="text-align:center">
+            <button class="btn btn-outline btn-sm" style="font-size:11px" onclick="togglePartEdit('${p.id}')">✏ Editar</button>
+          </td>
+        </tr>
+        <tr id="edit-row-${p.id}" style="display:none;background:#FAFBFF">
+          <td colspan="8" style="padding:16px">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:12px">
+              <div><label style="font-size:10px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Segmento</label>
+                <select id="e-seg-${p.id}" style="width:100%;padding:6px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit">
+                  <option value="AG" ${p.seg==='AG'?'selected':''}>AG</option>
+                  <option value="FD" ${p.seg==='FD'?'selected':''}>FD</option>
+                </select></div>
+              <div><label style="font-size:10px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Produto</label>
+                <input id="e-prod-${p.id}" value="${(p.product||'').replace(/"/g,'&quot;')}" style="width:100%;padding:6px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"/></div>
+              <div style="grid-column:span 2"><label style="font-size:10px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Descrição</label>
+                <input id="e-desc-${p.id}" value="${p.description.replace(/"/g,'&quot;')}" style="width:100%;padding:6px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"/></div>
+              <div><label style="font-size:10px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">List Price</label>
+                <input id="e-lp-${p.id}" type="number" value="${p.list_price||''}" style="width:100%;padding:6px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"/></div>
+              <div><label style="font-size:10px;font-weight:600;color:var(--tm);display:block;margin-bottom:3px">Custo 🔒</label>
+                <input id="e-cost-${p.id}" type="number" value="${p.cost||''}" style="width:100%;padding:6px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"/></div>
+            </div>
+            <p style="font-size:11px;color:var(--tm);margin-bottom:8px;font-weight:600">Preços por grupo:</p>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px;margin-bottom:12px">
+              ${(allGroups||[]).map(g=>{
+                const gp=priceMap[g.slug]||{};
+                return `<div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:8px">
+                  <p style="font-size:10px;font-weight:600;color:var(--blue-dark);margin-bottom:5px">${g.label}</p>
+                  <div style="display:flex;gap:5px">
+                    <div style="flex:1"><label style="font-size:9px;color:var(--tm)">Scheduled</label>
+                      <input id="e-${p.id}-${g.slug}-s" type="number" value="${gp.scheduled||''}" placeholder="—"
+                        style="width:100%;padding:4px 6px;border:1px solid var(--border-md);border-radius:5px;font-size:11px"/></div>
+                    <div style="flex:1"><label style="font-size:9px;color:var(--tm)">SPOT</label>
+                      <input id="e-${p.id}-${g.slug}-p" type="number" value="${gp.spot||''}" placeholder="—"
+                        style="width:100%;padding:4px 6px;border:1px solid var(--border-md);border-radius:5px;font-size:11px"/></div>
+                  </div>
+                </div>`;
+              }).join('')}
+            </div>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn btn-primary btn-sm" onclick="savePartEdit('${p.id}',${JSON.stringify((allGroups||[]).map(g=>({id:g.id,slug:g.slug})))})">💾 Salvar alterações</button>
+              <button class="btn btn-outline btn-sm" onclick="togglePartEdit('${p.id}')">Cancelar</button>
+              <button class="btn btn-sm" style="background:#FDECEA;color:#C0392B;border:1px solid #FECACA;margin-left:auto" onclick="deletePart('${p.id}','${p.pn}')">🗑 Excluir PN</button>
+            </div>
+            <div id="edit-status-${p.id}" style="margin-top:8px"></div>
+          </td>
         </tr>`;
-      }).join('')}</tbody></table></div>`;
+      }).join('')}
+      </tbody>
+    </table></div>`;
   }
-  if(tab==='orders'){
+
+    if(tab==='orders'){
     el.innerHTML=`<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando pedidos…</div></div>`;
     const{data:orders}=await sb.from('orders')
       .select('*,user_profiles(full_name,id),client_groups(label),order_items(*)')
@@ -1397,6 +1518,125 @@ async function saveClientTarget(userId, year){
   if(error){alert('Erro: '+error.message);return;}
   const btn=event.target;btn.textContent='✓ Salvo';btn.style.background='#3A8C4C';
   setTimeout(()=>{btn.textContent='Salvar';btn.style.background=''},2000);
+}
+
+// ── Catalog edit functions ────────────────────────────────────
+function togglePartEdit(partId){
+  const row=document.getElementById('edit-row-'+partId);
+  if(row) row.style.display=row.style.display==='none'?'table-row':'none';
+}
+
+function showNewPartForm(){
+  const f=document.getElementById('new-pn-form');
+  if(f){f.style.display=f.style.display==='none'?'block':'none';}
+}
+
+async function savePartEdit(partId, groups){
+  const statusEl=document.getElementById('edit-status-'+partId);
+  statusEl.innerHTML=`<div class="alert alert-info"><span class="spinner" style="border-color:rgba(5,58,100,.3);border-top-color:var(--blue-deep)"></span> Salvando…</div>`;
+
+  // Update part base data
+  const{error:pErr}=await sb.from('parts').update({
+    seg:   document.getElementById('e-seg-'+partId)?.value,
+    product: document.getElementById('e-prod-'+partId)?.value||null,
+    description: document.getElementById('e-desc-'+partId)?.value,
+    list_price: parseFloat(document.getElementById('e-lp-'+partId)?.value)||null,
+    cost: parseFloat(document.getElementById('e-cost-'+partId)?.value)||null,
+  }).eq('id',partId);
+
+  if(pErr){statusEl.innerHTML=`<div class="alert alert-err">✗ ${pErr.message}</div>`;return;}
+
+  // Update prices for each group
+  for(const g of groups){
+    const s=parseFloat(document.getElementById(`e-${partId}-${g.slug}-s`)?.value)||null;
+    const p=parseFloat(document.getElementById(`e-${partId}-${g.slug}-p`)?.value)||null;
+    if(s||p){
+      await sb.from('part_prices').upsert(
+        {part_id:partId,group_id:g.id,scheduled_price:s,spot_price:p},
+        {onConflict:'part_id,group_id'}
+      );
+    }
+  }
+
+  statusEl.innerHTML=`<div class="alert alert-ok">✓ Part number atualizado com sucesso.</div>`;
+  setTimeout(()=>setTab(document.querySelector('.atab.active'),'catalog'),1500);
+}
+
+async function saveNewPart(groups){
+  const statusEl=document.getElementById('new-pn-status');
+  const pn=document.getElementById('new-pn')?.value?.trim();
+  const desc=document.getElementById('new-desc')?.value?.trim();
+  if(!pn||!desc){statusEl.innerHTML=`<div class="alert alert-err">✗ PN e Descrição são obrigatórios.</div>`;return;}
+
+  statusEl.innerHTML=`<div class="alert alert-info"><span class="spinner" style="border-color:rgba(5,58,100,.3);border-top-color:var(--blue-deep)"></span> Salvando…</div>`;
+
+  const{data:part,error:pErr}=await sb.from('parts').insert({
+    seg:   document.getElementById('new-seg')?.value||'AG',
+    product: document.getElementById('new-product')?.value||null,
+    pn, description:desc,
+    list_price: parseFloat(document.getElementById('new-lp')?.value)||null,
+    cost: parseFloat(document.getElementById('new-cost')?.value)||null,
+    active:true
+  }).select().single();
+
+  if(pErr){statusEl.innerHTML=`<div class="alert alert-err">✗ ${pErr.message}</div>`;return;}
+
+  for(const g of groups){
+    const s=parseFloat(document.getElementById(`new-${g.slug}-s`)?.value)||null;
+    const p=parseFloat(document.getElementById(`new-${g.slug}-p`)?.value)||null;
+    if(s||p){
+      await sb.from('part_prices').insert(
+        {part_id:part.id,group_id:g.id,scheduled_price:s,spot_price:p}
+      );
+    }
+  }
+
+  statusEl.innerHTML=`<div class="alert alert-ok">✓ PN ${pn} cadastrado com sucesso!</div>`;
+  setTimeout(()=>setTab(document.querySelector('.atab.active'),'catalog'),1500);
+}
+
+async function deletePart(partId, pn){
+  if(!confirm(`Excluir o PN ${pn} permanentemente? Isso remove o item e todos os preços associados.`))return;
+  await sb.from('part_prices').delete().eq('part_id',partId);
+  const{error}=await sb.from('parts').delete().eq('id',partId);
+  if(error){alert('Erro: '+error.message);return;}
+  document.getElementById('row-'+partId)?.remove();
+  document.getElementById('edit-row-'+partId)?.remove();
+}
+
+async function downloadCatalogCSV(){
+  const btn=event.target;
+  btn.textContent='⏳ Gerando…';btn.disabled=true;
+
+  const{data:parts}=await sb.from('parts')
+    .select('*,part_prices(*,client_groups(slug))')
+    .eq('active',true).order('seg').order('pn');
+
+  const groups=['latam','mexico','agricien','feed_latam','feed_mx','tormex','kuhn'];
+  const headers=['seg','product','pn','description','list_price','cost',
+    ...groups.flatMap(g=>[`${g}_scheduled`,`${g}_spot`])];
+
+  const rows=parts.map(p=>{
+    const pm={};
+    (p.part_prices||[]).forEach(pp=>{if(pp.client_groups)pm[pp.client_groups.slug]=pp;});
+    return [
+      p.seg, p.product||'', p.pn, p.description,
+      p.list_price||'', p.cost||'',
+      ...groups.flatMap(g=>[pm[g]?.scheduled_price||'', pm[g]?.spot_price||''])
+    ];
+  });
+
+  const csv=[headers,...rows].map(r=>r.map(v=>
+    String(v).includes(',')?`"${v}"`:v
+  ).join(',')).join('
+');
+
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=`topcon_catalog_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+  btn.textContent='⬇ Baixar CSV'; btn.disabled=false;
 }
 
 const fmt=v=>v==null?'—':'USD '+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
