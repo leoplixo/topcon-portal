@@ -933,6 +933,7 @@ async function renderAdminTab(tab){
       .eq('active',true).order('seg').order('pn');
 
     const{data:allGroups}=await sb.from('client_groups').select('*').order('label');
+    window._catalogGroups=(allGroups||[]).map(g=>({id:g.id,slug:g.slug}));
 
     if(!parts?.length){
       el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Catálogo</h1>
@@ -994,7 +995,7 @@ async function renderAdminTab(tab){
         </div>`).join('')}
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" onclick="saveNewPart(${JSON.stringify((allGroups||[]).map(g=>({id:g.id,slug:g.slug})))})">Salvar PN</button>
+        <button class="btn btn-primary" onclick="saveNewPart(window._catalogGroups)">Salvar PN</button>
         <button class="btn btn-outline" onclick="document.getElementById('new-pn-form').style.display='none'">Cancelar</button>
       </div>
       <div id="new-pn-status" style="margin-top:10px"></div>
@@ -1063,7 +1064,7 @@ async function renderAdminTab(tab){
               }).join('')}
             </div>
             <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-primary btn-sm" onclick="savePartEdit('${p.id}',${JSON.stringify((allGroups||[]).map(g=>({id:g.id,slug:g.slug})))})">💾 Salvar alterações</button>
+              <button class="btn btn-primary btn-sm" onclick="savePartEdit('${p.id}',window._catalogGroups)">💾 Salvar alterações</button>
               <button class="btn btn-outline btn-sm" onclick="togglePartEdit('${p.id}')">Cancelar</button>
               <button class="btn btn-sm" style="background:#FDECEA;color:#C0392B;border:1px solid #FECACA;margin-left:auto" onclick="deletePart('${p.id}','${p.pn}')">🗑 Excluir PN</button>
             </div>
