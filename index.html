@@ -1498,8 +1498,8 @@ async function renderAdminTab(tab){
           </div>
           <div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);align-items:center;flex-wrap:wrap">
             <span style="font-size:12px;font-weight:600;color:var(--t2)">Encaminhar para Sales OPS:</span>
-            <button class="btn btn-sm" style="background:#E0F4F6;color:#0A7A8C;border:1px solid #A0D4DC;font-weight:600" onclick="forwardOrder('${o.id}','Madri')">📤 Madri</button>
-            <button class="btn btn-sm" style="background:#E8F5EC;color:#3A8C4C;border:1px solid #B8DCBF;font-weight:600" onclick="forwardOrder('${o.id}','Fort Atkinson')">📤 Fort Atkinson</button>
+            <button class="btn btn-sm" style="background:#E0F4F6;color:#0A7A8C;border:1px solid #A0D4DC;font-weight:600" onclick="this.textContent='⏳ Preparando...';this.disabled=true;forwardOrder('${o.id}','Madrid')">📤 Madri</button>
+            <button class="btn btn-sm" style="background:#E8F5EC;color:#3A8C4C;border:1px solid #B8DCBF;font-weight:600" onclick="this.textContent='⏳ Preparando...';this.disabled=true;forwardOrder('${o.id}','Fort Atkinson')">📤 Fort Atkinson</button>
             ${o.forwarded_to?`<span style="font-size:12px;color:var(--tm)">Encaminhado para <strong>${o.forwarded_to}</strong> em ${new Date(o.forwarded_at).toLocaleDateString('pt-BR')}</span>`:''}
           </div>
         </div>
@@ -1729,9 +1729,13 @@ async function forwardOrder(orderId, destination){
     .eq('id',orderId).single();
   if(oErr){alert('Erro ao buscar pedido: '+oErr.message);return;}
 
-  // Fetch destination email
-  const{data:dest}=await sb.from('sales_ops_destinations')
-    .select('email').eq('name',destination).eq('active',true).single();
+  // Fetch destination email (graceful fallback if table doesn't exist)
+  let destEmail='';
+  try{
+    const{data:dest}=await sb.from('sales_ops_destinations')
+      .select('email').eq('name',destination).eq('active',true).single();
+    destEmail=dest?.email||'';
+  }catch(e){ console.warn('Could not fetch destination email:',e); }
 
   // Build email body
   const items=order.order_items||[];
@@ -1776,8 +1780,13 @@ async function forwardOrder(orderId, destination){
   }).eq('id',orderId);
   if(error){alert('Erro ao atualizar pedido: '+error.message);return;}
 
-  // Open Outlook/mail client with pre-filled email
-  window.location.href=mailtoLink;
+  // Open mail client with pre-filled email
+  const mailAnchor=document.createElement('a');
+  mailAnchor.href=mailtoLink;
+  mailAnchor.target='_blank';
+  document.body.appendChild(mailAnchor);
+  mailAnchor.click();
+  document.body.removeChild(mailAnchor);
 
   // Refresh orders after short delay
   setTimeout(()=>renderAdminTab('orders'),1500);
