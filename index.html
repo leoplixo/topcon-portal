@@ -1787,16 +1787,36 @@ async function forwardOrder(orderId, destination){
   const modal=document.createElement('div');
   modal.id='mailto-modal';
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.6);z-index:9999;display:flex;align-items:center;justify-content:center';
-  modal.innerHTML='<div style="background:#fff;border-radius:16px;padding:32px;max-width:420px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.2)">'
-    +'<div style="font-size:40px;margin-bottom:12px">✅</div>'
-    +'<h3 style="font-size:18px;font-weight:700;margin-bottom:8px;color:#001423">Pedido encaminhado!</h3>'
-    +'<p style="font-size:13px;color:#737373;margin-bottom:20px">Clique abaixo para abrir o e-mail no Outlook com todos os detalhes do pedido já preenchidos.</p>'
-    +'<a href="'+mailtoLink+'" style="display:block;background:#0A8CFA;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;margin-bottom:10px">📧 Abrir e-mail no Outlook</a>'
-    +'<button id="close-mailto-modal" style="background:none;border:none;color:#737373;font-size:13px;cursor:pointer;padding:8px">Fechar e atualizar pedidos</button>'
-    +'</div>';
+  // Build plain text email body for copy fallback
+  const plainBody=bodyParts.join('\n');
+
+  modal.innerHTML='<div style="background:#fff;border-radius:16px;padding:28px;max-width:520px;width:95%;box-shadow:0 20px 60px rgba(0,0,0,.2)">'
+    +'<div style="text-align:center;margin-bottom:16px"><div style="font-size:36px">✅</div>'
+    +'<h3 style="font-size:17px;font-weight:700;color:#001423">Pedido '+order.reference+' encaminhado para '+destination+'</h3></div>'
+    +'<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">'
+    +'<a id="mailto-btn" href="'+mailtoLink+'" style="flex:1;display:block;background:#0A8CFA;color:#fff;padding:11px 16px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;text-align:center">📧 Abrir no Outlook / e-mail padrão</a>'
+    +'</div>'
+    +'<p style="font-size:11px;color:#737373;margin-bottom:8px">Se o botão acima não abrir o e-mail, copie o conteúdo abaixo e cole manualmente:</p>'
+    +'<div style="background:#F7F8FA;border:1px solid #EBEBEB;border-radius:8px;padding:10px;margin-bottom:10px">'
+    +'<p style="font-size:10px;font-weight:600;color:#737373;margin-bottom:4px">PARA: '+destEmail+'</p>'
+    +'<p style="font-size:10px;font-weight:600;color:#737373;margin-bottom:6px">ASSUNTO: Topcon Portal - Pedido '+order.reference+' ['+destination+']</p>'
+    +'<pre id="email-body-text" style="font-size:10px;color:#4B4B4B;white-space:pre-wrap;max-height:180px;overflow-y:auto;margin:0">'+plainBody.replace(/</g,'&lt;')+'</pre></div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button id="copy-email-btn" style="flex:1;padding:9px;background:#F1F1F1;border:1px solid #D7D7D7;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">📋 Copiar conteúdo</button>'
+    +'<button id="close-mailto-modal" style="flex:1;padding:9px;background:none;border:1px solid #D7D7D7;border-radius:8px;font-size:12px;color:#737373;cursor:pointer">Fechar</button>'
+    +'</div></div>';
   document.body.appendChild(modal);
   modal.addEventListener('click',e=>{if(e.target===modal){modal.remove();renderAdminTab('orders');}});
   document.getElementById('close-mailto-modal')?.addEventListener('click',()=>{modal.remove();renderAdminTab('orders');});
+  document.getElementById('copy-email-btn')?.addEventListener('click',()=>{
+    const txt=document.getElementById('email-body-text')?.textContent||'';
+    const dest=destEmail?'PARA: '+destEmail+'\n':'';
+    const subj='ASSUNTO: Topcon Portal - Pedido '+order.reference+' ['+destination+']\n\n';
+    navigator.clipboard.writeText(dest+subj+txt).then(()=>{
+      const btn=document.getElementById('copy-email-btn');
+      if(btn){btn.textContent='✓ Copiado!';btn.style.background='#E8F5EC';btn.style.color='#166534';}
+    });
+  });
 }
 
 function toggleOrderEdit(orderId){
