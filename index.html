@@ -259,13 +259,13 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
   <div id="view-quote" style="display:none">
     <div class="quote-page">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <h1 class="page-title">Orçamento</h1>
-        <button class="btn btn-outline btn-sm" onclick="goBack()">← Voltar ao catálogo</button>
+        <h1 class="page-title">${t('quoteTitle')}</h1>
+        <button class="btn btn-outline btn-sm" onclick="goBack()">${t('backToCatalog')}</button>
       </div>
       <p class="page-sub" id="quote-sub"></p>
       <div id="quote-eligibility-note" style="display:none;margin-bottom:12px"></div>
       <div class="price-bar">
-        <span style="font-size:12px;color:var(--tm);font-weight:500">Tipo de preço:</span>
+        <span style="font-size:12px;color:var(--tm);font-weight:500">${t('priceType')}</span>
         <div class="tog-group" id="pt-tog-q">
           <button class="tog-btn active" onclick="setPT(this,'scheduled')">Scheduled</button>
           <button class="tog-btn" onclick="setPT(this,'spot')">SPOT</button>
@@ -278,10 +278,10 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
   <div id="view-confirm" style="display:none">
     <div class="confirm-page">
       <div class="confirm-wrap">✓</div>
-      <h2 style="font-size:22px;font-weight:700;letter-spacing:-.03em;margin-bottom:8px">Pedido enviado!</h2>
-      <p style="font-size:14px;color:var(--tm);line-height:1.6">Recebemos seu pedido. Nossa equipe entrará em contato em breve para confirmar disponibilidade e prazo.</p>
+      <h2 style="font-size:22px;font-weight:700;letter-spacing:-.03em;margin-bottom:8px">${t('orderSent')}</h2>
+      <p style="font-size:14px;color:var(--tm);line-height:1.6">${t('orderSentMsg')}</p>
       <p class="confirm-ref" id="confirm-ref"></p>
-      <button class="btn btn-primary" onclick="goBack()">+ Novo orçamento</button>
+      <button class="btn btn-primary" onclick="goBack()">${t('newOrder')}</button>
     </div>
   </div>
 </div>
@@ -522,9 +522,25 @@ const t=key=>TRANSLATIONS[LANG]?.[key]||TRANSLATIONS.pt[key]||key;
 function setLang(lang){
   LANG=lang;
   try{localStorage.setItem('topcon_lang',lang);}catch(e){}
-  // Re-render current view
   updateLangButtons();
   applyLangToStatic();
+  // Re-render current dynamic view
+  if(document.getElementById('screen-client')?.classList.contains('active')){
+    const vCat=document.getElementById('view-catalog');
+    const vQ=document.getElementById('view-quote');
+    const vD=document.getElementById('view-dashboard');
+    if(vD&&vD.style.display!=='none') renderDashboard();
+    else if(vCat&&vCat.style.display!=='none') renderCatalog();
+    else if(vQ&&vQ.style.display!=='none') renderQuote();
+  }
+  // Update topbar logout button
+  document.querySelectorAll('.btn-ghost').forEach(b=>{
+    const txt=b.textContent.trim();
+    if(['Sair','Salir','Sign Out'].includes(txt)) b.textContent=t('logout');
+  });
+  // Update quote button in topbar
+  const qBtn=document.getElementById('quote-btn');
+  if(qBtn) qBtn.childNodes.forEach(n=>{if(n.nodeType===3&&n.textContent.trim()) n.textContent=t('quote');});
 }
 
 function updateLangButtons(){
@@ -970,7 +986,7 @@ function renderCatalog(){
     return p.pn.toLowerCase().includes(q)||p.description.toLowerCase().includes(q)||(p.product||'').toLowerCase().includes(q);
   });
   const meta=document.getElementById('results-meta');
-  if(meta)meta.textContent=`${filtered.length} part number${filtered.length!==1?'s':''} · Preço: ${priceType==='scheduled'?'Scheduled':'SPOT'}`;
+  if(meta)meta.textContent=filtered.length+' part number'+(filtered.length!==1?'s':'')+' · '+t('priceType').replace(':','')+' '+( priceType==='scheduled'?t('priceScheduled'):t('priceSpot'));
   const grid=document.getElementById('parts-grid');if(!grid)return;
   if(!filtered.length&&catalog.length===0){
     grid.innerHTML=`<div class="empty"><div class="empty-icon">📦</div><p style="font-size:14px;font-weight:500">Catálogo vazio</p><p style="font-size:13px;margin-top:4px">O administrador ainda não carregou os part numbers.</p></div>`;return;
@@ -989,11 +1005,11 @@ function renderCatalog(){
       <p class="part-desc">${p.description}</p>
       <div class="part-footer">
         <div>
-          <p class="part-list">List Price: ${fmt(p.list_price)}</p>
+          <p class="part-list">${t('listPrice')}: ${fmt(p.list_price)}</p>
           <p class="part-price">${fmt(price)}</p>
         </div>
         <button class="add-btn ${inCart?'added':''}" onclick="addToCart('${p.pn}')">
-          ${inCart?'+ Adicionar':'Adicionar'}
+          ${inCart?t('addMore'):t('addToCart')}
         </button>
       </div>
     </div>`;
