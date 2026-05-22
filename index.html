@@ -1780,16 +1780,23 @@ async function forwardOrder(orderId, destination){
   }).eq('id',orderId);
   if(error){alert('Erro ao atualizar pedido: '+error.message);return;}
 
-  // Open mail client with pre-filled email
-  const mailAnchor=document.createElement('a');
-  mailAnchor.href=mailtoLink;
-  mailAnchor.target='_blank';
-  document.body.appendChild(mailAnchor);
-  mailAnchor.click();
-  document.body.removeChild(mailAnchor);
+  // Show modal with direct mailto link (avoids browser popup blocker)
+  const existing=document.getElementById('mailto-modal');
+  if(existing) existing.remove();
 
-  // Refresh orders after short delay
-  setTimeout(()=>renderAdminTab('orders'),1500);
+  const modal=document.createElement('div');
+  modal.id='mailto-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.6);z-index:9999;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML='<div style="background:#fff;border-radius:16px;padding:32px;max-width:420px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.2)">'
+    +'<div style="font-size:40px;margin-bottom:12px">✅</div>'
+    +'<h3 style="font-size:18px;font-weight:700;margin-bottom:8px;color:#001423">Pedido encaminhado!</h3>'
+    +'<p style="font-size:13px;color:#737373;margin-bottom:20px">Clique abaixo para abrir o e-mail no Outlook com todos os detalhes do pedido já preenchidos.</p>'
+    +'<a href="'+mailtoLink+'" style="display:block;background:#0A8CFA;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;margin-bottom:10px">📧 Abrir e-mail no Outlook</a>'
+    +'<button id="close-mailto-modal" style="background:none;border:none;color:#737373;font-size:13px;cursor:pointer;padding:8px">Fechar e atualizar pedidos</button>'
+    +'</div>';
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{if(e.target===modal){modal.remove();renderAdminTab('orders');}});
+  document.getElementById('close-mailto-modal')?.addEventListener('click',()=>{modal.remove();renderAdminTab('orders');});
 }
 
 function toggleOrderEdit(orderId){
