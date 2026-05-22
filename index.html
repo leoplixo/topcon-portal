@@ -194,12 +194,12 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
       </div>
       <div style="font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:4px">Bem-vindo</div>
       <div style="font-size:13px;color:var(--tm);margin-bottom:28px">Acesse com as credenciais fornecidas pela sua equipe Topcon.</div>
-      <label class="form-lbl">E-mail</label>
-      <input id="login-email" class="form-inp" type="email" placeholder="seu@email.com" style="margin-bottom:12px"/>
+      <form id="login-form" onsubmit="event.preventDefault();doLogin()" autocomplete="on"><label class="form-lbl">E-mail</label>
+      <input id="login-email" name="email" class="form-inp" type="email" placeholder="seu@email.com" autocomplete="email" style="margin-bottom:12px"/>
       <label class="form-lbl">Senha</label>
-      <input id="login-pass" class="form-inp" type="password" placeholder="••••••••"/>
+      <input id="login-pass" name="password" class="form-inp" type="password" placeholder="••••••••" autocomplete="current-password"/>
       <div id="login-err" class="login-err"></div>
-      <button id="login-btn" class="login-btn" onclick="doLogin()">Entrar</button>
+      <button id="login-btn" class="login-btn" type="submit">Entrar</button></form>
     </div>
   </div>
 </div>
@@ -1747,30 +1747,54 @@ async function forwardOrder(orderId, destination){
     ?new Date(order.requested_delivery_date+'T12:00:00').toLocaleDateString('pt-BR',{month:'long',year:'numeric'})
     :'Não definida';
 
+  const isEN=destination==='Fort Atkinson';
+  const isES=destination==='Madrid';
+  const L={
+    greeting:    isEN?'Hello,':isES?'Estimados,':'Olá,',
+    intro:       isEN?'Please find below the approved order for processing:':isES?'A continuación el pedido aprobado para procesamiento:':'Segue pedido aprovado para processamento:',
+    ref:         isEN?'REFERENCE':isES?'REFERENCIA':'REFERENCIA',
+    client:      isEN?'CLIENT':isES?'CLIENTE':'CLIENTE',
+    group:       isEN?'GROUP':isES?'GRUPO':'GRUPO',
+    orderDate:   isEN?'ORDER DATE':isES?'FECHA DEL PEDIDO':'DATA DO PEDIDO',
+    delivery:    isEN?'REQUESTED DELIVERY':isES?'ENTREGA SOLICITADA':'ENTREGA SOLICITADA',
+    priceType:   isEN?'PRICE TYPE':isES?'TIPO DE PRECIO':'TIPO DE PRECO',
+    items:       isEN?'ITEMS':isES?'ARTÍCULOS':'ITENS',
+    subtotal:    isEN?'ORIGINAL SUBTOTAL':isES?'SUBTOTAL ORIGINAL':'SUBTOTAL ORIGINAL',
+    discount:    isEN?'ADDITIONAL DISCOUNT':isES?'DESCUENTO ADICIONAL':'DESCONTO ADICIONAL',
+    total:       isEN?'FINAL TOTAL':isES?'TOTAL FINAL':'TOTAL FINAL',
+    reviewedBy:  isEN?'Reviewed by':isES?'Revisado por':'Revisado por',
+    closing:     isEN?'Best regards,':isES?'Atentamente,':'Atenciosamente,',
+    qty:         isEN?'Qty':isES?'Cant':'Qtd',
+    unitOrig:    isEN?'Unit orig.':isES?'Unit orig.':'Unit orig.',
+    desc:        isEN?'Disc.':isES?'Desc.':'Desc.',
+    final:       isEN?'Final/un':isES?'Final/un':'Final/un',
+    scheduled:   isEN?'Scheduled':isES?'Programado':'Scheduled',
+    spot:        isEN?'SPOT':isES?'SPOT':'SPOT',
+  };
   const bodyParts=[
-    'Ola,','',
-    'Segue pedido aprovado para processamento:','',
-    'REFERENCIA: '+order.reference,
-    'CLIENTE: '+(order.user_profiles?.full_name||'—'),
-    'GRUPO: '+(order.client_groups?.label||'—'),
-    'DATA DO PEDIDO: '+new Date(order.created_at).toLocaleDateString('pt-BR'),
-    'ENTREGA SOLICITADA: '+delivStr,
-    'TIPO DE PRECO: '+(order.price_type==='scheduled'?'Scheduled':'SPOT'),
-    '','ITENS:',
+    L.greeting,'',L.intro,'',
+    L.ref+': '+order.reference,
+    L.client+': '+(order.user_profiles?.full_name||'—'),
+    L.group+': '+(order.client_groups?.label||'—'),
+    L.orderDate+': '+new Date(order.created_at).toLocaleDateString('pt-BR'),
+    L.delivery+': '+delivStr,
+    L.priceType+': '+(order.price_type==='scheduled'?L.scheduled:L.spot),
+    '',L.items+':',
     ...items.map(i=>{
       const disc=Number(i.additional_discount||0);
       const finalP=Number(i.unit_price)-disc;
-      let line=i.pn+' | '+i.description+' | Qtd: '+i.quantity+' | Unit orig: '+fmt(i.unit_price);
-      if(disc>0) line+=' | Desc: -'+fmt(disc)+'/un | Final: '+fmt(finalP)+'/un';
+      let line=i.pn+' | '+i.description+' | '+L.qty+': '+i.quantity+' | '+L.unitOrig+': '+fmt(i.unit_price);
+      if(disc>0) line+=' | '+L.desc+': -'+fmt(disc)+'/un | '+L.final+': '+fmt(finalP)+'/un';
       return line+' | Total: '+fmt(finalP*Number(i.quantity));
     }),
-    '','SUBTOTAL ORIGINAL: '+fmt(order.total_usd),
-    ...(discTotal>0?['DESCONTO ADICIONAL: -'+fmt(discTotal)]:[]),
-    'TOTAL FINAL: '+fmt(finalTotal),
-    '','Revisado por: '+(cProfile?.full_name||'Admin'),
-    '','Atenciosamente,','Topcon Portal'
+    '',L.subtotal+': '+fmt(order.total_usd),
+    ...(discTotal>0?[L.discount+': -'+fmt(discTotal)]:[]),
+    L.total+': '+fmt(finalTotal),
+    '',L.reviewedBy+': '+(cProfile?.full_name||'Admin'),
+    '',L.closing,'Topcon Portal'
   ];
-  const subject=encodeURIComponent('Topcon Portal - Pedido '+order.reference+' para processamento ['+destination+']');
+  const clientName=order.user_profiles?.full_name||'Client';
+  const subject=encodeURIComponent(destination==='Fort Atkinson'?'Topcon Portal - Order '+order.reference+' ['+clientName+'] - For Processing [Fort Atkinson]':'Topcon Portal - Pedido '+order.reference+' ['+clientName+'] - Para Procesamiento [Madrid]');
   const body=encodeURIComponent(bodyParts.join('\n'));
   const mailtoLink='mailto:'+destEmail+'?subject='+subject+'&body='+body;
 
@@ -1871,7 +1895,8 @@ async function forwardOrder(orderId, destination){
       doc.text('TOTAL FINAL:',margin+100,y);doc.text(fmt(finalTotal),margin+148,y);y+=10;
       doc.setFontSize(7);doc.setFont('helvetica','normal');doc.setTextColor(150,150,150);
       doc.text('Gerado em '+new Date().toLocaleString('pt-BR')+' · Topcon Parts Portal',margin,285);
-      const pdfName='Topcon_'+order.reference+'_'+destination.replace(' ','_')+'.pdf';
+      const clientSlug=(order.user_profiles?.full_name||'Client').replace(/\s+/g,'_');
+      const pdfName='Topcon_'+order.reference+'_'+clientSlug+'_'+destination.replace(/\s+/g,'_')+'.pdf';
       doc.save(pdfName);
       // Update modal note
       const noteEl=document.getElementById('pdf-auto-note');
@@ -2230,7 +2255,7 @@ async function downloadCatalogCSV(){
 const fmt=v=>v==null?'—':'USD '+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById('screen-'+id).classList.add('active');}
 function showLoader(id,msg){const el=document.getElementById(id);if(el)el.innerHTML=`<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>${msg}</div></div>`;}
-document.addEventListener('keydown',e=>{if(e.key==='Enter'&&document.getElementById('screen-login').classList.contains('active'))doLogin();});
+// login handled by form submit
 </script>
 </body>
 </html>
