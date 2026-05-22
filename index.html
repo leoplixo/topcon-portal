@@ -1723,9 +1723,10 @@ function updateItemFinal(itemId, unitPrice, orderId){
 }
 
 async function forwardOrder(orderId, destination){
+  try{
   // Fetch full order details first
   const{data:order,error:oErr}=await sb.from('orders')
-    .select('*,user_profiles(full_name,notification_email),client_groups(label),order_items(pn,description,unit_price,quantity,additional_discount)')
+    .select('*,user_profiles(full_name,notification_email),client_groups(label),order_items(pn,description,unit_price,quantity)')
     .eq('id',orderId).single();
   if(oErr){alert('Erro ao buscar pedido: '+oErr.message);return;}
 
@@ -1817,6 +1818,10 @@ async function forwardOrder(orderId, destination){
       if(btn){btn.textContent='✓ Copiado!';btn.style.background='#E8F5EC';btn.style.color='#166534';}
     });
   });
+  }catch(err){
+    console.error('forwardOrder error:',err);
+    alert('Erro ao encaminhar pedido:\n'+err.message+'\n\nVerifique o console do browser para mais detalhes.');
+  }
 }
 
 function toggleOrderEdit(orderId){
