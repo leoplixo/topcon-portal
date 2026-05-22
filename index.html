@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Topcon Portal</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
@@ -244,6 +245,7 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
         <button class="tog-btn" onclick="setPT(this,'spot')">SPOT</button>
       </div>
     </div>
+    <div id="eligibility-banner" style="display:none;margin-bottom:12px"></div>
     <p class="results-meta" id="results-meta"></p>
     <div class="parts-grid" id="parts-grid"></div>
   </div>
@@ -255,6 +257,7 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
         <button class="btn btn-outline btn-sm" onclick="goBack()">← Voltar ao catálogo</button>
       </div>
       <p class="page-sub" id="quote-sub"></p>
+      <div id="quote-eligibility-note" style="display:none;margin-bottom:12px"></div>
       <div class="price-bar">
         <span style="font-size:12px;color:var(--tm);font-weight:500">Tipo de preço:</span>
         <div class="tog-group" id="pt-tog-q">
@@ -354,6 +357,7 @@ async function sendOrderEmail(order, items, clientName, groupLabel, deliveryDate
 }
 
 let cUser=null, cProfile=null, cGroup=null;
+let clientEligibility=null; // {eligible, inWindow, purchased, accTarget, minThreshold}
 let catalog=[], cart={}, priceType='scheduled', segFilter='ALL';
 let clientGroups=[];
 
@@ -409,7 +413,7 @@ async function afterLogin(){
     document.getElementById('u-av').textContent=profile.full_name[0].toUpperCase();
     document.getElementById('u-nm').textContent=profile.full_name;
     document.getElementById('u-grp').textContent='· '+(cGroup?.label||'');
-    showScreen('client'); showView('dashboard'); await renderDashboard(); await loadCatalog();
+    showScreen('client'); showView('dashboard'); await Promise.all([checkClientEligibility(),renderDashboard(),loadCatalog()]);
   }
 }
 
@@ -659,6 +663,35 @@ async function renderDashboard(){
     ${ordersHtml}`;
 }
 
+async function checkClientEligibility(){
+  if(!cUser||!cGroup) return {eligible:true,inWindow:false,purchased:0,accTarget:0,minThreshold:0};
+  const FISCAL_START='2026-04-01';
+  const[winRes,targetRes,ordersRes]=await Promise.all([
+    sb.from('windows').select('*').eq('year',2026).order('window_number'),
+    sb.from('targets').select('target_usd').eq('user_id',cUser.id).eq('year',2026).single(),
+    sb.from('orders').select('total_usd,final_total_usd,status').eq('user_id',cUser.id)
+      .gte('created_at',FISCAL_START).neq('status','cancelled')
+  ]);
+  const windows=winRes.data||[];
+  const annualTarget=Number(targetRes.data?.target_usd||0);
+  const orders=ordersRes.data||[];
+  const purchased=orders.reduce((s,o)=>s+Number(o.final_total_usd||o.total_usd||0),0);
+  const today=new Date();
+  // Check if inside a window
+  const currentWindow=windows.find(w=>today>=new Date(w.open_date)&&today<=new Date(w.close_date));
+  if(currentWindow){
+    clientEligibility={eligible:true,inWindow:true,windowName:currentWindow.name,purchased,accTarget:0,minThreshold:0};
+    return clientEligibility;
+  }
+  // Calculate accumulated target from closed windows
+  const closedMonths=windows.filter(w=>new Date(w.close_date)<today).reduce((s,w)=>s+w.months_covered,0);
+  const accTarget=annualTarget*(closedMonths/12);
+  const minThreshold=accTarget*0.75;
+  const eligible=accTarget===0||purchased>=minThreshold;
+  clientEligibility={eligible,inWindow:false,purchased,accTarget,minThreshold,annualTarget};
+  return clientEligibility;
+}
+
 async function doLogout(){
   await sb.auth.signOut();
   cart={};cUser=null;cProfile=null;cGroup=null;catalog=[];
@@ -704,6 +737,23 @@ function setPT(btn,type){
   renderCatalog();renderQuote();
 }
 function renderCatalog(){
+  // Show eligibility banner
+  const banner=document.getElementById('eligibility-banner');
+  if(banner&&clientEligibility){
+    if(clientEligibility.inWindow){
+      banner.style.display='block';
+      banner.innerHTML='<div style="padding:10px 16px;background:#E6F1FB;border:1px solid var(--blue-200);border-radius:var(--r-md);font-size:13px;color:var(--blue-dark);display:flex;align-items:center;gap:8px">🔓 <strong>'+clientEligibility.windowName+' aberta</strong> — Preço Scheduled disponível para todos durante este período.</div>';
+    } else if(!clientEligibility.eligible){
+      banner.style.display='block';
+      banner.innerHTML='<div style="padding:10px 16px;background:#FEF3C7;border:1px solid #FAC775;border-radius:var(--r-md);font-size:13px;color:#92400E">⚠️ <strong>Apenas SPOT disponível.</strong> Você atingiu '+
+        (clientEligibility.accTarget>0?(clientEligibility.purchased/clientEligibility.accTarget*100).toFixed(0):'0')+'% do objetivo acumulado (mínimo 75%). '+
+        'Pedidos fora da janela de programação serão processados com preço SPOT. Faltam <strong>'+fmt(Math.max(0,clientEligibility.minThreshold-clientEligibility.purchased))+'</strong> para atingir o mínimo.</div>';
+    } else {
+      banner.style.display='block';
+      banner.innerHTML='<div style="padding:10px 16px;background:#E8F5EC;border:1px solid #B8DCBF;border-radius:var(--r-md);font-size:13px;color:#166534;display:flex;align-items:center;gap:8px">✅ <strong>Preço Scheduled ativo</strong> — '+
+        (clientEligibility.accTarget>0?(clientEligibility.purchased/clientEligibility.accTarget*100).toFixed(0)+'% do objetivo acumulado atingido':'Aguardando início do ciclo')+'.</div>';
+    }
+  }
   const q=(document.getElementById('cat-search')?.value||'').toLowerCase();
   const filtered=catalog.filter(p=>{
     if(segFilter!=='ALL'&&p.seg!==segFilter)return false;
@@ -767,7 +817,25 @@ function showView(v){
   const db=document.getElementById('dash-btn');if(db)db.style.display=v==='dashboard'?'none':'inline-flex';
   const cb=document.getElementById('cat-btn');if(cb)cb.style.display=['quote','confirm'].includes(v)?'inline-flex':'none';
 }
-function goQuote(){showView('quote');renderQuote();}
+function goQuote(){
+  showView('quote');
+  renderQuote();
+  // Show eligibility note in quote
+  const noteEl=document.getElementById('quote-eligibility-note');
+  if(noteEl&&clientEligibility){
+    if(clientEligibility.inWindow){
+      noteEl.style.display='block';
+      noteEl.innerHTML='<div style="padding:10px 16px;background:#E6F1FB;border:1px solid var(--blue-200);border-radius:var(--r-md);font-size:13px;color:var(--blue-dark)">🔓 <strong>'+clientEligibility.windowName+' aberta</strong> — Preço Scheduled disponível.</div>';
+    } else if(!clientEligibility.eligible){
+      noteEl.style.display='block';
+      noteEl.innerHTML='<div style="padding:10px 16px;background:#FEF3C7;border:1px solid #FAC775;border-radius:var(--r-md);font-size:13px;color:#92400E">⚠️ <strong>Atenção:</strong> Fora da janela de programação e abaixo de 75% do objetivo. Pedidos Scheduled serão bloqueados — use preço <strong>SPOT</strong>.</div>';
+      // Auto-switch to SPOT
+      setTimeout(()=>{const b=document.querySelector('#pt-tog-q .tog-btn:last-child');if(b&&priceType!=='spot')b.click();},100);
+    } else {
+      noteEl.style.display='none';
+    }
+  }
+}
 function goBack(){showView('catalog');updBadge();}
 
 function renderQuote(){
@@ -834,6 +902,18 @@ function renderQuote(){
 // ORDER
 async function sendOrder(){
   const btn=document.getElementById('send-btn');
+  // Enforce eligibility rule
+  if(priceType==='scheduled'){
+    const el=clientEligibility||await checkClientEligibility();
+    if(!el.eligible&&!el.inWindow){
+      const pct=el.accTarget>0?(el.purchased/el.accTarget*100).toFixed(0):0;
+      alert('⚠️ Pedido bloqueado em preço Scheduled.\n\nVocê atingiu '+pct+'% do objetivo acumulado (mínimo 75%).\n\nEste pedido será enviado com preço SPOT ou aguarde a próxima janela de programação para ter acesso ao preço Scheduled.');
+      // Switch to SPOT automatically
+      const spotBtn=document.querySelector('#pt-tog-q .tog-btn:last-child');
+      if(spotBtn) spotBtn.click();
+      return;
+    }
+  }
   if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Enviando…';}
   const items=getItems();const total=getTotal();
   const ref='TOP-'+Date.now().toString().slice(-7);
@@ -903,7 +983,159 @@ async function renderAdminTab(tab){
   const el=document.getElementById('admin-content');
 
 
-  if(tab==='upload'){
+  if(tab==='admindash'){
+    el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando dashboard…</div></div>';
+    const FISCAL_START='2026-04-01', FISCAL_YEAR=2026;
+    const[ordersRes,targetsRes,windowsRes]=await Promise.all([
+      sb.from('orders').select('*,user_profiles(full_name,id),client_groups(label),order_items(unit_price,quantity,additional_discount)')
+        .gte('created_at',FISCAL_START).neq('status','cancelled').order('created_at',{ascending:true}),
+      sb.from('targets').select('*,user_profiles(full_name)').eq('year',FISCAL_YEAR),
+      sb.from('windows').select('*').eq('year',FISCAL_YEAR).order('window_number')
+    ]);
+    const orders=ordersRes.data||[], targets=targetsRes.data||[], windows=windowsRes.data||[];
+    const oTotal=o=>Number(o.final_total_usd||o.total_usd||0);
+    const totalRev=orders.reduce((s,o)=>s+oTotal(o),0);
+    const pending=orders.filter(o=>o.status==='pending').length;
+    const avgTicket=orders.length?totalRev/orders.length:0;
+    const schedRev=orders.filter(o=>o.price_type==='scheduled').reduce((s,o)=>s+oTotal(o),0);
+    const spotRev=orders.filter(o=>o.price_type==='spot').reduce((s,o)=>s+oTotal(o),0);
+    const totalTarget=targets.reduce((s,t)=>s+Number(t.target_usd),0);
+    const today=new Date();
+    const closedW=windows.filter(w=>new Date(w.close_date)<today);
+    const closedM=closedW.reduce((s,w)=>s+w.months_covered,0);
+    const accTarget=totalTarget*(closedM/12);
+    const MK=['2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'];
+    const ML=['Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez','Jan','Fev','Mar'];
+    const revByMonth={};MK.forEach(m=>revByMonth[m]=0);
+    orders.forEach(o=>{const mk=(o.requested_delivery_date||o.created_at||'').slice(0,7);if(revByMonth[mk]!==undefined)revByMonth[mk]+=oTotal(o);});
+    const revByClient={};
+    orders.forEach(o=>{const n=o.user_profiles?.full_name||'—';revByClient[n]=(revByClient[n]||0)+oTotal(o);});
+    const clientRev=Object.entries(revByClient).sort((a,b)=>b[1]-a[1]);
+    const pnRev={};
+    orders.forEach(o=>(o.order_items||[]).forEach(i=>{
+      const t=(Number(i.unit_price)-Number(i.additional_discount||0))*Number(i.quantity);
+      pnRev[i.pn]=(pnRev[i.pn]||0)+t;
+    }));
+    const topPNs=Object.entries(pnRev).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    const targetMap={};
+    targets.forEach(t=>targetMap[t.user_id]={target:Number(t.target_usd),name:t.user_profiles?.full_name||'?'});
+    const revByUID={};
+    orders.forEach(o=>{if(o.user_profiles?.id)revByUID[o.user_profiles.id]=(revByUID[o.user_profiles.id]||0)+oTotal(o);});
+
+    // Build KPI cards
+    const kpis=[
+      {icon:'💰',label:'Receita Total FY26',val:fmt(totalRev),color:'var(--blue)'},
+      {icon:'🎯',label:'Meta Total FY26',val:fmt(totalTarget),color:'var(--ag-green)'},
+      {icon:'📈',label:'% da Meta',val:totalTarget>0?(totalRev/totalTarget*100).toFixed(0)+'%':'—',color:totalRev>=accTarget*0.75?'var(--ag-green)':'#C0392B'},
+      {icon:'📋',label:'Pedidos Ativos',val:orders.length,color:'var(--blue)'},
+      {icon:'⏳',label:'Aguardando Revisão',val:pending,color:pending>0?'#D97706':'var(--ag-green)'},
+      {icon:'🧾',label:'Ticket Médio',val:fmt(avgTicket),color:'var(--t2)'},
+    ];
+    let kpiHtml='';
+    kpis.forEach(k=>{
+      kpiHtml+='<div class="dash-card" style="padding:16px;margin-bottom:0">';
+      kpiHtml+='<div style="font-size:22px;margin-bottom:6px">'+k.icon+'</div>';
+      kpiHtml+='<p style="font-size:11px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">'+k.label+'</p>';
+      kpiHtml+='<p style="font-size:20px;font-weight:700;color:'+k.color+';letter-spacing:-.02em">'+k.val+'</p>';
+      kpiHtml+='</div>';
+    });
+
+    // Client targets
+    let targetsHtml='';
+    const COLORS=['var(--blue)','var(--ag-green)','#E67E22','#9B59B6','#E74C3C','#16A085'];
+    Object.entries(targetMap).forEach(([uid,t])=>{
+      const rev=revByUID[uid]||0;
+      const pct=t.target>0?Math.min(100,(rev/t.target*100)):0;
+      const eligible=closedM>0?rev>=(t.target*(closedM/12)*0.75):true;
+      const badge=eligible?'<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#E8F5EC;color:#166534;font-weight:600">✅ Scheduled</span>':'<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#FEF3C7;color:#92400E;font-weight:600">⚠️ Em risco</span>';
+      const accLine=closedM>0?'<div style="position:absolute;top:-3px;left:'+Math.min(100,(accTarget/totalTarget*100))+'%;width:2px;height:14px;background:#C0392B;border-radius:2px"></div>':'';
+      targetsHtml+='<div style="margin-bottom:14px">';
+      targetsHtml+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">';
+      targetsHtml+='<div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px;font-weight:500">'+t.name+'</span>'+badge+'</div>';
+      targetsHtml+='<div style="text-align:right"><span style="font-size:13px;font-weight:600;color:var(--blue)">'+fmt(rev)+'</span><span style="font-size:11px;color:var(--tm)"> / '+fmt(t.target)+'</span></div>';
+      targetsHtml+='</div>';
+      targetsHtml+='<div style="position:relative;background:var(--g100);border-radius:10px;height:8px">';
+      targetsHtml+='<div style="height:100%;border-radius:10px;background:'+(eligible?'var(--ag-green)':'#E67E22')+';width:'+pct+'%;transition:width .6s"></div>'+accLine;
+      targetsHtml+='</div>';
+      targetsHtml+='<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--tm);margin-top:3px"><span>'+pct.toFixed(0)+'% da meta anual</span><span>Meta: '+fmt(t.target)+'</span></div>';
+      targetsHtml+='</div>';
+    });
+    if(!targetsHtml) targetsHtml='<p style="font-size:13px;color:var(--tm)">Nenhuma meta configurada. Acesse Clientes para definir metas.</p>';
+
+    // Client revenue bars
+    let clientHtml='';
+    if(clientRev.length){
+      const maxR=clientRev[0][1];
+      clientRev.forEach(([name,rev],i)=>{
+        const pct=maxR>0?(rev/maxR*100):0;
+        clientHtml+='<div style="margin-bottom:10px">';
+        clientHtml+='<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="font-weight:500">'+name+'</span><span>'+fmt(rev)+'</span></div>';
+        clientHtml+='<div style="background:var(--g100);border-radius:6px;height:6px"><div style="height:100%;border-radius:6px;background:'+COLORS[i%COLORS.length]+';width:'+pct+'%"></div></div>';
+        clientHtml+='</div>';
+      });
+    } else clientHtml='<p style="font-size:13px;color:var(--tm)">Nenhum pedido ainda.</p>';
+
+    // Top PNs
+    let pnHtml='';
+    if(topPNs.length){
+      const maxP=topPNs[0][1];
+      topPNs.forEach(([pn,rev],i)=>{
+        const pct=maxP>0?(rev/maxP*100):0;
+        pnHtml+='<div style="margin-bottom:8px">';
+        pnHtml+='<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px"><span style="font-family:\'JetBrains Mono\',monospace;color:var(--blue)">'+pn+'</span><span style="font-weight:600">'+fmt(rev)+'</span></div>';
+        pnHtml+='<div style="background:var(--g100);border-radius:4px;height:5px"><div style="height:100%;border-radius:4px;background:var(--blue);width:'+pct+'%;opacity:'+(1-i*0.07)+'"></div></div>';
+        pnHtml+='</div>';
+      });
+    } else pnHtml='<p style="font-size:13px;color:var(--tm)">Nenhum item em pedidos ainda.</p>';
+
+    // Windows
+    let winHtml='';
+    windows.forEach(w=>{
+      const isOpen=today>=new Date(w.open_date)&&today<=new Date(w.close_date);
+      const isPast=new Date(w.close_date)<today;
+      const dot=isOpen?'🟢':isPast?'⚫':'⚪';
+      const wTarget=totalTarget*(w.months_covered/12);
+      winHtml+='<div style="background:var(--g50);border:1px solid '+(isOpen?'var(--blue)':'var(--border)')+';border-radius:var(--r-md);padding:12px">';
+      winHtml+='<p style="font-size:13px;font-weight:600;margin-bottom:3px">'+dot+' '+w.name+'</p>';
+      winHtml+='<p style="font-size:11px;color:var(--tm);margin-bottom:6px">'+new Date(w.open_date).toLocaleDateString('pt-BR')+' – '+new Date(w.close_date).toLocaleDateString('pt-BR')+'</p>';
+      winHtml+='<p style="font-size:13px;font-weight:700;color:var(--blue)">'+fmt(wTarget)+'</p>';
+      winHtml+='<p style="font-size:10px;color:var(--tm)">objetivo janela · '+w.months_covered+' meses</p>';
+      winHtml+='</div>';
+    });
+
+    // Assemble
+    el.innerHTML=
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">'+
+        '<h1 class="page-title">Dashboard Gerencial FY2026</h1>'+
+        '<span style="font-size:12px;color:var(--tm)">'+orders.length+' pedido(s) ativo(s)</span>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">'+kpiHtml+'</div>'+
+      '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px">'+
+        '<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Receita por mês (FY2026)</p><canvas id="chart-monthly" height="120"></canvas></div>'+
+        '<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Scheduled vs SPOT</p><canvas id="chart-ptype" height="160"></canvas>'+
+          '<div style="margin-top:12px">'+
+            '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--blue)">● Scheduled</span><span style="font-weight:600">'+fmt(schedRev)+'</span></div>'+
+            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:#E67E22">● SPOT</span><span style="font-weight:600">'+fmt(spotRev)+'</span></div>'+
+          '</div></div>'+
+      '</div>'+
+      '<div class="dash-card" style="margin-bottom:16px"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Performance por cliente vs meta acumulada</p>'+targetsHtml+'</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'+
+        '<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Receita por cliente</p>'+clientHtml+'</div>'+
+        '<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Top 10 PNs por receita</p>'+pnHtml+'</div>'+
+      '</div>'+
+      '<div class="dash-card"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Janelas FY2026</p>'+
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">'+winHtml+'</div></div>';
+
+    // Charts
+    requestAnimationFrame(()=>{
+      const mCtx=document.getElementById('chart-monthly');
+      if(mCtx) new Chart(mCtx,{type:'bar',data:{labels:ML,datasets:[{label:'USD',data:MK.map(m=>revByMonth[m]||0),backgroundColor:'rgba(10,140,250,0.7)',borderColor:'rgba(10,140,250,1)',borderWidth:1,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'USD '+ctx.raw.toLocaleString('en-US',{minimumFractionDigits:0})}}},scales:{y:{ticks:{callback:v=>'$'+Number(v).toLocaleString('en-US',{maximumFractionDigits:0})},grid:{color:'rgba(0,0,0,0.05)'}},x:{grid:{display:false}}}}});
+      const pCtx=document.getElementById('chart-ptype');
+      if(pCtx&&(schedRev+spotRev)>0) new Chart(pCtx,{type:'doughnut',data:{labels:['Scheduled','SPOT'],datasets:[{data:[schedRev,spotRev],backgroundColor:['rgba(10,140,250,0.8)','rgba(230,126,34,0.8)'],borderWidth:0}]},options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'USD '+ctx.raw.toLocaleString('en-US',{minimumFractionDigits:0})}}},cutout:'65%'}});
+    });
+  }
+
+    if(tab==='upload'){
     el.innerHTML=`
       <h1 class="page-title">Atualizar preços</h1>
       <p class="page-sub">Upload do CSV atualiza o catálogo para todos os clientes imediatamente.</p>
@@ -953,13 +1185,24 @@ async function renderAdminTab(tab){
     };
 
     el.innerHTML=`
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <h1 class="page-title">Catálogo completo (${parts.length} PNs)</h1>
       <div style="display:flex;gap:8px">
         <button class="btn btn-outline btn-sm" onclick="downloadCatalogCSV()" style="gap:6px">⬇ Baixar CSV</button>
         <button class="btn btn-primary btn-sm" onclick="showNewPartForm()" id="new-pn-btn">+ Novo PN</button>
       </div>
     </div>
+    <div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap">
+      <input id="catalog-filter" placeholder="Buscar por PN ou descrição…"
+        oninput="filterCatalogTable(this.value)"
+        style="flex:1;min-width:240px;padding:8px 14px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;background:#fff"/>
+      <div class="tog-group">
+        <button class="tog-btn active" onclick="filterCatalogSeg(this,'ALL')">Todos</button>
+        <button class="tog-btn" onclick="filterCatalogSeg(this,'AG')">AG</button>
+        <button class="tog-btn" onclick="filterCatalogSeg(this,'FD')">FD</button>
+      </div>
+    </div>
+    <p id="catalog-count" style="font-size:12px;color:var(--tm);margin-bottom:10px">${parts.length} part numbers</p>
 
     <!-- New PN form (hidden by default) -->
     <div id="new-pn-form" style="display:none;background:#F0F8FF;border:1px solid var(--blue-200);border-radius:var(--r-lg);padding:20px;margin-bottom:16px">
@@ -1522,6 +1765,36 @@ async function saveClientTarget(userId, year){
 }
 
 // ── Catalog edit functions ────────────────────────────────────
+let _catalogSegFilter='ALL';
+
+function filterCatalogTable(q){
+  const search=(q||'').toLowerCase();
+  let shown=0;
+  document.querySelectorAll('[id^="row-"]').forEach(row=>{
+    if(!row.id.startsWith('row-')) return;
+    const pn=row.cells[1]?.textContent.toLowerCase()||'';
+    const desc=row.cells[3]?.textContent.toLowerCase()||'';
+    const prod=row.cells[2]?.textContent.toLowerCase()||'';
+    const seg=row.cells[0]?.textContent.trim()||'';
+    const matchQ=!search||pn.includes(search)||desc.includes(search)||prod.includes(search);
+    const matchSeg=_catalogSegFilter==='ALL'||seg===_catalogSegFilter;
+    const editRow=document.getElementById('edit-row-'+row.id.replace('row-',''));
+    const show=matchQ&&matchSeg;
+    row.style.display=show?'':'none';
+    if(editRow&&!show) editRow.style.display='none';
+    if(show) shown++;
+  });
+  const countEl=document.getElementById('catalog-count');
+  if(countEl) countEl.textContent=shown+' part number'+(shown!==1?'s':'')+' encontrado'+(shown!==1?'s':'');
+}
+
+function filterCatalogSeg(btn,seg){
+  _catalogSegFilter=seg;
+  btn.closest('.tog-group').querySelectorAll('.tog-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  filterCatalogTable(document.getElementById('catalog-filter')?.value||'');
+}
+
 function togglePartEdit(partId){
   const row=document.getElementById('edit-row-'+partId);
   if(row) row.style.display=row.style.display==='none'?'table-row':'none';
