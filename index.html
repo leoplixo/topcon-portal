@@ -651,7 +651,7 @@ async function renderDashboard(){
   const[targetRes,windowsRes,ordersRes]=await Promise.all([
     sb.from('targets').select('target_usd').eq('user_id',cUser.id).eq('year',FISCAL_YEAR).single(),
     sb.from('windows').select('*').eq('year',FISCAL_YEAR).order('window_number'),
-    sb.from('orders').select('id,reference,total_usd,price_type,created_at,requested_delivery_date,status,order_items(pn,description,unit_price,quantity)')
+    sb.from('orders').select('id,reference,total_usd,final_total_usd,price_type,created_at,requested_delivery_date,status,order_items(pn,description,unit_price,quantity)')
       .eq('user_id',cUser.id).gte('created_at',FISCAL_START.toISOString()).order('created_at',{ascending:false})
   ]);
 
@@ -2202,22 +2202,30 @@ async function saveOrderEdit(orderId){
   const priceType=document.getElementById('ptype-'+orderId)?.value;
   const delVal=document.getElementById('del-'+orderId)?.value;
   const notes=document.getElementById('notes-'+orderId)?.value||'';
-  // Save all item discounts
-  const itemRows=document.querySelectorAll(`#items-${orderId} tr`);
+  // Save all item discounts and recalculate final total
+  const itemRows=document.querySelectorAll('#items-'+orderId+' tr');
+  let finalTotal=0;
   for(const row of itemRows){
     const discInput=row.querySelector('[id^="disc-"]');
+    const qtyEl=row.querySelector('[id^="iqty-"]');
     if(discInput){
       const itemId=discInput.id.replace('disc-','');
       const disc=parseFloat(discInput.value)||0;
-      const noteInput=document.getElementById('item-note-'+itemId);
+      const qty=parseInt(qtyEl?.textContent||1);
+      // Get unit price from the row
+      const priceCell=row.querySelectorAll('td')[2];
+      const unitPrice=parseFloat((priceCell?.textContent||'0').replace(/[^0-9.]/g,''))||0;
+      const lineTotal=(unitPrice-disc)*qty;
+      finalTotal+=lineTotal;
       await sb.from('order_items').update({additional_discount:disc}).eq('id',itemId);
     }
   }
-  // Recalculate final total
-  let finalTotal=0;
-  document.querySelectorAll(`#items-${orderId} tr [id^="itotal-"]`).forEach(td=>{
-    finalTotal+=parseFloat(td.textContent.replace(/[^0-9.]/g,''))||0;
-  });
+  // Fallback: read from displayed itotal cells if calculation above yielded 0
+  if(finalTotal===0){
+    document.querySelectorAll('#items-'+orderId+' [id^="itotal-"]').forEach(td=>{
+      finalTotal+=parseFloat(td.textContent.replace(/[^0-9.]/g,''))||0;
+    });
+  }
   const{error}=await sb.from('orders').update({
     status,price_type:priceType,
     requested_delivery_date:delVal||null,
@@ -2226,8 +2234,13 @@ async function saveOrderEdit(orderId){
     reviewed_at:new Date().toISOString()
   }).eq('id',orderId);
   if(error){alert('Erro: '+error.message);return;}
-  const btn=event.target;btn.textContent='✓ Revisão salva';btn.style.background='#3A8C4C';
-  setTimeout(()=>{btn.textContent='Salvar revisão';btn.style.background='';},2000);
+  // Update the displayed total in the order card header
+  const cardHeader=document.querySelector('#order-card-'+orderId+' .order-final-display');
+  if(cardHeader) cardHeader.textContent=fmt(finalTotal);
+  // Refresh orders tab to show updated values
+  const btn=event.target;
+  btn.textContent='✓ Revisão salva';btn.style.background='#3A8C4C';
+  setTimeout(()=>{btn.textContent='Salvar revisão';btn.style.background='';renderAdminTab('orders');},1500);
 }
 
 async function changeItemQty(itemId,orderId,delta,unitPrice){
