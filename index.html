@@ -310,10 +310,13 @@ const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
 
 // ── EmailJS Config ─────────────────────────────────────────────
 // TO CONFIGURE: replace with your EmailJS credentials
-const EMAILJS_PUBLIC_KEY  = 'YOUR_EMAILJS_PUBLIC_KEY';
-const EMAILJS_SERVICE_ID  = 'YOUR_EMAILJS_SERVICE_ID';
-const EMAILJS_TEMPLATE_ID = 'YOUR_EMAILJS_TEMPLATE_ID';
-const SALES_OPS_EMAIL     = 'leoplixo@gmail.com';
+// ── EmailJS — preencha com seus dados do emailjs.com ────────────
+const EMAILJS_PUBLIC_KEY        = 'YOUR_EMAILJS_PUBLIC_KEY';    // Account > General > Public Key
+const EMAILJS_SERVICE_ID        = 'YOUR_EMAILJS_SERVICE_ID';    // Email Services > Service ID
+const EMAILJS_NEW_ORDER_TEMPLATE  = 'YOUR_NEW_ORDER_TEMPLATE';  // Template: template_new_order
+const EMAILJS_FORWARDED_TEMPLATE  = 'YOUR_FORWARDED_TEMPLATE';  // Template: template_forwarded
+const EMAILJS_TEMPLATE_ID       = EMAILJS_NEW_ORDER_TEMPLATE;   // backward compat
+const SALES_OPS_EMAIL           = 'lplixo@gmail.com';           // fallback
 
 function initEmailJS(){
   if(EMAILJS_PUBLIC_KEY !== 'YOUR_EMAILJS_PUBLIC_KEY'){
@@ -322,14 +325,16 @@ function initEmailJS(){
 }
 initEmailJS();
 
+// ── EmailJS config — replace with your values ──────────────────
+// EMAILJS_PUBLIC_KEY, SERVICE_ID, TEMPLATE IDs are set above in const declarations
+
 async function sendOrderEmail(order, items, clientName, groupLabel, deliveryDate){
   if(EMAILJS_PUBLIC_KEY === 'YOUR_EMAILJS_PUBLIC_KEY') return;
   try {
-    const itemsText = items.map(i=>`${i.pn} | ${i.description} | Qtd: ${i.qty} | Unit: ${fmt(i.price)} | Total: ${fmt(i.total)}`).join('\n');
+    const itemsText = items.map(i=>i.pn+' | '+i.description+' | Qtd: '+i.qty+' | Unit: '+fmt(i.price)+' | Total: '+fmt(i.total)).join('\n');
     const total = items.reduce((s,i)=>s+i.total,0);
     const delivStr = deliveryDate ? new Date(deliveryDate+'T12:00:00').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}) : 'Não definida';
-    const params = {
-      to_email:      SALES_OPS_EMAIL,
+    const baseParams = {
       client_name:   clientName,
       client_group:  groupLabel,
       order_ref:     order.reference,
@@ -338,22 +343,69 @@ async function sendOrderEmail(order, items, clientName, groupLabel, deliveryDate
       price_type:    order.price_type === 'scheduled' ? 'Scheduled' : 'SPOT',
       items_list:    itemsText,
       total_usd:     fmt(total),
-      portal_url:    window.location.href,
+      portal_url:    window.location.origin,
     };
-    // Send to Sales OPS
-    await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, params);
-    // Send to all admins
-    const {data:admins} = await sb.from('user_profiles').select('id').eq('is_admin', true);
-    const {data:authUsers} = await sb.from('user_profiles').select('id,full_name').eq('is_admin',true);
-    // Note: admin emails fetched separately as Supabase auth emails require service role
-    // For now sends to SALES_OPS_EMAIL — configure individual admin emails below
-    const ADMIN_EMAILS = [SALES_OPS_EMAIL]; // add more: 'gerente@topcon.com'
-    for(const email of ADMIN_EMAILS){
-      if(email !== SALES_OPS_EMAIL){ // avoid duplicate
-        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {...params, to_email: email});
-      }
+    // Fetch admin notification emails from DB
+    const{data:admins}=await sb.from('user_profiles').select('notification_email').eq('is_admin',true).not('notification_email','is',null);
+    const adminEmails=(admins||[]).map(a=>a.notification_email).filter(Boolean);
+    if(!adminEmails.length) adminEmails.push(SALES_OPS_EMAIL);
+    // Send to each admin
+    for(const email of adminEmails){
+      await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_NEW_ORDER_TEMPLATE, {...baseParams, to_email: email});
     }
+    console.log('New order emails sent to:', adminEmails);
   } catch(e){ console.warn('Email failed:', e); }
+}
+
+async function sendForwardedEmail(order, destination){
+  if(EMAILJS_PUBLIC_KEY === 'YOUR_EMAILJS_PUBLIC_KEY'){
+    alert('Pedido encaminhado para '+destination+'!\n\nConfigure o EmailJS para enviar e-mails automáticos.');
+    return;
+  }
+  try {
+    const items=order.order_items||[];
+    const discTotal=items.reduce((s,i)=>s+(Number(i.additional_discount||0)*Number(i.quantity)),0);
+    const finalTotal=Number(order.final_total_usd||order.total_usd||0);
+    const itemsText=items.map(i=>{
+      const disc=Number(i.additional_discount||0);
+      const finalP=Number(i.unit_price)-disc;
+      return i.pn+' | '+i.description+' | Qtd: '+i.quantity+' | Unit orig: '+fmt(i.unit_price)+(disc>0?' | Desc: -'+fmt(disc)+'/un':'')+' | Unit final: '+fmt(finalP)+' | Total: '+fmt(finalP*i.quantity);
+    }).join('\n');
+    const delivStr=order.requested_delivery_date?new Date(order.requested_delivery_date+'T12:00:00').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'Não definida';
+    const baseParams={
+      to_email:       '',
+      client_name:    order.user_profiles?.full_name||'—',
+      client_group:   order.client_groups?.label||'—',
+      order_ref:      order.reference,
+      order_date:     new Date(order.created_at).toLocaleDateString('pt-BR'),
+      delivery_date:  delivStr,
+      price_type:     order.price_type==='scheduled'?'Scheduled':'SPOT',
+      items_list:     itemsText,
+      original_total: fmt(order.total_usd),
+      discount_total: fmt(discTotal),
+      final_total:    fmt(finalTotal),
+      destination:    destination,
+      reviewed_by:    cProfile?.full_name||'Admin',
+      portal_url:     window.location.origin,
+    };
+    // Fetch destination email from DB
+    const{data:dest}=await sb.from('sales_ops_destinations').select('email').eq('name',destination).eq('active',true).single();
+    const destEmail=dest?.email;
+    // Fetch admin emails
+    const{data:admins}=await sb.from('user_profiles').select('notification_email').eq('is_admin',true).not('notification_email','is',null);
+    const adminEmails=(admins||[]).map(a=>a.notification_email).filter(Boolean);
+    // Send to Sales OPS
+    if(destEmail) await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_FORWARDED_TEMPLATE, {...baseParams, to_email: destEmail});
+    // Send confirmation to all admins
+    for(const email of adminEmails){
+      await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_FORWARDED_TEMPLATE, {...baseParams, to_email: email});
+    }
+    console.log('Forwarded emails sent to:', destEmail, adminEmails);
+    alert('✅ Pedido '+order.reference+' encaminhado para '+destination+'!\nE-mails enviados para o time Sales OPS e admins.');
+  } catch(e){
+    console.warn('Email failed:', e);
+    alert('Pedido encaminhado para '+destination+'. (E-mail não configurado ainda)');
+  }
 }
 
 let cUser=null, cProfile=null, cGroup=null;
@@ -1671,14 +1723,64 @@ function updateItemFinal(itemId, unitPrice, orderId){
 }
 
 async function forwardOrder(orderId, destination){
+  // Fetch full order details first
+  const{data:order,error:oErr}=await sb.from('orders')
+    .select('*,user_profiles(full_name,notification_email),client_groups(label),order_items(pn,description,unit_price,quantity,additional_discount)')
+    .eq('id',orderId).single();
+  if(oErr){alert('Erro ao buscar pedido: '+oErr.message);return;}
+
+  // Fetch destination email
+  const{data:dest}=await sb.from('sales_ops_destinations')
+    .select('email').eq('name',destination).eq('active',true).single();
+
+  // Build email body
+  const items=order.order_items||[];
+  const discTotal=items.reduce((s,i)=>s+(Number(i.additional_discount||0)*Number(i.quantity)),0);
+  const finalTotal=Number(order.final_total_usd||order.total_usd||0);
+  const delivStr=order.requested_delivery_date
+    ?new Date(order.requested_delivery_date+'T12:00:00').toLocaleDateString('pt-BR',{month:'long',year:'numeric'})
+    :'Não definida';
+
+  const bodyParts=[
+    'Ola,','',
+    'Segue pedido aprovado para processamento:','',
+    'REFERENCIA: '+order.reference,
+    'CLIENTE: '+(order.user_profiles?.full_name||'—'),
+    'GRUPO: '+(order.client_groups?.label||'—'),
+    'DATA DO PEDIDO: '+new Date(order.created_at).toLocaleDateString('pt-BR'),
+    'ENTREGA SOLICITADA: '+delivStr,
+    'TIPO DE PRECO: '+(order.price_type==='scheduled'?'Scheduled':'SPOT'),
+    '','ITENS:',
+    ...items.map(i=>{
+      const disc=Number(i.additional_discount||0);
+      const finalP=Number(i.unit_price)-disc;
+      let line=i.pn+' | '+i.description+' | Qtd: '+i.quantity+' | Unit orig: '+fmt(i.unit_price);
+      if(disc>0) line+=' | Desc: -'+fmt(disc)+'/un | Final: '+fmt(finalP)+'/un';
+      return line+' | Total: '+fmt(finalP*Number(i.quantity));
+    }),
+    '','SUBTOTAL ORIGINAL: '+fmt(order.total_usd),
+    ...(discTotal>0?['DESCONTO ADICIONAL: -'+fmt(discTotal)]:[]),
+    'TOTAL FINAL: '+fmt(finalTotal),
+    '','Revisado por: '+(cProfile?.full_name||'Admin'),
+    '','Atenciosamente,','Topcon Portal'
+  ];
+  const subject=encodeURIComponent('Topcon Portal - Pedido '+order.reference+' para processamento ['+destination+']');
+  const body=encodeURIComponent(bodyParts.join('\n'));
+  const mailtoLink='mailto:'+toEmail+'?subject='+subject+'&body='+body;
+
+  // Update order status in DB
   const{error}=await sb.from('orders').update({
     forwarded_to: destination,
     forwarded_at: new Date().toISOString(),
     status: 'forwarded'
   }).eq('id',orderId);
-  if(error){alert('Erro: '+error.message);return;}
-  alert(`Pedido encaminhado para ${destination}!\nEm breve: envio automático por e-mail para o time correto.`);
-  renderAdminTab('orders');
+  if(error){alert('Erro ao atualizar pedido: '+error.message);return;}
+
+  // Open Outlook/mail client with pre-filled email
+  window.location.href=mailtoLink;
+
+  // Refresh orders after short delay
+  setTimeout(()=>renderAdminTab('orders'),1500);
 }
 
 function toggleOrderEdit(orderId){
