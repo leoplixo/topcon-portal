@@ -438,7 +438,7 @@ async function renderDashboard(){
   const annualTarget=targetRes.data?.target_usd||0;
   const windows=windowsRes.data||[];
   const orders=ordersRes.data||[];
-  const purchased=orders.reduce((s,o)=>s+Number(o.total_usd||0),0);
+  const purchased=orders.filter(o=>o.status!=='cancelled').reduce((s,o)=>s+Number(o.final_total_usd||o.total_usd||0),0);
 
   // Current window (open right now)
   const currentWindow=windows.find(w=>today>=new Date(w.open_date)&&today<=new Date(w.close_date));
@@ -585,7 +585,7 @@ async function renderDashboard(){
   const CMONTH_KEYS=['2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'];
   const cByMonth={};CMONTH_KEYS.forEach(k=>cByMonth[k]=[]);
   const cNoDate=[];
-  orders.forEach(o=>{
+  orders.filter(o=>o.status!=='cancelled').forEach(o=>{
     if(o.requested_delivery_date){const mk=o.requested_delivery_date.slice(0,7);if(cByMonth[mk])cByMonth[mk].push(o);else cNoDate.push(o);}
     else cNoDate.push(o);
   });
@@ -603,7 +603,7 @@ async function renderDashboard(){
           <div style="min-height:50px;background:${isNow?'var(--blue-100)':'var(--g50)'};border:1px solid ${isNow?'var(--blue)':'var(--border)'};border-radius:var(--r-md);padding:3px;display:flex;flex-direction:column;gap:2px">
             ${mos.map(o=>`<div style="background:var(--blue);color:#fff;border-radius:3px;padding:2px 3px;font-size:9px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${o.reference} · ${fmt(o.total_usd)}">${o.reference}</div>`).join('')}
           </div>
-          ${mos.length?`<p style="font-size:9px;color:var(--tm);margin-top:2px">${fmt(mos.reduce((s,o)=>s+Number(o.total_usd||0),0))}</p>`:''}
+          ${mos.length?`<p style="font-size:9px;color:var(--tm);margin-top:2px">${fmt(mos.reduce((s,o)=>s+Number(o.final_total_usd||o.total_usd||0),0))}</p>`:''}
         </div>`;
       }).join('')}
     </div>
@@ -611,7 +611,7 @@ async function renderDashboard(){
       <div style="margin-top:10px;padding:8px 10px;background:var(--g50);border-radius:var(--r-md);border:1px dashed var(--border-md)">
         <p style="font-size:11px;color:var(--tm);font-weight:500">Sem data de entrega definida (${cNoDate.length} pedido(s)):</p>
         <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">
-          ${cNoDate.map(o=>`<span style="background:var(--g200);color:var(--t2);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace">\${o.reference}</span>`).join('')}
+          ${cNoDate.map(o=>`<span style="background:var(--g200);color:var(--t2);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;font-family:'JetBrains Mono',monospace">${o.reference}</span>`).join('')}
         </div>
       </div>`:''}
   </div>`:'' ;
@@ -965,7 +965,7 @@ async function renderAdminTab(tab){
     const MONTHS=['Abr 26','Mai 26','Jun 26','Jul 26','Ago 26','Set 26','Out 26','Nov 26','Dez 26','Jan 27','Fev 27','Mar 27'];
     const MK=['2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'];
     const byM={};MK.forEach(k=>byM[k]=[]);const noD=[];
-    orders.forEach(o=>{if(o.requested_delivery_date){const mk=o.requested_delivery_date.slice(0,7);if(byM[mk])byM[mk].push(o);else noD.push(o);}else noD.push(o);});
+    orders.filter(o=>o.status!=='cancelled').forEach(o=>{if(o.requested_delivery_date){const mk=o.requested_delivery_date.slice(0,7);if(byM[mk])byM[mk].push(o);else noD.push(o);}else noD.push(o);});
     const CC=['#0A8CFA','#3A8C4C','#E67E22','#9B59B6','#E74C3C','#16A085','#2C3E50','#F39C12'];
     const cMap={};let ci=0;
     orders.forEach(o=>{const n=o.user_profiles?.full_name||'?';if(!cMap[n])cMap[n]=CC[ci++%CC.length];});
@@ -980,7 +980,7 @@ async function renderAdminTab(tab){
             <div style="min-height:50px;background:${isPast?'var(--g50)':'#fff'};border:1px solid var(--border);border-radius:var(--r-md);padding:4px;display:flex;flex-direction:column;gap:3px">
               ${mos.map(o=>`<div title="${o.user_profiles?.full_name} · ${o.reference} · ${fmt(o.total_usd)}" style="background:${cMap[o.user_profiles?.full_name||'?']};color:#fff;border-radius:4px;padding:2px 4px;font-size:9px;font-weight:600;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="toggleOrderEdit('${o.id}')">${o.reference}</div>`).join('')}
             </div>
-            ${mos.length?`<p style="font-size:10px;color:var(--tm);margin-top:3px">${fmt(mos.reduce((s,o)=>s+Number(o.total_usd||0),0))}</p>`:''}
+            ${mos.length?`<p style="font-size:10px;color:var(--tm);margin-top:3px">${fmt(mos.reduce((s,o)=>s+Number(o.final_total_usd||o.total_usd||0),0))}</p>`:''}
           </div>`;}).join('')}
       </div>
     </div>`;
@@ -1006,6 +1006,7 @@ async function renderAdminTab(tab){
             <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${o.price_type==='scheduled'?'#E6F1FB':'#FEF3C7'};color:${o.price_type==='scheduled'?'#185FA5':'#92400E'};font-weight:600">${o.price_type==='scheduled'?'Scheduled':'SPOT'}</span>
             <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#E6F1FB;color:var(--blue)">📦 ${delivStr}</span>
             ${o.forwarded_to?`<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#E0F4F6;color:#0A7A8C;font-weight:600">→ ${o.forwarded_to}</span>`:''}
+            ${o.status==='cancelled'?`<button onclick="deleteOrder('${o.id}',event)" style="font-size:11px;padding:2px 10px;border-radius:10px;background:#FDECEA;color:#C0392B;border:1px solid #FECACA;font-weight:600;cursor:pointer">🗑 Excluir</button>`:''}
           </div>
           <div style="text-align:right;min-width:110px">
             ${discTotal>0?`<p style="font-size:11px;color:var(--tm);text-decoration:line-through">${fmt(o.total_usd)}</p>`:''}
@@ -1260,6 +1261,16 @@ async function handleCSV(file){
 }
 
 // UTILS
+async function deleteOrder(orderId, event){
+  event.stopPropagation();
+  if(!confirm('Excluir este pedido cancelado permanentemente?')) return;
+  // Delete items first
+  await sb.from('order_items').delete().eq('order_id', orderId);
+  const{error} = await sb.from('orders').delete().eq('id', orderId).eq('status','cancelled');
+  if(error){ alert('Erro: '+error.message); return; }
+  document.getElementById('order-card-'+orderId)?.remove();
+}
+
 function updateItemFinal(itemId, unitPrice, orderId){
   const discEl=document.getElementById('disc-'+itemId);
   const finalEl=document.getElementById('ifinal-'+itemId);
