@@ -533,11 +533,8 @@ function setLang(lang){
     else if(vCat&&vCat.style.display!=='none') renderCatalog();
     else if(vQ&&vQ.style.display!=='none') renderQuote();
   }
-  // Update topbar logout button
-  document.querySelectorAll('.btn-ghost').forEach(b=>{
-    const txt=b.textContent.trim();
-    if(['Sair','Salir','Sign Out'].includes(txt)) b.textContent=t('logout');
-  });
+  // Update logout button
+  const lb=document.getElementById('logout-btn');if(lb)lb.textContent=t('logout');
   // Update quote button in topbar
   const qBtn=document.getElementById('quote-btn');
   if(qBtn) qBtn.childNodes.forEach(n=>{if(n.nodeType===3&&n.textContent.trim()) n.textContent=t('quote');});
@@ -545,34 +542,30 @@ function setLang(lang){
 
 function updateLangButtons(){
   document.querySelectorAll('.lang-btn').forEach(b=>{
-    b.style.opacity=b.dataset.lang===LANG?'1':'0.4';
-    b.style.fontWeight=b.dataset.lang===LANG?'700':'400';
+    const active=b.dataset.lang===LANG;
+    b.style.opacity=active?'1':'0.45';
+    b.style.fontWeight=active?'700':'400';
+    b.style.background=active?'rgba(255,255,255,0.25)':'rgba(255,255,255,0.08)';
+    b.style.outline=active?'1px solid rgba(255,255,255,0.5)':'none';
   });
 }
 
 function applyLangToStatic(){
   // Login page
-  const welcomeEl=document.querySelector('.form-title');
-  if(welcomeEl) welcomeEl.textContent=t('welcome');
-  const subEl=document.querySelector('.form-sub');
-  if(subEl) subEl.textContent=t('loginSub');
-  const emailLbl=document.querySelector('.form-lbl');
-  if(emailLbl) emailLbl.textContent=t('emailLabel');
-  const loginBtnEl=document.getElementById('login-btn');
-  if(loginBtnEl&&!loginBtnEl.disabled) loginBtnEl.textContent=t('loginBtn');
-  // Hero
-  const heroLblEl=document.querySelector('.hero-lbl');
-  if(heroLblEl) heroLblEl.textContent=t('heroLabel');
-  const heroTitleEl=document.querySelector('.hero-title');
-  if(heroTitleEl) heroTitleEl.textContent=t('heroTitle');
-  const heroSubEl=document.querySelector('.hero-sub');
-  if(heroSubEl) heroSubEl.textContent=t('heroSub');
+  const welcomeEl=document.querySelector('.form-title');if(welcomeEl)welcomeEl.textContent=t('welcome');
+  const subEl=document.querySelector('.form-sub');if(subEl)subEl.textContent=t('loginSub');
+  const loginBtnEl=document.getElementById('login-btn');if(loginBtnEl&&!loginBtnEl.disabled)loginBtnEl.textContent=t('loginBtn');
+  const heroLblEl=document.querySelector('.hero-lbl');if(heroLblEl)heroLblEl.textContent=t('heroLabel');
+  const heroTitleEl=document.querySelector('.hero-title');if(heroTitleEl)heroTitleEl.textContent=t('heroTitle');
+  const heroSubEl=document.querySelector('.hero-sub');if(heroSubEl)heroSubEl.textContent=t('heroSub');
+  // Topbar
+  const logoutBtn=document.getElementById('logout-btn');if(logoutBtn)logoutBtn.textContent=t('logout');
+  const quoteBtn=document.getElementById('quote-btn');if(quoteBtn){const txt=quoteBtn.querySelector('span')||quoteBtn;if(!quoteBtn.querySelector('span'))quoteBtn.firstChild&&(quoteBtn.firstChild.textContent=t('quote'));}
+  const dashBtn=document.getElementById('dash-btn');if(dashBtn)dashBtn.textContent=t('dashboard');
   // Search
-  const searchEl=document.getElementById('cat-search');
-  if(searchEl) searchEl.placeholder=t('searchPlaceholder');
-  // Topbar buttons
-  const logoutBtns=document.querySelectorAll('.btn-ghost');
-  logoutBtns.forEach(b=>{if(b.textContent.trim()==='Sair'||b.textContent.trim()==='Salir'||b.textContent.trim()==='Sign Out') b.textContent=t('logout');});
+  const searchEl=document.getElementById('cat-search');if(searchEl)searchEl.placeholder=t('searchPlaceholder');
+  // Highlight active lang button
+  updateLangButtons();
 }
 let catalog=[], cart={}, priceType='scheduled', segFilter='ALL';
 let clientGroups=[];
@@ -636,7 +629,7 @@ async function afterLogin(){
     document.getElementById('u-av').textContent=profile.full_name[0].toUpperCase();
     document.getElementById('u-nm').textContent=profile.full_name;
     document.getElementById('u-grp').textContent='· '+(cGroup?.label||'');
-    showScreen('client'); showView('dashboard'); await Promise.all([checkClientEligibility(),renderDashboard(),loadCatalog()]);
+    showScreen('client'); updateLangButtons(); applyLangToStatic(); showView('dashboard'); await Promise.all([checkClientEligibility(),renderDashboard(),loadCatalog()]);
   }
 }
 
