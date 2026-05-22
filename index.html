@@ -6,6 +6,7 @@
 <title>Topcon Portal</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
@@ -1787,15 +1788,16 @@ async function forwardOrder(orderId, destination){
 
   const modal=document.createElement('div');
   modal.id='mailto-modal';
-  modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.6);z-index:9999;display:flex;align-items:center;justify-content:center';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.65);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
   // Build plain text email body for copy fallback
   const plainBody=bodyParts.join('\n');
 
-  modal.innerHTML='<div style="background:#fff;border-radius:16px;padding:28px;max-width:520px;width:95%;box-shadow:0 20px 60px rgba(0,0,0,.2)">'
+  modal.innerHTML='<div style="background:#fff;border-radius:16px;padding:28px;max-width:520px;width:95%;box-shadow:0 20px 60px rgba(0,0,0,.3);position:relative;max-height:90vh;overflow-y:auto">'
     +'<div style="text-align:center;margin-bottom:16px"><div style="font-size:36px">✅</div>'
     +'<h3 style="font-size:17px;font-weight:700;color:#001423">Pedido '+order.reference+' encaminhado para '+destination+'</h3></div>'
     +'<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">'
-    +'<a id="mailto-btn" href="'+mailtoLink+'" style="flex:1;display:block;background:#0A8CFA;color:#fff;padding:11px 16px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;text-align:center">📧 Abrir no Outlook / e-mail padrão</a>'
+    +'<a id="mailto-btn" href="'+mailtoLink+'" style="flex:1;display:block;background:#0A8CFA;color:#fff;padding:11px 16px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;text-align:center">📧 Abrir no Outlook</a>'
+    +'<button id="pdf-download-btn" style="flex:1;background:#053764;color:#fff;padding:11px 16px;border-radius:8px;font-size:13px;font-weight:600;border:none;cursor:pointer">📄 Baixar PDF</button>'
     +'</div>'
     +'<p style="font-size:11px;color:#737373;margin-bottom:8px">Se o botão acima não abrir o e-mail, copie o conteúdo abaixo e cole manualmente:</p>'
     +'<div style="background:#F7F8FA;border:1px solid #EBEBEB;border-radius:8px;padding:10px;margin-bottom:10px">'
@@ -1817,6 +1819,103 @@ async function forwardOrder(orderId, destination){
       const btn=document.getElementById('copy-email-btn');
       if(btn){btn.textContent='✓ Copiado!';btn.style.background='#E8F5EC';btn.style.color='#166534';}
     });
+  });
+
+  document.getElementById('pdf-download-btn')?.addEventListener('click',()=>{
+    const btn=document.getElementById('pdf-download-btn');
+    if(btn){btn.textContent='⏳ Gerando...';btn.disabled=true;}
+    try{
+      const{jsPDF}=window.jspdf;
+      const doc=new jsPDF({orientation:'p',unit:'mm',format:'a4'});
+      const margin=15, pageW=210, contentW=pageW-margin*2;
+      let y=margin;
+
+      // Header
+      doc.setFillColor(0,20,35);
+      doc.rect(0,0,pageW,28,'F');
+      doc.setTextColor(255,255,255);
+      doc.setFontSize(16);doc.setFont('helvetica','bold');
+      doc.text('TOPCON',margin,18);
+      doc.setFontSize(9);doc.setFont('helvetica','normal');
+      doc.text('Parts Portal — Pedido para Processamento',margin+32,18);
+      y=36;
+
+      // Order info box
+      doc.setFillColor(247,248,250);
+      doc.roundedRect(margin,y,contentW,38,2,2,'F');
+      doc.setTextColor(0,20,35);
+      doc.setFontSize(9);doc.setFont('helvetica','bold');
+      doc.text('REFERÊNCIA: '+order.reference,margin+4,y+8);
+      doc.setFont('helvetica','normal');
+      doc.text('Cliente: '+(order.user_profiles?.full_name||'—'),margin+4,y+15);
+      doc.text('Grupo: '+(order.client_groups?.label||'—'),margin+4,y+22);
+      doc.text('Data do pedido: '+new Date(order.created_at).toLocaleDateString('pt-BR'),margin+80,y+8);
+      doc.text('Entrega solicitada: '+delivStr,margin+80,y+15);
+      doc.text('Tipo de preço: '+(order.price_type==='scheduled'?'Scheduled':'SPOT'),margin+80,y+22);
+      doc.text('Encaminhado para: '+destination,margin+4,y+30);
+      doc.text('Revisado por: '+(cProfile?.full_name||'Admin'),margin+80,y+30);
+      y+=44;
+
+      // Items table header
+      doc.setFillColor(0,20,35);
+      doc.rect(margin,y,contentW,7,'F');
+      doc.setTextColor(255,255,255);
+      doc.setFontSize(8);doc.setFont('helvetica','bold');
+      doc.text('PN',margin+2,y+5);
+      doc.text('Descrição',margin+28,y+5);
+      doc.text('Qtd',margin+108,y+5);
+      doc.text('Unit orig.',margin+118,y+5);
+      doc.text('Desc.',margin+140,y+5);
+      doc.text('Final/un',margin+154,y+5);
+      doc.text('Total',margin+172,y+5);
+      y+=9;
+
+      // Items rows
+      const items=order.order_items||[];
+      items.forEach((item,i)=>{
+        const disc=Number(item.additional_discount||0);
+        const finalP=Number(item.unit_price)-disc;
+        const lineTotal=finalP*Number(item.quantity);
+        if(i%2===0){doc.setFillColor(250,251,252);doc.rect(margin,y-1,contentW,7,'F');}
+        doc.setTextColor(0,20,35);doc.setFont('helvetica','normal');doc.setFontSize(7);
+        doc.text(item.pn||'',margin+2,y+4,{maxWidth:24});
+        doc.text((item.description||'').substring(0,38),margin+28,y+4);
+        doc.text(String(item.quantity),margin+110,y+4);
+        doc.text(fmt(item.unit_price).replace('USD ',''),margin+118,y+4);
+        doc.text(disc>0?'-'+fmt(disc).replace('USD ',''):'—',margin+140,y+4);
+        doc.text(fmt(finalP).replace('USD ',''),margin+154,y+4);
+        doc.text(fmt(lineTotal).replace('USD ',''),margin+172,y+4);
+        y+=7;
+        if(y>270){doc.addPage();y=20;}
+      });
+
+      // Totals
+      y+=4;
+      doc.setDrawColor(200,200,200);
+      doc.line(margin,y,pageW-margin,y);y+=6;
+      doc.setFontSize(9);doc.setFont('helvetica','normal');doc.setTextColor(80,80,80);
+      doc.text('Subtotal original:',margin+100,y);
+      doc.text(fmt(order.total_usd),margin+145,y);y+=6;
+      if(discTotal>0){
+        doc.setTextColor(192,57,43);
+        doc.text('Desconto adicional:',margin+100,y);
+        doc.text('-'+fmt(discTotal),margin+145,y);y+=6;
+      }
+      doc.setFontSize(11);doc.setFont('helvetica','bold');doc.setTextColor(0,20,35);
+      doc.text('TOTAL FINAL:',margin+100,y);
+      doc.text(fmt(finalTotal),margin+145,y);y+=10;
+
+      // Footer
+      doc.setFontSize(7);doc.setFont('helvetica','normal');doc.setTextColor(150,150,150);
+      doc.text('Gerado em '+new Date().toLocaleString('pt-BR')+' · Topcon Parts Portal',margin,285);
+
+      doc.save('Topcon_Pedido_'+order.reference+'_'+destination.replace(' ','_')+'.pdf');
+      if(btn){btn.textContent='✓ PDF baixado';btn.style.background='#3A8C4C';}
+    }catch(e){
+      console.error('PDF error:',e);
+      if(btn){btn.textContent='📄 Baixar PDF';btn.disabled=false;}
+      alert('Erro ao gerar PDF: '+e.message);
+    }
   });
   }catch(err){
     console.error('forwardOrder error:',err);
