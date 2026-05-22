@@ -1888,9 +1888,33 @@ function updateItemFinal(itemId, unitPrice, orderId){
 
 async function forwardOrder(orderId, destination){
   try{
-  // Fetch full order details first
+  // Auto-save all discount values currently visible on screen
+  const editRows=document.querySelectorAll('#items-'+orderId+' tr');
+  let calcFinalTotal=0;
+  for(const row of editRows){
+    const discInput=row.querySelector('[id^="disc-"]');
+    const qtyEl=row.querySelector('[id^="iqty-"]');
+    if(discInput){
+      const itemId=discInput.id.replace('disc-','');
+      const disc=parseFloat(discInput.value)||0;
+      const qty=parseInt(qtyEl?.textContent||1);
+      const cells=row.querySelectorAll('td');
+      const up=parseFloat((cells[2]?.textContent||'0').replace(/[^0-9.]/g,''))||0;
+      calcFinalTotal+=(up-disc)*qty;
+      await sb.from('order_items').update({additional_discount:disc}).eq('id',itemId);
+    }
+  }
+  // Save final total if we calculated it
+  if(calcFinalTotal>0){
+    await sb.from('orders').update({
+      final_total_usd:calcFinalTotal,
+      reviewed_at:new Date().toISOString()
+    }).eq('id',orderId);
+  }
+
+  // Now fetch full order with updated discounts
   const{data:order,error:oErr}=await sb.from('orders')
-    .select('*,user_profiles(full_name,notification_email),client_groups(label),order_items(pn,description,unit_price,quantity)')
+    .select('*,user_profiles(full_name,notification_email),client_groups(label),order_items(pn,description,unit_price,quantity,additional_discount)')
     .eq('id',orderId).single();
   if(oErr){alert('Erro ao buscar pedido: '+oErr.message);return;}
 
