@@ -1771,7 +1771,7 @@ async function forwardOrder(orderId, destination){
   ];
   const subject=encodeURIComponent('Topcon Portal - Pedido '+order.reference+' para processamento ['+destination+']');
   const body=encodeURIComponent(bodyParts.join('\n'));
-  const mailtoLink='mailto:'+toEmail+'?subject='+subject+'&body='+body;
+  const mailtoLink='mailto:'+destEmail+'?subject='+subject+'&body='+body;
 
   // Update order status in DB
   const{error}=await sb.from('orders').update({
