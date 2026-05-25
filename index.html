@@ -706,12 +706,26 @@ async function afterLogin(){
     return;
   }
   cProfile=profile; cGroup=profile.client_groups;
-  const role = profile.role || (profile.is_admin ? 'admin' : 'client');
+  // Robust role detection
+  let detectedRole = profile.role;
+  if(!detectedRole || detectedRole === 'client'){
+    // Re-verify directly
+    const{data:rd}=await sb.from('user_profiles').select('role,is_admin').eq('id',cUser.id).single();
+    if(rd?.role) detectedRole=rd.role;
+    if(rd?.is_admin) profile.is_admin=rd.is_admin;
+  }
+  const role = detectedRole || (profile.is_admin ? 'admin' : 'client');
+
   if(role === 'admin' || profile.is_admin){
     showScreen('admin');
     const {data:g}=await sb.from('client_groups').select('*').order('label');
     clientGroups=g||[];
     renderAdminTab('orders');
+  } else if(role === 'salesops'){
+    showScreen('salesops');
+    const badge=document.getElementById('sops-dest-badge');
+    if(badge) badge.textContent='Sales Ops · '+(profile.full_name||'');
+    await renderSalesOpsBacklog();
   } else {
     document.getElementById('u-av').textContent=profile.full_name[0].toUpperCase();
     document.getElementById('u-nm').textContent=profile.full_name;
