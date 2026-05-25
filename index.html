@@ -3311,29 +3311,46 @@ async function downloadCatalogCSV(){
     .eq('active',true).order('seg').order('pn');
 
   const groups=['latam','mexico','agricien','tormex','kuhn'];
+  const priceKeys=['list_price','cost',
+    ...groups.flatMap(g=>[g+'_scheduled',g+'_spot'])];
   const headers=['seg','product','pn','description','list_price','cost',
-    ...groups.flatMap(g=>[`${g}_scheduled`,`${g}_spot`])];
+    ...groups.flatMap(g=>[g+'_scheduled',g+'_spot'])];
+
+  // PT-BR number format: dot→thousands, comma→decimal
+  const ptbr=v=>{
+    if(v===''||v===null||v===undefined) return '';
+    const n=Number(v);
+    if(isNaN(n)) return '';
+    // Format with 2 decimals, replace . with ,
+    return n.toFixed(2).replace('.',',');
+  };
 
   const rows=parts.map(p=>{
     const pm={};
     (p.part_prices||[]).forEach(pp=>{if(pp.client_groups)pm[pp.client_groups.slug]=pp;});
     return [
       p.seg, p.product||'', p.pn, p.description,
-      p.list_price||'', p.cost||'',
-      ...groups.flatMap(g=>[pm[g]?.scheduled_price||'', pm[g]?.spot_price||''])
+      ptbr(p.list_price), ptbr(p.cost),
+      ...groups.flatMap(g=>[ptbr(pm[g]?.scheduled_price), ptbr(pm[g]?.spot_price)])
     ];
   });
 
-  const csv=[headers,...rows].map(r=>r.map(v=>
-    String(v).includes(',')?`"${v}"`:v
-  ).join(',')).join('\n');
+  // Use ; as separator (PT-BR standard)
+  const csv=[headers,...rows].map(r=>r.map(v=>{
+    const s=String(v??'');
+    return s.includes(';')||s.includes('"')?'"'+s.replace(/"/g,'""')+'"':s;
+  }).join(';')).join('\n');
 
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  // BOM for Excel to detect UTF-8
+  const bom='\uFEFF';
+  const blob=new Blob([bom+csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=url; a.download=`topcon_catalog_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click(); URL.revokeObjectURL(url);
-  btn.textContent='⬇ Baixar CSV'; btn.disabled=false;
+  a.href=url;
+  a.download='topcon_catalog_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  btn.textContent='⬇ Baixar CSV';btn.disabled=false;
 }
 
 const fmt=v=>v==null?'—':'USD '+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
