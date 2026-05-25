@@ -1295,42 +1295,43 @@ async function confirmShipment(itemId, qtyOrdered){
 }
 
 async function renderCutoffsTab(el){
-  el.innerHTML='<h1 class="page-title" style="margin-bottom:4px">Cutoffs mensais</h1>'
-    +'<p class="page-sub">Defina o dia limite de embarque por grupo de cliente. Pedidos com disponibilidade após este dia provavelmente não embarcam no mês.</p>'
-    +'<div class="loader-page" id="cutoff-loader"><div class="loader-inner"><div class="lspin"></div></div></div>';
-
-  const ym=new Date().toISOString().slice(0,7);
-  const[groupsRes,cutoffsRes]=await Promise.all([
-    sb.from('client_groups').select('id,label,slug').order('label'),
-    sb.from('monthly_cutoffs').select('*').eq('year_month',ym)
+  el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div></div></div>';
+  const months=[];
+  for(let i=0;i<3;i++){const d=new Date();d.setMonth(d.getMonth()+i);months.push(d.toISOString().slice(0,7));}
+  const[clientsRes,cutoffsRes]=await Promise.all([
+    sb.from('user_profiles').select('id,full_name,client_groups(label)').eq('is_admin',false).eq('active',true).order('full_name'),
+    sb.from('monthly_cutoffs').select('*').in('year_month',months)
   ]);
-  const groups=groupsRes.data||[];
-  const cutoffMap={};(cutoffsRes.data||[]).forEach(c=>cutoffMap[c.group_id]=c.cutoff_day);
-  document.getElementById('cutoff-loader').style.display='none';
-
-  el.innerHTML='<h1 class="page-title" style="margin-bottom:4px">Cutoffs mensais — '+ym+'</h1>'
-    +'<p class="page-sub">Dia do mês a partir do qual não há tempo hábil para embarque.</p>'
-    +'<div style="border-radius:var(--r-md);border:1px solid var(--border);overflow:hidden">'
-    +'<table class="dtbl" style="font-size:13px"><thead><tr><th>Grupo</th><th>Cutoff — '+ym+' (dia do mês)</th><th></th></tr></thead><tbody>'
-    +groups.map(g=>'<tr>'
-      +'<td style="font-weight:500">'+g.label+'</td>'
-      +'<td><div style="display:flex;align-items:center;gap:8px">'
-      +'<input type="number" id="cutoff-'+g.id+'" min="1" max="31" value="'+(cutoffMap[g.id]||'')+'" placeholder="Ex: 20"'
-      +' style="width:80px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px"/>'
-      +'<span style="font-size:12px;color:var(--tm)">de cada mês</span>'
-      +'</div></td>'
-      +'<td><button class="btn btn-primary btn-sm" onclick="saveCutoff(\''+g.id+'\',\''+ym+'\')">Salvar</button></td>'
+  const clients=clientsRes.data||[];
+  const cutoffMap={};
+  (cutoffsRes.data||[]).forEach(r=>{if(!cutoffMap[r.user_id])cutoffMap[r.user_id]={};cutoffMap[r.user_id][r.year_month]=r.cutoff_day;});
+  el.innerHTML='<h1 class="page-title" style="margin-bottom:4px">Cutoffs mensais</h1>'
+    +'<p class="page-sub" style="margin-bottom:14px">Dia limite de embarque por cliente (próximos 3 meses).</p>'
+    +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
+    +'<table class="dtbl" style="font-size:13px"><thead><tr>'
+    +'<th>Cliente</th><th style="color:var(--tm)">Grupo</th>'
+    +months.map(m=>'<th style="text-align:center">📅 '+m+'</th>').join('')
+    +'</tr></thead><tbody>'
+    +clients.map(cl=>'<tr>'
+      +'<td style="font-weight:500">'+cl.full_name+'</td>'
+      +'<td style="font-size:11px;color:var(--tm)">'+(cl.client_groups?.label||'—')+'</td>'
+      +months.map(m=>'<td style="text-align:center"><div style="display:flex;align-items:center;justify-content:center;gap:5px">'
+        +'<input type="number" id="co-'+cl.id+'-'+m+'" min="1" max="31" value="'+(cutoffMap[cl.id]?.[m]||'')+'" placeholder="dia"'
+        +' style="width:58px;padding:5px 6px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;text-align:center"/>'
+        +'<button id="co-btn-'+cl.id+'-'+m+'" onclick="saveCutoff(this.dataset.u,this.dataset.m)" data-u="'+cl.id+'" data-m="'+m+'" style="background:var(--blue);color:#fff;border:none;border-radius:5px;padding:4px 8px;font-size:11px;font-weight:600;cursor:pointer">✓</button>'
+        +'</div></td>').join('')
       +'</tr>').join('')
     +'</tbody></table></div>';
 }
 
-async function saveCutoff(groupId, ym){
-  const day=parseInt(document.getElementById('cutoff-'+groupId)?.value||0);
+async function saveCutoff(userId,ym,btnEl){
+  if(!userId&&btnEl){userId=btnEl.dataset?.u;ym=btnEl.dataset?.m;}
+  const day=parseInt(document.getElementById('co-'+userId+'-'+ym)?.value||0);
   if(!day||day<1||day>31){alert('Informe um dia válido (1-31).');return;}
-  const{error}=await sb.from('monthly_cutoffs').upsert({group_id:groupId,year_month:ym,cutoff_day:day},{onConflict:'group_id,year_month'});
+  const{error}=await sb.from('monthly_cutoffs').upsert({user_id:userId,year_month:ym,cutoff_day:day},{onConflict:'user_id,year_month'});
   if(error){alert('Erro: '+error.message);return;}
-  const btn=event.target;btn.textContent='✓ Salvo';btn.style.background='#3A8C4C';
-  setTimeout(()=>{btn.textContent='Salvar';btn.style.background='';},2000);
+  const inp=document.getElementById('co-'+userId+'-'+ym);
+  if(inp){inp.style.borderColor='#3A8C4C';setTimeout(()=>inp.style.borderColor='',1500);}
 }
 
 async function doLogout(){
