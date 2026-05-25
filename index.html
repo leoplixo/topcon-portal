@@ -1081,16 +1081,26 @@ function renderBacklogGrid(el, items, isAdmin){
     +'</div>'
     // KPI row
     +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px">'
-    +[
-      {icon:'📦',label:'Linhas abertas',val:totalOpen,color:'var(--blue)',kpi:'open'},
-      {icon:'💰',label:'Valor em aberto',val:fmt(totalValue),color:'var(--t1)',kpi:'value'},
-      {icon:'✅',label:'Embarca no mês',val:willShip,color:'#166534',kpi:'ship'},
-      {icon:'💵',label:'Faturamento previsto',val:fmt(willShipValue),color:'#166534',kpi:'forecast'},
-    ].map(k=>'<div class="dash-card" style="padding:14px;margin-bottom:0">'
-      +'<div style="font-size:18px;margin-bottom:4px">'+k.icon+'</div>'
-      +'<p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">'+k.label+'</p>'
-      +'<p data-kpi="'+k.kpi+'" style="font-size:18px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
-      +'</div>').join('')
+    +(()=>{
+      const openItems=filtered.filter(i=>i.classification!=='Shipped');
+      const shippedItems=filtered.filter(i=>i.classification==='Shipped');
+      const forecastItems=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped');
+      const openVal=openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+      const shippedVal=shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
+      const forecastVal=forecastItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+      return [
+        {icon:'📋',label:'Em aberto',count:openItems.length,val:fmt(openVal),color:'var(--blue)',kpi:'open',kpiv:'value'},
+        {icon:'🎯',label:'Previsto embarcar',count:forecastItems.length,val:fmt(forecastVal),color:'#D97706',kpi:'ship',kpiv:'forecast'},
+        {icon:'✅',label:'Já embarcado',count:shippedItems.length,val:fmt(shippedVal),color:'#166534',kpi:'shipped',kpiv:'shippedval'},
+      ].map(k=>'<div class="dash-card" style="padding:14px;margin-bottom:0;border-left:3px solid '+k.color+'">'
+        +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+        +'<div style="font-size:18px">'+k.icon+'</div>'
+        +'<span data-kpi="'+k.kpi+'" style="font-size:24px;font-weight:800;color:'+k.color+'">'+k.count+'</span>'
+        +'</div>'
+        +'<p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin:6px 0 3px">'+k.label+'</p>'
+        +'<p data-kpi="'+k.kpiv+'" style="font-size:14px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
+        +'</div>');
+    })().join('')
     +'</div>'
     // Filters
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:var(--r-md)">'
@@ -1149,7 +1159,7 @@ function renderBacklogGrid(el, items, isAdmin){
         +'<option value="false"'+(item.will_ship_month===false?' selected':'')+'>❌ Não</option>'
         +'</select></td>':'')
         +'<td style="padding:7px 10px">'
-        +'<select onchange="updateBacklogField(\''+item.id+'\',\'classification\',this.value)" style="padding:3px 5px;border:1px solid '+clsBg+';background:'+clsBg+';color:'+clsTxt+';border-radius:5px;font-size:10px;font-family:inherit;font-weight:600;max-width:130px">'
+        +'<select data-prev-cls="'+item.classification+'" onchange="onClassificationChange(\''+item.id+'\',this.value,this.dataset.prevCls,this)" style="padding:3px 5px;border:1px solid '+clsBg+';background:'+clsBg+';color:'+clsTxt+';border-radius:5px;font-size:10px;font-family:inherit;font-weight:600;max-width:130px">'
         +CLASSIFICATIONS.map(cl=>'<option value="'+cl+'"'+(item.classification===cl?' selected':'')+' style="background:#fff;color:#000">'+cl+'</option>').join('')
         +'</select></td>'
         +'<td style="padding:5px 8px;max-width:150px">'
@@ -1236,9 +1246,8 @@ function exportBacklogCSV(){
 
 function refreshBacklogKPIs(){
   const items=window._backlogItems||[];
-  // Apply current filters
-  let filtered=items.filter(item=>{
-    const f=backlogFilters;
+  const f=backlogFilters;
+  const filtered=items.filter(item=>{
     if(f.client&&!item.client_name.toLowerCase().includes(f.client.toLowerCase()))return false;
     if(f.pn&&!item.pn.toLowerCase().includes(f.pn.toLowerCase())&&!item.description?.toLowerCase().includes(f.pn.toLowerCase()))return false;
     if(f.classification&&item.classification!==f.classification)return false;
@@ -1247,24 +1256,20 @@ function refreshBacklogKPIs(){
     if(f.shipMonth==='no'&&item.will_ship_month!==false)return false;
     return true;
   });
-  const totalOpen=filtered.filter(i=>i.classification!=='Shipped').length;
-  const totalValue=filtered.reduce((s,i)=>{
-    const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
-    return s+open*Number(i.unit_price||0);
-  },0);
-  const willShip=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped').length;
-  const willShipValue=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped').reduce((s,i)=>{
-    const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
-    return s+open*Number(i.unit_price||0);
-  },0);
-  // Update DOM directly
-  const kpiEls=document.querySelectorAll('[data-kpi]');
-  kpiEls.forEach(el=>{
+  const openItems=filtered.filter(i=>i.classification!=='Shipped');
+  const shippedItems=filtered.filter(i=>i.classification==='Shipped');
+  const forecastItems=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped');
+  const openVal=openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+  const shippedVal=shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
+  const forecastVal=forecastItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+  document.querySelectorAll('[data-kpi]').forEach(el=>{
     const k=el.dataset.kpi;
-    if(k==='open') el.textContent=totalOpen;
-    if(k==='value') el.textContent=fmt(totalValue);
-    if(k==='ship') el.textContent=willShip;
-    if(k==='forecast') el.textContent=fmt(willShipValue);
+    if(k==='open') el.textContent=openItems.length;
+    if(k==='value') el.textContent=fmt(openVal);
+    if(k==='ship') el.textContent=forecastItems.length;
+    if(k==='forecast') el.textContent=fmt(forecastVal);
+    if(k==='shipped') el.textContent=shippedItems.length;
+    if(k==='shippedval') el.textContent=fmt(shippedVal);
   });
 }
 
@@ -1343,6 +1348,53 @@ function openShipModal(itemId, qtyOrdered, qtyShipped){
   modal.addEventListener('click',e=>{if(e.target===modal)modal.style.display='none';});
 }
 
+async function onClassificationChange(itemId, newCls, oldCls, selectEl){
+  // If moving FROM Shipped to something else, ask about reverting
+  if(oldCls==='Shipped' && newCls!=='Shipped'){
+    const item=window._backlogItems?.find(i=>i.id===itemId);
+    const shipped=Number(item?.qty_shipped||0);
+    if(shipped>0){
+      // Show reversal confirmation modal
+      const modal=document.getElementById('bl-ship-modal');
+      if(modal){
+        modal.style.display='flex';
+        modal.innerHTML='<div style="background:#fff;border-radius:16px;width:90%;max-width:400px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
+          +'<h3 style="font-size:16px;font-weight:700;margin-bottom:10px">⚠️ Reverter embarque?</h3>'
+          +'<p style="font-size:13px;color:var(--t1);margin-bottom:6px">Este item tem <strong>'+shipped+' unidades</strong> registradas como embarcadas.</p>'
+          +'<p style="font-size:13px;color:var(--tm);margin-bottom:18px">Deseja reverter o embarque e devolver essas unidades para o saldo em aberto?</p>'
+          +'<div style="display:flex;gap:10px">'
+          +'<button id="revert-yes" style="flex:1;background:#C0392B;color:#fff;border:none;border-radius:var(--r-md);padding:10px;font-size:13px;font-weight:600;cursor:pointer">✓ Sim, reverter embarque</button>'
+          +'<button id="revert-no" style="flex:1;background:var(--g100);color:var(--t2);border:none;border-radius:var(--r-md);padding:10px;font-size:13px;cursor:pointer">Não, só reclassificar</button>'
+          +'</div></div>';
+        modal.addEventListener('click',e=>{if(e.target===modal){modal.style.display='none';selectEl.value=oldCls;}},{ once:true });
+        document.getElementById('revert-yes').onclick=async()=>{
+          // Delete all shipments and reset qty_shipped
+          await sb.from('backlog_shipments').delete().eq('backlog_item_id',itemId);
+          await sb.from('backlog_items').update({qty_shipped:0,classification:newCls,updated_at:new Date().toISOString(),updated_by:cProfile?.full_name||'Admin'}).eq('id',itemId);
+          const item=window._backlogItems?.find(i=>i.id===itemId);
+          if(item){item.qty_shipped=0;item.classification=newCls;item.backlog_shipments=[];}
+          if(selectEl) selectEl.dataset.prevCls=newCls;
+          modal.style.display='none';
+          refreshBacklogKPIs();
+          // Update the row's open quantity display
+          const isAdmin=cProfile?.is_admin||false;
+          const el=document.getElementById(isAdmin?'admin-content':'salesops-content');
+          if(el&&window._backlogItems) renderBacklogGrid(el,window._backlogItems,isAdmin);
+        };
+        document.getElementById('revert-no').onclick=async()=>{
+          await updateBacklogField(itemId,'classification',newCls);
+          if(selectEl) selectEl.dataset.prevCls=newCls;
+          modal.style.display='none';
+        };
+        return;
+      }
+    }
+  }
+  // Normal classification change
+  await updateBacklogField(itemId,'classification',newCls);
+  if(selectEl) selectEl.dataset.prevCls=newCls;
+}
+
 async function confirmShipment(itemId, qtyOrdered){
   const qty=parseFloat(document.getElementById('ship-qty')?.value||0);
   const date=document.getElementById('ship-date')?.value;
@@ -1369,6 +1421,9 @@ async function confirmShipment(itemId, qtyOrdered){
     updated_at:new Date().toISOString(),
     updated_by:cProfile?.full_name||'Admin'
   }).eq('id',itemId);
+  // Update select data-prev-cls if visible
+  const clsSelect=document.querySelector('[data-prev-cls][onchange*="'+itemId+'"]');
+  if(clsSelect) clsSelect.dataset.prevCls=newCls;
 
   // Update local cache
   if(item){
