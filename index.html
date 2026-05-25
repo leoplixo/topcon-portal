@@ -1643,7 +1643,7 @@ async function renderCutoffsTab(el){
   if(pw) pw.style.maxWidth='1060px';
   el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div></div></div>';
   const[clientsRes,cutoffsRes]=await Promise.all([
-    sb.from('user_profiles').select('id,full_name,client_groups(label)').eq('is_admin',false).eq('active',true).order('full_name'),
+    sb.from('user_profiles').select('id,full_name,client_groups(label)').eq('is_admin',false).eq('active',true).neq('role','salesops').order('full_name'),
     sb.from('monthly_cutoffs').select('*')
   ]);
   const clients=clientsRes.data||[];
@@ -1763,7 +1763,7 @@ function renderCatalog(){
     const inCart=cart[p.pn]||0;
     return `<div class="part-card ${inCart?'in-cart':''}">
       <div class="part-top">
-        <span class="badge badge-${p.seg.toLowerCase()}">${p.seg}</span>
+        <span class="badge badge-${p.seg==='SW-OAF'?'swoaf':p.seg.toLowerCase()}">${p.seg}</span>
         ${inCart?`<span class="in-cart-tag">${inCart}× no orçamento</span>`:''}
       </div>
       <p class="part-pn">${p.pn}</p>
@@ -2233,6 +2233,7 @@ async function renderAdminTab(tab){
           <select id="new-seg" style="width:100%;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit">
             <option value="AG">AG · Agriculture</option>
             <option value="FD">FD · Feed</option>
+            <option value="SW-OAF">SW-OAF</option>
           </select></div>
         <div><label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Part Number *</label>
           <input id="new-pn" placeholder="ex: 1036805-01" style="width:100%;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:'JetBrains Mono',monospace"/></div>
@@ -2282,7 +2283,7 @@ async function renderAdminTab(tab){
         const mc=mg>45?'#166534':'#A16207';
         const priceMap=buildPriceMap(p);
         return `<tr id="row-${p.id}">
-          <td><span class="badge badge-${p.seg.toLowerCase()}">${p.seg}</span></td>
+          <td><span class="badge badge-${p.seg==='SW-OAF'?'swoaf':p.seg.toLowerCase()}">${p.seg}</span></td>
           <td style="font-family:'JetBrains Mono',monospace;font-size:10px">${p.pn}</td>
           <td style="font-size:12px;color:var(--tm)">${p.product||'—'}</td>
           <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.description}</td>
@@ -2300,6 +2301,7 @@ async function renderAdminTab(tab){
                 <select id="e-seg-${p.id}" style="width:100%;padding:6px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit">
                   <option value="AG" ${p.seg==='AG'?'selected':''}>AG</option>
                   <option value="FD" ${p.seg==='FD'?'selected':''}>FD</option>
+                  <option value="SW-OAF" ${p.seg==='SW-OAF'?'selected':''}>SW-OAF</option>
                 </select></div>
               <div><label style="font-size:10px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Produto</label>
                 <input id="e-prod-${p.id}" value="${(p.product||'').replace(/"/g,'&quot;')}" style="width:100%;padding:6px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"/></div>
@@ -2491,7 +2493,7 @@ async function renderAdminTab(tab){
     el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Clientes</h1><div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>`;
     const year=new Date().getFullYear();
     const[clientsRes,targetsRes]=await Promise.all([
-      sb.from('user_profiles').select('*,client_groups(label,segment)').eq('is_admin',false).order('full_name'),
+      sb.from('user_profiles').select('*,client_groups(label,segment)').eq('is_admin',false).neq('role','salesops').order('full_name'),
       sb.from('targets').select('user_id,target_usd').eq('year',year)
     ]);
     const clients=clientsRes.data||[];
@@ -3164,6 +3166,28 @@ async function saveClientTarget(userId, year){
 
 // ── Catalog edit functions ────────────────────────────────────
 let _catalogSegFilter='ALL';
+let _swoafNoticeShown=false;
+
+function showSWOAFNotice(){
+  if(_swoafNoticeShown) return;
+  _swoafNoticeShown=true;
+  const modal=document.createElement('div');
+  modal.id='swoaf-modal';modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.6);z-index:99999;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML='<div style="background:#fff;border-radius:16px;padding:28px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
+    +'<div style="text-align:center;margin-bottom:16px">'
+    +'<div style="font-size:40px;margin-bottom:8px">ℹ️</div>'
+    +'<h3 style="font-size:17px;font-weight:700;color:#001423;margin-bottom:8px">Itens SW-OAF — Aviso Importante</h3>'
+    +'<p style="font-size:14px;color:#4B4B4B;line-height:1.6;margin-bottom:8px">'
+    +'Este portal é recomendado apenas para <strong>consulta de preço</strong> dos itens SW-OAF.</p>'
+    +'<p style="font-size:14px;color:#C0392B;font-weight:600;line-height:1.6">'
+    +'A compra destes itens deve ser realizada exclusivamente através do portal <strong>TAP</strong>.</p>'
+    +'</div>'
+    +'<button onclick="document.getElementById(\'swoaf-modal\').remove()" '
+    +'style="width:100%;background:var(--blue);color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px">Entendido</button>'
+    +'</div>';
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{if(e.target===modal){modal.remove();}});
+}
 
 function filterCatalogTable(q){
   const search=(q||'').toLowerCase();
