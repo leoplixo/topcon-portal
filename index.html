@@ -447,7 +447,7 @@ const TRANSLATIONS={
     spotOnly:'Apenas SPOT disponível.',
     missingAmount:'para atingir o mínimo.',
     nextWindow:'Próxima janela', annualGoal:'META ANUAL FY2026',
-    bought:'Comprado (FY26)', minimum:'Mínimo 75%', accGoal:'Objetivo acumulado',
+    bought:'Comprado (FY26)', minimum:'Mínimo 75%', accGoal:'Objetivo acumulado', accProgress:'PROGRESO ACUMULADO', accProgress:'PROGRESSO ACUMULADO',
     orderHistory:'Histórico de pedidos FY2026', noOrders:'Nenhum pedido registrado no FY2026',
     windows:'Janelas de programação FY2026', windowNote:'Durante a janela todos têm acesso ao preço programado.',
     hello:'Olá,',
@@ -479,7 +479,7 @@ const TRANSLATIONS={
     spotOnly:'Solo SPOT disponible.',
     missingAmount:'para alcanzar el mínimo.',
     nextWindow:'Próxima ventana', annualGoal:'META ANUAL FY2026',
-    bought:'Comprado (FY26)', minimum:'Mínimo 75%', accGoal:'Objetivo acumulado',
+    bought:'Comprado (FY26)', minimum:'Mínimo 75%', accGoal:'Objetivo acumulado', accProgress:'PROGRESO ACUMULADO', accProgress:'PROGRESSO ACUMULADO',
     orderHistory:'Historial de pedidos FY2026', noOrders:'Ningún pedido registrado en FY2026',
     windows:'Ventanas de programación FY2026', windowNote:'Durante la ventana todos tienen acceso al precio programado.',
     hello:'Hola,',
@@ -511,7 +511,7 @@ const TRANSLATIONS={
     spotOnly:'SPOT pricing only.',
     missingAmount:'to reach the minimum.',
     nextWindow:'Next window', annualGoal:'ANNUAL GOAL FY2026',
-    bought:'Purchased (FY26)', minimum:'Minimum 75%', accGoal:'Accumulated target',
+    bought:'Purchased (FY26)', minimum:'Minimum 75%', accGoal:'Accumulated target', accProgress:'ACCUMULATED PROGRESS',
     orderHistory:'Order history FY2026', noOrders:'No orders recorded in FY2026',
     windows:'FY2026 programming windows', windowNote:'During the window all have access to scheduled pricing.',
     hello:'Hello,',
@@ -548,6 +548,7 @@ const TX={
     deliveryMonth:'{month}',
     pending:'pendente',confirmed:'confirmado',shipped:'enviado',cancelled:'cancelado',forwarded:'aprovado e enviado',
     spotBlock:'⚠️ Pedido bloqueado em preço Scheduled.\n\nVocê atingiu {pct}% do objetivo acumulado (mínimo 75%).\n\nEste pedido será enviado com preço SPOT.',
+    months:'{n} meses',windowGoal:'objetivo janela',boughtLabel:'comprado',goalLabel:'Meta:',
   },
   es:{
     spotOnly:'⚠️ <strong>Solo SPOT disponible.</strong>',
@@ -577,6 +578,7 @@ const TX={
     deliveryMonth:'{month}',
     pending:'pendiente',confirmed:'confirmado',shipped:'enviado',cancelled:'cancelado',forwarded:'aprobado y enviado',
     spotBlock:'⚠️ Pedido bloqueado en precio Programado.\n\nHa alcanzado {pct}% del objetivo acumulado (mínimo 75%).\n\nEste pedido se procesará con precio SPOT.',
+    months:'{n} meses',windowGoal:'objetivo ventana',boughtLabel:'comprado',goalLabel:'Meta:',
   },
   en:{
     spotOnly:'⚠️ <strong>SPOT pricing only.</strong>',
@@ -606,6 +608,7 @@ const TX={
     deliveryMonth:'{month}',
     pending:'pending',confirmed:'confirmed',shipped:'shipped',cancelled:'cancelled',forwarded:'approved & sent',
     spotBlock:'⚠️ Order blocked at Scheduled price.\n\nYou have reached {pct}% of accumulated target (minimum 75%).\n\nThis order will be processed at SPOT price.',
+    months:'{n} months',windowGoal:'window target',boughtLabel:'purchased',goalLabel:'Target:',
   }
 };
 const tx=(key,vars={})=>{
@@ -621,10 +624,11 @@ function setLang(lang){
   updateLangButtons();
   applyLangToStatic();
   // Re-render current dynamic view
-  if(document.getElementById('screen-client')?.classList.contains('active')){
+  const screenClient=document.getElementById('screen-client');
+  if(screenClient&&screenClient.style.display!=='none'){
+    const vD=document.getElementById('view-dashboard');
     const vCat=document.getElementById('view-catalog');
     const vQ=document.getElementById('view-quote');
-    const vD=document.getElementById('view-dashboard');
     if(vD&&vD.style.display!=='none') renderDashboard();
     else if(vCat&&vCat.style.display!=='none') renderCatalog();
     else if(vQ&&vQ.style.display!=='none') renderQuote();
@@ -944,7 +948,7 @@ async function renderDashboard(){
           <p style="font-size:12px;color:var(--tm);margin-top:2px">
             Enviado: ${new Date(o.created_at).toLocaleDateString('pt-BR')} · 
             Entrega solicitada: <strong>${delivStr}</strong> · 
-            ${o.order_items?.length||0} item(s) · 
+            ${tx('nItems',{n:o.order_items?.length||0})} · 
             <span style="background:${o.price_type==='scheduled'?'#E6F1FB':'#FEF3C7'};color:${o.price_type==='scheduled'?'var(--blue)':'#92400E'};padding:1px 6px;border-radius:8px;font-size:11px;font-weight:600">${o.price_type==='scheduled'?'Scheduled':'SPOT'}</span>
             · <span style="font-size:11px;color:#166534;font-weight:600">${o.status||'pending'}</span>
           </p>
