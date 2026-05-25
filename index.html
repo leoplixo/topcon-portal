@@ -517,6 +517,102 @@ const TRANSLATIONS={
     hello:'Hello,',
   }
 };
+
+// Extended translations for dynamic content
+const TX={
+  pt:{
+    spotOnly:'⚠️ <strong>Apenas SPOT disponível.</strong>',
+    spotOnlyDetail:'Você atingiu {pct}% do objetivo acumulado (mínimo 75%). Pedidos fora da janela de programação serão processados com preço SPOT.',
+    spotMissing:'Faltam <strong>{amt}</strong> para atingir o mínimo.',
+    scheduledActive:'✅ <strong>Preço Programado ativo</strong>',
+    scheduledActivePct:'{pct}% do objetivo acumulado atingido.',
+    windowOpen:'🔓 <strong>{name} aberta</strong> — Preço Programado disponível para todos durante este período.',
+    windowOpenQuote:'🔓 <strong>{name} aberta</strong> — Preço Programado disponível.',
+    spotQuoteWarning:'⚠️ <strong>Atenção:</strong> Fora da janela de programação e abaixo de 75% do objetivo. Pedidos Scheduled serão bloqueados — use preço <strong>SPOT</strong>.',
+    goalNotSet:'Meta não configurada',
+    goalNotSetMsg:'Entre em contato com sua equipe Topcon para configurar sua meta.',
+    scheduledStatus:'Preço Programado ativo',
+    spotStatus:'Preço Spot aplicado',
+    notConfigured:'Configure sua meta',
+    windowOpenStatus:'aberta até',
+    accProgress:'Progresso acumulado — FY2026',
+    closedWindows:'{n} janela(s) fechada(s)',
+    windowsTitle:'Janelas de programação FY2026',
+    windowObjective:'{n} meses · objetivo janela',
+    annualProgress:'Meta anual FY2026',
+    myOrdersTimeline:'Meus pedidos — Timeline FY2026',
+    noDeliveryDate:'Sem data de entrega definida ({n} pedido(s)):',
+    sentOn:'Enviado:',
+    deliveryReq:'Entrega solicitada:',
+    nItems:'{n} item(s)',
+    deliveryMonth:'{month}',
+    pending:'pendente',confirmed:'confirmado',shipped:'enviado',cancelled:'cancelado',forwarded:'aprovado e enviado',
+    spotBlock:'⚠️ Pedido bloqueado em preço Scheduled.\n\nVocê atingiu {pct}% do objetivo acumulado (mínimo 75%).\n\nEste pedido será enviado com preço SPOT.',
+  },
+  es:{
+    spotOnly:'⚠️ <strong>Solo SPOT disponible.</strong>',
+    spotOnlyDetail:'Ha alcanzado {pct}% del objetivo acumulado (mínimo 75%). Los pedidos fuera de la ventana de programación se procesarán con precio SPOT.',
+    spotMissing:'Faltan <strong>{amt}</strong> para alcanzar el mínimo.',
+    scheduledActive:'✅ <strong>Precio Programado activo</strong>',
+    scheduledActivePct:'{pct}% del objetivo acumulado alcanzado.',
+    windowOpen:'🔓 <strong>{name} abierta</strong> — Precio Programado disponible para todos durante este período.',
+    windowOpenQuote:'🔓 <strong>{name} abierta</strong> — Precio Programado disponible.',
+    spotQuoteWarning:'⚠️ <strong>Atención:</strong> Fuera de la ventana de programación y por debajo del 75% del objetivo. Los pedidos Programados serán bloqueados — use precio <strong>SPOT</strong>.',
+    goalNotSet:'Meta no configurada',
+    goalNotSetMsg:'Contacte a su equipo Topcon para configurar su meta.',
+    scheduledStatus:'Precio Programado activo',
+    spotStatus:'Precio Spot aplicado',
+    notConfigured:'Configure su meta',
+    windowOpenStatus:'abierta hasta',
+    accProgress:'Progreso acumulado — FY2026',
+    closedWindows:'{n} ventana(s) cerrada(s)',
+    windowsTitle:'Ventanas de programación FY2026',
+    windowObjective:'{n} meses · objetivo ventana',
+    annualProgress:'Meta anual FY2026',
+    myOrdersTimeline:'Mis pedidos — Timeline FY2026',
+    noDeliveryDate:'Sin fecha de entrega definida ({n} pedido(s)):',
+    sentOn:'Enviado:',
+    deliveryReq:'Entrega solicitada:',
+    nItems:'{n} artículo(s)',
+    deliveryMonth:'{month}',
+    pending:'pendiente',confirmed:'confirmado',shipped:'enviado',cancelled:'cancelado',forwarded:'aprobado y enviado',
+    spotBlock:'⚠️ Pedido bloqueado en precio Programado.\n\nHa alcanzado {pct}% del objetivo acumulado (mínimo 75%).\n\nEste pedido se procesará con precio SPOT.',
+  },
+  en:{
+    spotOnly:'⚠️ <strong>SPOT pricing only.</strong>',
+    spotOnlyDetail:'You have reached {pct}% of the accumulated target (minimum 75%). Orders outside the programming window will be processed at SPOT price.',
+    spotMissing:'<strong>{amt}</strong> still needed to reach the minimum.',
+    scheduledActive:'✅ <strong>Scheduled price active</strong>',
+    scheduledActivePct:'{pct}% of accumulated target reached.',
+    windowOpen:'🔓 <strong>{name} open</strong> — Scheduled price available for everyone during this period.',
+    windowOpenQuote:'🔓 <strong>{name} open</strong> — Scheduled price available.',
+    spotQuoteWarning:'⚠️ <strong>Note:</strong> Outside the programming window and below 75% of target. Scheduled orders will be blocked — use <strong>SPOT</strong> price.',
+    goalNotSet:'Annual target not set',
+    goalNotSetMsg:'Contact your Topcon team to set up your target.',
+    scheduledStatus:'Scheduled price active',
+    spotStatus:'SPOT price applied',
+    notConfigured:'Set up your target',
+    windowOpenStatus:'open until',
+    accProgress:'Accumulated progress — FY2026',
+    closedWindows:'{n} window(s) closed',
+    windowsTitle:'FY2026 Programming Windows',
+    windowObjective:'{n} months · window target',
+    annualProgress:'Annual target FY2026',
+    myOrdersTimeline:'My orders — FY2026 Timeline',
+    noDeliveryDate:'No delivery date defined ({n} order(s)):',
+    sentOn:'Sent:',
+    deliveryReq:'Requested delivery:',
+    nItems:'{n} item(s)',
+    deliveryMonth:'{month}',
+    pending:'pending',confirmed:'confirmed',shipped:'shipped',cancelled:'cancelled',forwarded:'approved & sent',
+    spotBlock:'⚠️ Order blocked at Scheduled price.\n\nYou have reached {pct}% of accumulated target (minimum 75%).\n\nThis order will be processed at SPOT price.',
+  }
+};
+const tx=(key,vars={})=>{
+  let s=(TX[LANG]||TX.pt)[key]||(TX.pt[key]||key);
+  Object.entries(vars).forEach(([k,v])=>s=s.replace(new RegExp('{'+k+'}','g'),v));
+  return s;
+};
 const t=key=>TRANSLATIONS[LANG]?.[key]||TRANSLATIONS.pt[key]||key;
 
 function setLang(lang){
@@ -961,13 +1057,15 @@ function renderCatalog(){
       banner.innerHTML='<div style="padding:10px 16px;background:#E6F1FB;border:1px solid var(--blue-200);border-radius:var(--r-md);font-size:13px;color:var(--blue-dark);display:flex;align-items:center;gap:8px">🔓 <strong>'+clientEligibility.windowName+' aberta</strong> — Preço Scheduled disponível para todos durante este período.</div>';
     } else if(!clientEligibility.eligible){
       banner.style.display='block';
-      banner.innerHTML='<div style="padding:10px 16px;background:#FEF3C7;border:1px solid #FAC775;border-radius:var(--r-md);font-size:13px;color:#92400E">⚠️ <strong>Apenas SPOT disponível.</strong> Você atingiu '+
-        (clientEligibility.accTarget>0?(clientEligibility.purchased/clientEligibility.accTarget*100).toFixed(0):'0')+'% do objetivo acumulado (mínimo 75%). '+
-        'Pedidos fora da janela de programação serão processados com preço SPOT. Faltam <strong>'+fmt(Math.max(0,clientEligibility.minThreshold-clientEligibility.purchased))+'</strong> para atingir o mínimo.</div>';
+      const _pct=(clientEligibility.accTarget>0?(clientEligibility.purchased/clientEligibility.accTarget*100).toFixed(0):'0');
+      const _miss=fmt(Math.max(0,clientEligibility.minThreshold-clientEligibility.purchased));
+      banner.innerHTML='<div style="padding:10px 16px;background:#FEF3C7;border:1px solid #FAC775;border-radius:var(--r-md);font-size:13px;color:#92400E">'+
+        tx('spotOnly')+' '+tx('spotOnlyDetail',{pct:_pct})+' '+tx('spotMissing',{amt:_miss})+'</div>';
     } else {
       banner.style.display='block';
-      banner.innerHTML='<div style="padding:10px 16px;background:#E8F5EC;border:1px solid #B8DCBF;border-radius:var(--r-md);font-size:13px;color:#166534;display:flex;align-items:center;gap:8px">✅ <strong>Preço Scheduled ativo</strong> — '+
-        (clientEligibility.accTarget>0?(clientEligibility.purchased/clientEligibility.accTarget*100).toFixed(0)+'% do objetivo acumulado atingido':'Aguardando início do ciclo')+'.</div>';
+      const _pctOk=clientEligibility.accTarget>0?(clientEligibility.purchased/clientEligibility.accTarget*100).toFixed(0):null;
+      banner.innerHTML='<div style="padding:10px 16px;background:#E8F5EC;border:1px solid #B8DCBF;border-radius:var(--r-md);font-size:13px;color:#166534">'+
+        tx('scheduledActive')+(_pctOk?' — '+tx('scheduledActivePct',{pct:_pctOk}):'')+'</div>';
     }
   }
   const q=(document.getElementById('cat-search')?.value||'').toLowerCase();
@@ -1065,10 +1163,10 @@ function goQuote(){
   if(noteEl&&clientEligibility){
     if(clientEligibility.inWindow){
       noteEl.style.display='block';
-      noteEl.innerHTML='<div style="padding:10px 16px;background:#E6F1FB;border:1px solid var(--blue-200);border-radius:var(--r-md);font-size:13px;color:var(--blue-dark)">🔓 <strong>'+clientEligibility.windowName+' aberta</strong> — Preço Scheduled disponível.</div>';
+      noteEl.innerHTML='<div style="padding:10px 16px;background:#E6F1FB;border:1px solid var(--blue-200);border-radius:var(--r-md);font-size:13px;color:var(--blue-dark)">'+tx('windowOpenQuote',{name:clientEligibility.windowName})+'</div>';
     } else if(!clientEligibility.eligible){
       noteEl.style.display='block';
-      noteEl.innerHTML='<div style="padding:10px 16px;background:#FEF3C7;border:1px solid #FAC775;border-radius:var(--r-md);font-size:13px;color:#92400E">⚠️ <strong>Atenção:</strong> Fora da janela de programação e abaixo de 75% do objetivo. Pedidos Scheduled serão bloqueados — use preço <strong>SPOT</strong>.</div>';
+      noteEl.innerHTML='<div style="padding:10px 16px;background:#FEF3C7;border:1px solid #FAC775;border-radius:var(--r-md);font-size:13px;color:#92400E">'+tx('spotQuoteWarning')+'</div>';
       // Auto-switch to SPOT
       setTimeout(()=>{const b=document.querySelector('#pt-tog-q .tog-btn:last-child');if(b&&priceType!=='spot')b.click();},100);
     } else {
@@ -1147,7 +1245,7 @@ async function sendOrder(){
     const el=clientEligibility||await checkClientEligibility();
     if(!el.eligible&&!el.inWindow){
       const pct=el.accTarget>0?(el.purchased/el.accTarget*100).toFixed(0):0;
-      alert('⚠️ Pedido bloqueado em preço Scheduled.\n\nVocê atingiu '+pct+'% do objetivo acumulado (mínimo 75%).\n\nEste pedido será enviado com preço SPOT ou aguarde a próxima janela de programação para ter acesso ao preço Scheduled.');
+      alert(tx('spotBlock',{pct}));
       // Switch to SPOT automatically
       const spotBtn=document.querySelector('#pt-tog-q .tog-btn:last-child');
       if(spotBtn) spotBtn.click();
