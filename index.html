@@ -1082,14 +1082,14 @@ function renderBacklogGrid(el, items, isAdmin){
     // KPI row
     +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px">'
     +[
-      {icon:'📦',label:'Linhas abertas',val:totalOpen,color:'var(--blue)'},
-      {icon:'💰',label:'Valor em aberto',val:fmt(totalValue),color:'var(--t1)'},
-      {icon:'✅',label:'Embarca no mês',val:willShip,color:'#166534'},
-      {icon:'💵',label:'Faturamento previsto',val:fmt(willShipValue),color:'#166534'},
+      {icon:'📦',label:'Linhas abertas',val:totalOpen,color:'var(--blue)',kpi:'open'},
+      {icon:'💰',label:'Valor em aberto',val:fmt(totalValue),color:'var(--t1)',kpi:'value'},
+      {icon:'✅',label:'Embarca no mês',val:willShip,color:'#166534',kpi:'ship'},
+      {icon:'💵',label:'Faturamento previsto',val:fmt(willShipValue),color:'#166534',kpi:'forecast'},
     ].map(k=>'<div class="dash-card" style="padding:14px;margin-bottom:0">'
       +'<div style="font-size:18px;margin-bottom:4px">'+k.icon+'</div>'
       +'<p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">'+k.label+'</p>'
-      +'<p style="font-size:18px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
+      +'<p data-kpi="'+k.kpi+'" style="font-size:18px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
       +'</div>').join('')
     +'</div>'
     // Filters
@@ -1174,12 +1174,98 @@ async function updateBacklogField(itemId, field, value){
     updated_at:new Date().toISOString(),
     updated_by:cProfile?.full_name||'Admin'
   }).eq('id',itemId);
-  if(error){console.error('Backlog update error:',error);alert('Erro: '+error.message);}
+  if(error){console.error('Backlog update error:',error);alert('Erro: '+error.message);return;}
   // Update local cache
   if(window._backlogItems){
     const idx=window._backlogItems.findIndex(i=>i.id===itemId);
     if(idx>=0) window._backlogItems[idx][field]=value;
   }
+  // Refresh KPI cards without re-rendering full table
+  refreshBacklogKPIs();
+}
+
+function exportBacklogCSV(){
+  const items=window._backlogItems||[];
+  // Apply current filters
+  let filtered=items.filter(item=>{
+    const f=backlogFilters;
+    if(f.client&&!item.client_name.toLowerCase().includes(f.client.toLowerCase()))return false;
+    if(f.pn&&!item.pn.toLowerCase().includes(f.pn.toLowerCase())&&!item.description?.toLowerCase().includes(f.pn.toLowerCase()))return false;
+    if(f.classification&&item.classification!==f.classification)return false;
+    if(f.destination&&item.destination!==f.destination)return false;
+    if(f.shipMonth==='yes'&&item.will_ship_month!==true)return false;
+    if(f.shipMonth==='no'&&item.will_ship_month!==false)return false;
+    return true;
+  });
+  const headers=['Cliente','Destino','Pedido','PN','Descrição','Qtd Pedida','Qtd Embarcada','Qtd Aberta','Preço Unit.','Valor Aberto','Data Entrega','Disponibilidade','Embarca no Mês','Classificação','Último Comentário','Última Atualização','Atualizado por'];
+  const rows=filtered.map(i=>{
+    const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
+    const lastComm=i.backlog_comments?.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
+    return [
+      i.client_name,
+      i.destination||'',
+      i.order_reference,
+      i.pn,
+      i.description||'',
+      i.qty_ordered,
+      Number(i.qty_shipped||0),
+      open,
+      Number(i.unit_price||0).toFixed(2),
+      (open*Number(i.unit_price||0)).toFixed(2),
+      i.availability_date||'',
+      i.availability_date?new Date(i.availability_date+'T12:00:00').toLocaleDateString('pt-BR'):'',
+      i.will_ship_month===true?'Sim':i.will_ship_month===false?'Não':'',
+      i.classification||'',
+      lastComm?lastComm.comment:'',
+      i.updated_at?new Date(i.updated_at).toLocaleString('pt-BR'):'',
+      i.updated_by||'',
+    ];
+  });
+  const csv=[headers,...rows].map(r=>r.map(v=>{
+    const s=String(v??'');
+    return s.includes(',')||s.includes('"')||s.includes('\n')?'"'+s.replace(/"/g,'""')+'"':s;
+  }).join(',')).join('\n');
+  const bom='﻿';
+  const blob=new Blob([bom+csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='Backlog_Topcon_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click();URL.revokeObjectURL(url);
+}
+
+function refreshBacklogKPIs(){
+  const items=window._backlogItems||[];
+  // Apply current filters
+  let filtered=items.filter(item=>{
+    const f=backlogFilters;
+    if(f.client&&!item.client_name.toLowerCase().includes(f.client.toLowerCase()))return false;
+    if(f.pn&&!item.pn.toLowerCase().includes(f.pn.toLowerCase())&&!item.description?.toLowerCase().includes(f.pn.toLowerCase()))return false;
+    if(f.classification&&item.classification!==f.classification)return false;
+    if(f.destination&&item.destination!==f.destination)return false;
+    if(f.shipMonth==='yes'&&item.will_ship_month!==true)return false;
+    if(f.shipMonth==='no'&&item.will_ship_month!==false)return false;
+    return true;
+  });
+  const totalOpen=filtered.filter(i=>i.classification!=='Shipped').length;
+  const totalValue=filtered.reduce((s,i)=>{
+    const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
+    return s+open*Number(i.unit_price||0);
+  },0);
+  const willShip=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped').length;
+  const willShipValue=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped').reduce((s,i)=>{
+    const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
+    return s+open*Number(i.unit_price||0);
+  },0);
+  // Update DOM directly
+  const kpiEls=document.querySelectorAll('[data-kpi]');
+  kpiEls.forEach(el=>{
+    const k=el.dataset.kpi;
+    if(k==='open') el.textContent=totalOpen;
+    if(k==='value') el.textContent=fmt(totalValue);
+    if(k==='ship') el.textContent=willShip;
+    if(k==='forecast') el.textContent=fmt(willShipValue);
+  });
 }
 
 function openBacklogComments(itemId){
@@ -1301,41 +1387,40 @@ async function renderCutoffsTab(el){
   const pw=document.getElementById('admin-page-wrap');
   if(pw) pw.style.maxWidth='1060px';
   el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div></div></div>';
-  const months=[];
-  for(let i=0;i<3;i++){const d=new Date();d.setMonth(d.getMonth()+i);months.push(d.toISOString().slice(0,7));}
   const[clientsRes,cutoffsRes]=await Promise.all([
     sb.from('user_profiles').select('id,full_name,client_groups(label)').eq('is_admin',false).eq('active',true).order('full_name'),
-    sb.from('monthly_cutoffs').select('*').in('year_month',months)
+    sb.from('monthly_cutoffs').select('*')
   ]);
   const clients=clientsRes.data||[];
-  const cutoffMap={};
-  (cutoffsRes.data||[]).forEach(r=>{if(!cutoffMap[r.user_id])cutoffMap[r.user_id]={};cutoffMap[r.user_id][r.year_month]=r.cutoff_day;});
+  const cutoffMap={};(cutoffsRes.data||[]).forEach(r=>cutoffMap[r.user_id]=r.cutoff_day);
   el.innerHTML='<h1 class="page-title" style="margin-bottom:4px">Cutoffs mensais</h1>'
-    +'<p class="page-sub" style="margin-bottom:14px">Dia limite de embarque por cliente (próximos 3 meses).</p>'
-    +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
+    +'<p class="page-sub" style="margin-bottom:14px">Dia limite de embarque por cliente — válido todo mês. Ex: dia 20 = todo mês o dia 20 é o cutoff.</p>'
+    +'<div style="border-radius:var(--r-md);border:1px solid var(--border);overflow:hidden">'
     +'<table class="dtbl" style="font-size:13px"><thead><tr>'
     +'<th>Cliente</th><th style="color:var(--tm)">Grupo</th>'
-    +months.map(m=>'<th style="text-align:center">📅 '+m+'</th>').join('')
+    +'<th style="text-align:center">Cutoff (dia do mês)</th><th></th>'
     +'</tr></thead><tbody>'
     +clients.map(cl=>'<tr>'
       +'<td style="font-weight:500">'+cl.full_name+'</td>'
       +'<td style="font-size:11px;color:var(--tm)">'+(cl.client_groups?.label||'—')+'</td>'
-      +months.map(m=>'<td style="text-align:center"><div style="display:flex;align-items:center;justify-content:center;gap:5px">'
-        +'<input type="number" id="co-'+cl.id+'-'+m+'" min="1" max="31" value="'+(cutoffMap[cl.id]?.[m]||'')+'" placeholder="dia"'
-        +' style="width:58px;padding:5px 6px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;text-align:center"/>'
-        +'<button id="co-btn-'+cl.id+'-'+m+'" onclick="saveCutoff(this.dataset.u,this.dataset.m)" data-u="'+cl.id+'" data-m="'+m+'" style="background:var(--blue);color:#fff;border:none;border-radius:5px;padding:4px 8px;font-size:11px;font-weight:600;cursor:pointer">✓</button>'
-        +'</div></td>').join('')
+      +'<td style="text-align:center">'
+      +'<div style="display:flex;align-items:center;justify-content:center;gap:8px">'
+      +'<span style="font-size:12px;color:var(--tm)">Todo dia</span>'
+      +'<input type="number" id="co-'+cl.id+'" min="1" max="31" value="'+(cutoffMap[cl.id]||'')+'" placeholder="Ex: 20"'
+      +' style="width:70px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:14px;font-weight:600;text-align:center"/>'
+      +'<span style="font-size:12px;color:var(--tm)">de cada mês</span>'
+      +'</div></td>'
+      +'<td><button class="btn btn-primary btn-sm" data-uid="'+cl.id+'" onclick="saveCutoff(this.dataset.uid)">Salvar</button></td>'
       +'</tr>').join('')
     +'</tbody></table></div>';
 }
 
-async function saveCutoff(userId,ym,btnEl){
-  if(!userId&&btnEl){userId=btnEl.dataset?.u;ym=btnEl.dataset?.m;}
-  const day=parseInt(document.getElementById('co-'+userId+'-'+ym)?.value||0);
+async function saveCutoff(userId){
+  const day=parseInt(document.getElementById('co-'+userId)?.value||0);
   if(!day||day<1||day>31){alert('Informe um dia válido (1-31).');return;}
-  const{error}=await sb.from('monthly_cutoffs').upsert({user_id:userId,year_month:ym,cutoff_day:day},{onConflict:'user_id,year_month'});
+  const{error}=await sb.from('monthly_cutoffs').upsert({user_id:userId,cutoff_day:day},{onConflict:'user_id'});
   if(error){alert('Erro: '+error.message);return;}
-  const inp=document.getElementById('co-'+userId+'-'+ym);
+  const inp=document.getElementById('co-'+userId);
   if(inp){inp.style.borderColor='#3A8C4C';setTimeout(()=>inp.style.borderColor='',1500);}
 }
 
