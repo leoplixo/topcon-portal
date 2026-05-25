@@ -306,7 +306,7 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
       <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sair</button>
     </div>
   </div>
-  <div class="page" style="max-width:1200px">
+  <div class="page" id="salesops-page-wrap" style="max-width:100%;padding-top:16px">
     <div id="salesops-content"></div>
   </div>
 </div>
@@ -491,7 +491,8 @@ const I18N={
     windowOpenQuote:'🔓 <strong>{name} aberta</strong> — Preço Programado disponível.',
     spotQuoteWarning:'⚠️ <strong>Atenção:</strong> Fora da janela e abaixo de 75% do objetivo. Use preço <strong>SPOT</strong>.',
     spotBlock:'⚠️ Pedido bloqueado em preço Scheduled.\n\nVocê atingiu {pct}% do objetivo acumulado (mínimo 75%).\n\nEste pedido será enviado com preço SPOT.',
-    goalNotSet:'Meta anual não definida',goalNotSetMsg:'Entre em contato com sua equipe Topcon para configurar sua meta.',
+    goalNotSet:'Meta anual não definida',
+    myOrdersStatus:'Meus Pedidos em Processo',goalNotSetMsg:'Entre em contato com sua equipe Topcon para configurar sua meta.',
   },
   es:{
     welcome:'Bienvenido',emailLabel:'Correo electrónico',passLabel:'Contraseña',loginBtn:'Ingresar',
@@ -538,7 +539,8 @@ const I18N={
     windowOpenQuote:'🔓 <strong>{name} abierta</strong> — Precio Programado disponible.',
     spotQuoteWarning:'⚠️ <strong>Atención:</strong> Fuera de la ventana y por debajo del 75%. Use precio <strong>SPOT</strong>.',
     spotBlock:'⚠️ Pedido bloqueado en precio Programado.\n\nHa alcanzado {pct}% del objetivo acumulado (mínimo 75%).\n\nEste pedido se procesará con precio SPOT.',
-    goalNotSet:'Meta anual no configurada',goalNotSetMsg:'Contacte a su equipo Topcon para configurar su meta.',
+    goalNotSet:'Meta anual no configurada',
+    myOrdersStatus:'Mis Pedidos en Proceso',goalNotSetMsg:'Contacte a su equipo Topcon para configurar su meta.',
   },
   en:{
     welcome:'Welcome',emailLabel:'Email',passLabel:'Password',loginBtn:'Sign In',
@@ -585,7 +587,8 @@ const I18N={
     windowOpenQuote:'🔓 <strong>{name} open</strong> — Scheduled price available.',
     spotQuoteWarning:'⚠️ <strong>Note:</strong> Outside window and below 75% of target. Use <strong>SPOT</strong> price.',
     spotBlock:'⚠️ Order blocked at Scheduled price.\n\nYou have reached {pct}% of accumulated target (minimum 75%).\n\nThis order will be processed at SPOT price.',
-    goalNotSet:'Annual target not set',goalNotSetMsg:'Contact your Topcon team to set up your target.',
+    goalNotSet:'Annual target not set',
+    myOrdersStatus:'My Orders in Process',goalNotSetMsg:'Contact your Topcon team to set up your target.',
   }
 };
 
@@ -1150,13 +1153,13 @@ async function renderSalesOpsBacklog(){
     .select('*,backlog_comments(id,comment,author_name,author_role,created_at),backlog_shipments(id,qty_shipped,ship_date,notes,created_by,created_at)')
     .order('created_at',{ascending:false});
 
-  if(error){el.innerHTML='<div class="alert alert-err">Erro: '+error.message+'</div>';return;}
+  if(error){el.innerHTML='<div class="alert alert-err">Erro ao carregar: '+error.message+'</div>';return;}
   if(!items?.length){
-    el.innerHTML='<div class="empty" style="margin-top:60px"><div class="empty-icon">📋</div><p style="font-size:14px;font-weight:500">Nenhum item no backlog.</p></div>';
+    el.innerHTML='<div class="empty" style="margin-top:60px"><div class="empty-icon">📋</div><p style="font-size:14px;font-weight:500">Nenhum item no backlog ainda.</p></div>';
     return;
   }
   window._backlogItems=items;
-  renderBacklogGrid(el, items, false);
+  renderBacklogGrid(el, items, 'salesops');
 }
 
 function renderBacklogGrid(el, items, isAdmin){
@@ -1251,7 +1254,7 @@ function renderBacklogGrid(el, items, isAdmin){
     +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
     +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
     +'<thead><tr style="background:var(--g100)">'
-    +['Cliente','Pedido','PN','Descrição','Qtd','Emb.','Aberto',isAdmin?'Preço':'',isAdmin?'Valor aberto':'','Dt. Entrega','Disponib.',isAdmin?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
+    +['Cliente','Pedido','PN','Descrição','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Dt. Entrega','Disponib.',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
       .map(h=>'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
     +filtered.map((item,idx)=>{
@@ -1502,8 +1505,9 @@ async function saveBacklogComment(itemId){
   }
   document.getElementById('bl-comments-modal').style.display='none';
   // Re-render
-  const isAdmin=cProfile?.is_admin||false;
-  const contentEl=document.getElementById(isAdmin?'admin-content':'salesops-content');
+  const _role=cProfile?.role||'client';
+  const isAdmin=cProfile?.is_admin?true:_role==='salesops'?'salesops':false;
+  const contentEl=document.getElementById(cProfile?.is_admin?'admin-content':'salesops-content');
   if(contentEl&&window._backlogItems) renderBacklogGrid(contentEl,window._backlogItems,isAdmin);
 }
 
@@ -1614,8 +1618,9 @@ async function confirmShipment(itemId, qtyOrdered){
     item.backlog_shipments.push({qty_shipped:qty,ship_date:date,notes,created_by:cProfile?.full_name});
   }
   document.getElementById('bl-ship-modal').style.display='none';
-  const isAdmin=cProfile?.is_admin||false;
-  const contentEl=document.getElementById(isAdmin?'admin-content':'salesops-content');
+  const _role=cProfile?.role||'client';
+  const isAdmin=cProfile?.is_admin?true:_role==='salesops'?'salesops':false;
+  const contentEl=document.getElementById(cProfile?.is_admin?'admin-content':'salesops-content');
   if(contentEl&&window._backlogItems) renderBacklogGrid(contentEl,window._backlogItems,isAdmin);
 }
 
