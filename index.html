@@ -278,10 +278,10 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
   <div id="view-confirm" style="display:none">
     <div class="confirm-page">
       <div class="confirm-wrap">✓</div>
-      <h2 style="font-size:22px;font-weight:700;letter-spacing:-.03em;margin-bottom:8px">${t('orderSent')}</h2>
-      <p style="font-size:14px;color:var(--tm);line-height:1.6">${t('orderSentMsg')}</p>
+      <h2 id="confirm-title" style="font-size:22px;font-weight:700;letter-spacing:-.03em;margin-bottom:8px">Pedido enviado!</h2>
+      <p id="confirm-msg" style="font-size:14px;color:var(--tm);line-height:1.6">Recebemos seu pedido. Nossa equipe entrará em contato em breve.</p>
       <p class="confirm-ref" id="confirm-ref"></p>
-      <button class="btn btn-primary" onclick="goBack()">${t('newOrder')}</button>
+      <button id="confirm-new-btn" class="btn btn-primary" onclick="goBack()">+ Novo orçamento</button>
     </div>
   </div>
 </div>
@@ -1032,6 +1032,12 @@ function showView(v){
   const qb=document.getElementById('quote-btn');if(qb)qb.style.display=v==='catalog'?'inline-flex':'none';
   const db=document.getElementById('dash-btn');if(db)db.style.display=v==='dashboard'?'none':'inline-flex';
   const cb=document.getElementById('cat-btn');if(cb)cb.style.display=['quote','confirm'].includes(v)?'inline-flex':'none';
+  // Update confirm screen translations
+  if(v==='confirm'){
+    const ct=document.getElementById('confirm-title');if(ct)ct.textContent=t('orderSent');
+    const cm=document.getElementById('confirm-msg');if(cm)cm.textContent=t('orderSentMsg');
+    const cnb=document.getElementById('confirm-new-btn');if(cnb)cnb.textContent=t('newOrder');
+  }
 }
 function goQuote(){
   showView('quote');
