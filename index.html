@@ -314,7 +314,7 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
       <button class="btn btn-ghost btn-sm" onclick="doLogout()">Sair</button>
     </div>
   </div>
-  <div class="page" style="max-width:1060px">
+  <div class="page" id="admin-page-wrap" style="max-width:1060px">
     <div class="admin-tabs">
       <button class="atab active" onclick="setTab(this,'upload')">Upload CSV</button>
       <button class="atab" onclick="setTab(this,'backlog')">📋 Backlog</button>
@@ -1008,6 +1008,9 @@ const CLS_COLORS={
 let backlogFilters={client:'',pn:'',classification:'',destination:'',shipMonth:''};
 
 async function renderAdminBacklog(el){
+  // Expand admin page to full width for backlog
+  const pw=document.getElementById('admin-page-wrap');
+  if(pw) pw.style.maxWidth='100%';
   el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando backlog…</div></div>';
 
   const{data:items,error}=await sb.from('backlog_items')
@@ -1110,10 +1113,10 @@ function renderBacklogGrid(el, items, isAdmin){
     +'</div>'
     // Table
     +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
-    +'<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1100px">'
+    +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
     +'<thead><tr style="background:var(--g100)">'
-    +['Cliente','Pedido','PN','Descrição','Qtd','Embarcado','Em Aberto','Preço unit.','Valor aberto','Data entrega','Disponibilidade',isAdmin?'Embarca no mês?':'','Classificação','Comentários','Ações'].filter(Boolean)
-      .map(h=>'<th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:11px;color:var(--t2)">'+h+'</th>').join('')
+    +['Cliente','Pedido','PN','Descrição','Qtd','Emb.','Aberto',isAdmin?'Preço':'',isAdmin?'Valor aberto':'','Dt. Entrega','Disponib.',isAdmin?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
+      .map(h=>'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
     +filtered.map((item,idx)=>{
       const qtyOpen=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
@@ -1124,38 +1127,38 @@ function renderBacklogGrid(el, items, isAdmin){
       const rowBg=idx%2===0?'#fff':'#FAFBFC';
       const isShipped=item.classification==='Shipped';
       return '<tr id="bl-row-'+item.id+'" style="background:'+rowBg+';opacity:'+(isShipped?'0.6':'1')+'">'
-        +'<td style="padding:7px 10px;font-weight:500;white-space:nowrap">'+item.client_name+'</td>'
-        +'<td style="padding:7px 10px;font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--blue)">'+item.order_reference+'</td>'
-        +'<td style="padding:7px 10px;font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:600">'+item.pn+'</td>'
-        +'<td style="padding:7px 10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+item.description+'">'+item.description+'</td>'
-        +'<td style="padding:7px 10px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
-        +'<td style="padding:7px 10px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
-        +'<td style="padding:7px 10px;text-align:center;font-weight:700;color:'+(qtyOpen>0?'var(--blue)':'#166534')+'">'+qtyOpen+'</td>'
+        +'<td style="padding:5px 8px;font-weight:500;white-space:nowrap;font-size:11px">'+item.client_name+'</td>'
+        +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--blue);white-space:nowrap">'+item.order_reference+'</td>'
+        +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
+        +'<td style="padding:5px 8px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px" title="'+item.description+'">'+item.description+'</td>'
+        +'<td style="padding:5px 8px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
+        +'<td style="padding:5px 8px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
+        +'<td style="padding:5px 8px;text-align:center;font-weight:700;color:'+(qtyOpen>0?'var(--blue)':'#166534')+'">'+qtyOpen+'</td>'
         +(isAdmin?'<td style="padding:7px 10px;text-align:right;color:var(--tm)">'+fmt(item.unit_price)+'</td>'
                  +'<td style="padding:7px 10px;text-align:right;font-weight:600">'+fmt(valueOpen)+'</td>':'')
-        +'<td style="padding:7px 10px;white-space:nowrap;color:var(--tm)">'+(item.availability_date?new Date(item.availability_date+'T12:00:00').toLocaleDateString('pt-BR'):'—')+'</td>'
+        +'<td style="padding:5px 8px;white-space:nowrap;color:var(--tm);font-size:10px">'+(item.availability_date?new Date(item.availability_date+'T12:00:00').toLocaleDateString('pt-BR'):'—')+'</td>'
         +'<td style="padding:7px 10px;text-align:center">'
         +(isAdmin
-          ?'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:4px 6px;border:1px solid var(--border-md);border-radius:5px;font-size:11px;font-family:inherit"/>'
-          :'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:4px 6px;border:1px solid var(--border-md);border-radius:5px;font-size:11px;font-family:inherit"/>'
+          ?'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:10px;font-family:inherit;width:115px"/>'
+          :'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:10px;font-family:inherit;width:115px"/>'
         )+'</td>'
         +(isAdmin?'<td style="padding:7px 10px;text-align:center">'
-        +'<select onchange="updateBacklogField(\''+item.id+'\',\'will_ship_month\',this.value===\'true\'?true:this.value===\'false\'?false:null)" style="padding:4px 6px;border:1px solid var(--border-md);border-radius:5px;font-size:11px;font-family:inherit">'
+        +'<select onchange="updateBacklogField(\''+item.id+'\',\'will_ship_month\',this.value===\'true\'?true:this.value===\'false\'?false:null)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:11px;font-family:inherit;width:68px">'
         +'<option value=""'+(item.will_ship_month===null||item.will_ship_month===undefined?' selected':'')+'>—</option>'
         +'<option value="true"'+(item.will_ship_month===true?' selected':'')+'>✅ Sim</option>'
         +'<option value="false"'+(item.will_ship_month===false?' selected':'')+'>❌ Não</option>'
         +'</select></td>':'')
         +'<td style="padding:7px 10px">'
-        +'<select onchange="updateBacklogField(\''+item.id+'\',\'classification\',this.value)" style="padding:4px 6px;border:1px solid '+clsBg+';background:'+clsBg+';color:'+clsTxt+';border-radius:5px;font-size:11px;font-family:inherit;font-weight:600">'
+        +'<select onchange="updateBacklogField(\''+item.id+'\',\'classification\',this.value)" style="padding:3px 5px;border:1px solid '+clsBg+';background:'+clsBg+';color:'+clsTxt+';border-radius:5px;font-size:10px;font-family:inherit;font-weight:600;max-width:130px">'
         +CLASSIFICATIONS.map(cl=>'<option value="'+cl+'"'+(item.classification===cl?' selected':'')+' style="background:#fff;color:#000">'+cl+'</option>').join('')
         +'</select></td>'
-        +'<td style="padding:7px 10px;max-width:200px">'
+        +'<td style="padding:5px 8px;max-width:150px">'
         +(lastComment?'<p style="font-size:10px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+lastComment.comment+'">'+lastComment.comment+'</p>'
                      +'<p style="font-size:9px;color:var(--g600)">'+lastComment.author_name+' · '+new Date(lastComment.created_at).toLocaleDateString('pt-BR')+'</p>':'')
-        +'<button onclick="openBacklogComments(\''+item.id+'\')" style="margin-top:3px;background:var(--g100);border:none;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:var(--t2)">💬 '+(commCount||'+')+' </button>'
+        +'<button onclick="openBacklogComments(\''+item.id+'\')" style="margin-top:2px;background:var(--g100);border:none;border-radius:4px;padding:2px 6px;font-size:9px;cursor:pointer;color:var(--t2)">💬'+(commCount||'+')+'</button>'
         +'</td>'
-        +'<td style="padding:7px 10px;white-space:nowrap">'
-        +'<button onclick="openShipModal(\''+item.id+'\','+item.qty_ordered+','+Number(item.qty_shipped||0)+')" style="background:#E6F1FB;color:#185FA5;border:none;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer;font-weight:600">📦 Embarque</button>'
+        +'<td style="padding:5px 8px;white-space:nowrap">'
+        +'<button onclick="openShipModal(\''+item.id+'\','+item.qty_ordered+','+Number(item.qty_shipped||0)+')" style="background:#E6F1FB;color:#185FA5;border:none;border-radius:4px;padding:3px 7px;font-size:10px;cursor:pointer;font-weight:600">📦</button>'
         +'</td>'
         +'</tr>';
     }).join('')
@@ -1295,6 +1298,8 @@ async function confirmShipment(itemId, qtyOrdered){
 }
 
 async function renderCutoffsTab(el){
+  const pw=document.getElementById('admin-page-wrap');
+  if(pw) pw.style.maxWidth='1060px';
   el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div></div></div>';
   const months=[];
   for(let i=0;i<3;i++){const d=new Date();d.setMonth(d.getMonth()+i);months.push(d.toISOString().slice(0,7));}
@@ -1645,7 +1650,13 @@ function exportPDF(){
 // ADMIN
 function setTab(btn,tab){
   document.querySelectorAll('.atab').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');renderAdminTab(tab);
+  btn.classList.add('active');
+  // Restore max-width for non-backlog tabs
+  if(tab!=='backlog'){
+    const pw=document.getElementById('admin-page-wrap');
+    if(pw) pw.style.maxWidth='1060px';
+  }
+  renderAdminTab(tab);
 }
 async function renderAdminTab(tab){
   const el=document.getElementById('admin-content');
