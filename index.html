@@ -259,13 +259,13 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
   <div id="view-quote" style="display:none">
     <div class="quote-page">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <h1 class="page-title">${t('quoteTitle')}</h1>
-        <button class="btn btn-outline btn-sm" onclick="goBack()">${t('backToCatalog')}</button>
+        <h1 class="page-title" id="quote-title-h1">Orçamento</h1>
+        <button class="btn btn-outline btn-sm" onclick="goBack()" id="back-catalog-btn">← Voltar ao catálogo</button>
       </div>
       <p class="page-sub" id="quote-sub"></p>
       <div id="quote-eligibility-note" style="display:none;margin-bottom:12px"></div>
       <div class="price-bar">
-        <span style="font-size:12px;color:var(--tm);font-weight:500">${t('priceType')}</span>
+        <span style="font-size:12px;color:var(--tm);font-weight:500" id="price-type-label">Tipo de preço:</span>
         <div class="tog-group" id="pt-tog-q">
           <button class="tog-btn active" onclick="setPT(this,'scheduled')">Scheduled</button>
           <button class="tog-btn" onclick="setPT(this,'spot')">SPOT</button>
@@ -1029,14 +1029,32 @@ function showView(v){
   ['dashboard','catalog','quote','confirm'].forEach(x=>{
     const el=document.getElementById('view-'+x);if(el)el.style.display=x===v?'block':'none';
   });
-  const qb=document.getElementById('quote-btn');if(qb)qb.style.display=v==='catalog'?'inline-flex':'none';
-  const db=document.getElementById('dash-btn');if(db)db.style.display=v==='dashboard'?'none':'inline-flex';
-  const cb=document.getElementById('cat-btn');if(cb)cb.style.display=['quote','confirm'].includes(v)?'inline-flex':'none';
+  // quote button: show when in catalog or dashboard
+  const qb=document.getElementById('quote-btn');
+  if(qb)qb.style.display=['catalog','dashboard'].includes(v)?'inline-flex':'none';
+  // dashboard button: hide when already in dashboard
+  const db=document.getElementById('dash-btn');
+  if(db)db.style.display=v==='dashboard'?'none':'inline-flex';
+  // catalog button: show when in quote, confirm, or dashboard
+  const cb=document.getElementById('cat-btn');
+  if(cb){
+    cb.style.display=['quote','confirm'].includes(v)?'inline-flex':'none';
+    cb.textContent=t('catalog');
+  }
+  // Update quote btn text
+  if(qb) qb.childNodes.forEach(n=>{if(n.nodeType===3) n.textContent=t('quote');});
+  if(db) db.textContent=t('dashboard');
   // Update confirm screen translations
   if(v==='confirm'){
     const ct=document.getElementById('confirm-title');if(ct)ct.textContent=t('orderSent');
     const cm=document.getElementById('confirm-msg');if(cm)cm.textContent=t('orderSentMsg');
     const cnb=document.getElementById('confirm-new-btn');if(cnb)cnb.textContent=t('newOrder');
+  }
+  // Update quote page static text
+  if(v==='quote'){
+    const qh=document.getElementById('quote-title-h1');if(qh)qh.textContent=t('quoteTitle');
+    const bb=document.getElementById('back-catalog-btn');if(bb)bb.textContent=t('backToCatalog');
+    const pl=document.getElementById('price-type-label');if(pl)pl.textContent=t('priceType');
   }
 }
 function goQuote(){
