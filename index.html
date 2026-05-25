@@ -2594,10 +2594,29 @@ async function handleCSV(file){
     if(!r.description) r.description=r['desc']||r['descricao']||r['material_description']||r['materialdescription']||'';
     if(!r.list_price) r.list_price=r['listprice']||r['list price']||r['preco_lista']||'';
     // Fix PT-BR decimal separator (comma → dot) and remove feed_latam/feed_mx
+    // Parse PT-BR numbers: 1.113,89 → 1113.89 | 1113,89 → 1113.89 | 1113.89 → 1113.89
     const priceKeys=['list_price','cost','latam_scheduled','latam_spot','mexico_scheduled','mexico_spot',
      'tormex_scheduled','tormex_spot','kuhn_scheduled','kuhn_spot','agricien_scheduled','agricien_spot'];
     priceKeys.forEach(k=>{
-      if(r[k]) r[k]=String(r[k]).replace(/\.(?=.*\.)/g,'').replace(',','.');
+      if(!r[k]||r[k].trim()==='') return;
+      let v=String(r[k]).trim();
+      if(v.includes(',')&&v.includes('.')){
+        // Both separators: check which is last (decimal)
+        const lastComma=v.lastIndexOf(',');
+        const lastDot=v.lastIndexOf('.');
+        if(lastComma>lastDot){
+          // PT-BR: 1.113,89 → remove dots, replace comma with dot
+          v=v.replace(/\./g,'').replace(',','.');
+        } else {
+          // EN: 1,113.89 → remove commas
+          v=v.replace(/,/g,'');
+        }
+      } else if(v.includes(',')){
+        // Only comma: PT-BR decimal → 1113,89 → 1113.89
+        v=v.replace(',','.');
+      }
+      // Only dot or plain integer: already correct
+      r[k]=v;
     });
     // Map feed_latam → latam, feed_mx → mexico if present and target is empty
     if(r.feed_latam_scheduled&&!r.latam_scheduled) r.latam_scheduled=r.feed_latam_scheduled;
@@ -2605,24 +2624,7 @@ async function handleCSV(file){
     if(r.feed_mx_scheduled&&!r.mexico_scheduled) r.mexico_scheduled=r.feed_mx_scheduled;
     if(r.feed_mx_spot&&!r.mexico_spot) r.mexico_spot=r.feed_mx_spot;
   });
-  // Auto-detect ×100 price format (e.g. 66833 instead of 668.33)
-  {
-    const sampleLp=rows[0]?.list_price||rows[0]?.latam_scheduled||'0';
-    const sampleVal=parseFloat(String(sampleLp).replace(',','.'));
-    const hasNoDecimal=!String(sampleLp).includes('.')&&!String(sampleLp).includes(',');
-    if(hasNoDecimal && sampleVal > 5000){
-      const priceKeys2=['list_price','cost','latam_scheduled','latam_spot','mexico_scheduled','mexico_spot',
-        'tormex_scheduled','tormex_spot','kuhn_scheduled','kuhn_spot','agricien_scheduled','agricien_spot'];
-      rows.forEach(r=>priceKeys2.forEach(k=>{
-        if(r[k]&&r[k].trim()!==''){
-          const v=parseFloat(String(r[k]).replace(',','.'));
-          if(!isNaN(v)) r[k]=String((v/100).toFixed(2));
-        }
-      }));
-      st.innerHTML=`<div class="alert alert-info"><span class="spinner" style="border-color:rgba(5,58,100,.3);border-top-color:var(--blue-deep)"></span> Detectado formato ×100 — preços divididos por 100 automaticamente…</div>`;
-      await new Promise(r=>setTimeout(r,500));
-    }
-  }
+  // (×100 detection removed - using proper PT-BR decimal parsing below)
   const filteredRows=rows.filter(r=>r.pn&&r.pn.length>0);
   if(!filteredRows.length){
     st.innerHTML=`<div class="alert alert-err">✗ Nenhum PN encontrado.<br>
