@@ -222,6 +222,7 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
         <span id="cart-badge" class="cart-badge">0</span>
       </div>
       <button class="btn btn-ghost btn-sm" id="dash-btn" onclick="goDash()">Dashboard</button>
+      <button class="btn btn-ghost btn-sm" id="myorders-btn" onclick="goMyBacklog()">Meus Pedidos</button>
       <button class="btn btn-ghost btn-sm" id="cat-btn" onclick="goBack()" style="display:none">Catálogo</button>
       <div class="user-chip">
         <div id="u-av" class="user-av">U</div>
@@ -235,6 +236,12 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
   <div id="view-dashboard" style="display:none">
     <div class="page" style="max-width:900px">
       <div id="dash-content"></div>
+    </div>
+  </div>
+
+  <div id="view-mybacklog" style="display:none">
+    <div class="page" style="max-width:1000px">
+      <div id="mybacklog-content"></div>
     </div>
   </div>
 
@@ -710,6 +717,113 @@ async function afterLogin(){
   }
 }
 
+async function goMyBacklog(){
+  showView('mybacklog');
+  await renderMyBacklog();
+}
+
+async function renderMyBacklog(){
+  const el=document.getElementById('mybacklog-content');
+  if(!el)return;
+  el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>';
+
+  // Fetch backlog items for this client's orders
+  const{data:orders}=await sb.from('orders').select('id').eq('user_id',cUser.id);
+  const orderIds=(orders||[]).map(o=>o.id);
+  if(!orderIds.length){
+    el.innerHTML='<h1 class="page-title" style="margin-bottom:16px">'+t('myOrdersStatus')+'</h1>'
+      +'<div class="empty"><div class="empty-icon">📦</div><p style="font-size:14px;font-weight:500">Nenhum pedido em processamento.</p></div>';
+    return;
+  }
+
+  const{data:items}=await sb.from('backlog_items')
+    .select('order_reference,pn,description,qty_ordered,qty_shipped,availability_date,classification')
+    .in('order_id',orderIds)
+    .order('order_reference');
+
+  if(!items?.length){
+    el.innerHTML='<h1 class="page-title" style="margin-bottom:8px">Meus Pedidos em Processo</h1>'
+      +'<p class="page-sub" style="margin-bottom:20px">Acompanhamento de ordens em andamento</p>'
+      +'<div class="empty"><div class="empty-icon">✅</div><p style="font-size:14px;font-weight:500">Nenhum item em processamento no momento.</p></div>';
+    return;
+  }
+
+  // Summary
+  const totalLines=items.length;
+  const openLines=items.filter(i=>i.classification!=='Shipped').length;
+  const shippedLines=items.filter(i=>i.classification==='Shipped').length;
+
+  // Group by order
+  const byOrder={};
+  items.forEach(i=>{
+    if(!byOrder[i.order_reference])byOrder[i.order_reference]=[];
+    byOrder[i.order_reference].push(i);
+  });
+
+  // Simple status label for clients (no internal classification names)
+  const clientStatus=(cls)=>{
+    if(cls==='Shipped') return {label:'✅ Despachado',bg:'#E8F5EC',color:'#166534'};
+    if(cls==='PN Short') return {label:'⏳ Aguardando material',bg:'#FEF3C7',color:'#92400E'};
+    if(cls==='Missing Doc') return {label:'📄 Aguardando documentação',bg:'#FFF0E6',color:'#C05000'};
+    if(cls==='Credit Hold') return {label:'🔒 Em análise',bg:'#FDECEA',color:'#7B1E1E'};
+    if(cls==='Late Delivery') return {label:'📅 Atraso previsto',bg:'#FDECEA',color:'#C0392B'};
+    if(cls==='Pick up pending') return {label:'📦 Aguardando retirada',bg:'#E6F1FB',color:'#185FA5'};
+    if(cls==='Partial') return {label:'🔀 Entrega parcial',bg:'#FEF9EC',color:'#A16207'};
+    if(cls==='Ship Complete') return {label:'⏳ Aguardando consolidação do pedido',bg:'#EDE0F9',color:'#5B2D99'};
+    return {label:'🔄 Em processamento',bg:'var(--g100)',color:'var(--t2)'};
+  };
+
+  let html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">'
+    +'<div><h1 class="page-title">Meus Pedidos em Processo</h1>'
+    +'<p class="page-sub" style="margin-bottom:0">Acompanhamento item a item dos pedidos encaminhados</p></div>'
+    +'</div>'
+    // KPIs
+    +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">'
+    +'<div class="dash-card" style="padding:16px;margin-bottom:0;text-align:center">'
+    +'<p style="font-size:24px;font-weight:700;color:var(--blue)">'+totalLines+'</p>'
+    +'<p style="font-size:11px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em">Total de linhas</p></div>'
+    +'<div class="dash-card" style="padding:16px;margin-bottom:0;text-align:center">'
+    +'<p style="font-size:24px;font-weight:700;color:#C05000">'+openLines+'</p>'
+    +'<p style="font-size:11px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em">Em processamento</p></div>'
+    +'<div class="dash-card" style="padding:16px;margin-bottom:0;text-align:center">'
+    +'<p style="font-size:24px;font-weight:700;color:#166534">'+shippedLines+'</p>'
+    +'<p style="font-size:11px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em">Despachados</p></div>'
+    +'</div>';
+
+  // Table per order
+  Object.entries(byOrder).forEach(([ref,lines])=>{
+    html+='<div class="dash-card" style="margin-bottom:14px;padding:0;overflow:hidden">'
+      +'<div style="padding:12px 16px;background:var(--g50);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
+      +'<span style="font-family:monospace;font-size:13px;font-weight:700;color:var(--blue)">'+ref+'</span>'
+      +'<span style="font-size:11px;color:var(--tm)">'+lines.length+' item(s)</span>'
+      +'</div>'
+      +'<div style="overflow-x:auto">'
+      +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+      +'<thead><tr style="background:var(--g100)">'
+      +['PN','Descrição','Qtd Pedida','Despachado','Em Aberto','Disponib. Prevista','Status']
+        .map(h=>'<th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--t2);white-space:nowrap">'+h+'</th>').join('')
+      +'</tr></thead><tbody>'
+      +lines.map((item,idx)=>{
+        const open=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
+        const{label,bg,color}=clientStatus(item.classification);
+        const availStr=item.availability_date?new Date(item.availability_date+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}):'—';
+        const rowBg=idx%2===0?'#fff':'#FAFBFC';
+        return '<tr style="background:'+rowBg+'">'
+          +'<td style="padding:8px 12px;font-family:monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
+          +'<td style="padding:8px 12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+item.description+'">'+item.description+'</td>'
+          +'<td style="padding:8px 12px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
+          +'<td style="padding:8px 12px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
+          +'<td style="padding:8px 12px;text-align:center;font-weight:700;color:'+(open>0?'var(--blue)':'#166534')+'">'+open+'</td>'
+          +'<td style="padding:8px 12px;text-align:center;font-weight:600;color:var(--blue)">'+availStr+'</td>'
+          +'<td style="padding:8px 12px"><span style="background:'+bg+';color:'+color+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap">'+label+'</span></td>'
+          +'</tr>';
+      }).join('')
+      +'</tbody></table></div></div>';
+  });
+
+  el.innerHTML=html;
+}
+
 async function goDash(){
   showView('dashboard');
   await renderDashboard();
@@ -1059,14 +1173,26 @@ function renderBacklogGrid(el, items, isAdmin){
   });
 
   // Summary stats
-  const totalOpen=filtered.filter(i=>i.classification!=='Shipped').length;
-  const totalValue=filtered.reduce((s,i)=>{
-    const open=Number(i.qty_ordered||0)-Number(i.qty_shipped||0);
+  const notShipped=filtered.filter(i=>i.classification!=='Shipped');
+  const totalOpen=notShipped.length;
+  const totalValue=notShipped.reduce((s,i)=>{
+    const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
     return s+open*Number(i.unit_price||0);
   },0);
-  const willShip=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped').length;
-  const willShipValue=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped').reduce((s,i)=>{
-    const open=Number(i.qty_ordered||0)-Number(i.qty_shipped||0);
+  const willShip=notShipped.filter(i=>i.will_ship_month===true).length;
+  const willShipValue=notShipped.filter(i=>i.will_ship_month===true).reduce((s,i)=>{
+    const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
+    return s+open*Number(i.unit_price||0);
+  },0);
+  // Already shipped
+  const shippedLines=filtered.filter(i=>i.classification==='Shipped');
+  const shippedCount=shippedLines.length;
+  const shippedValue=shippedLines.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
+  // At risk: not shipped, will_ship_month=false or null
+  const atRiskLines=notShipped.filter(i=>!i.will_ship_month);
+  const atRisk=atRiskLines.length;
+  const atRiskValue=atRiskLines.reduce((s,i)=>{
+    const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
     return s+open*Number(i.unit_price||0);
   },0);
 
@@ -1176,6 +1302,61 @@ function renderBacklogGrid(el, items, isAdmin){
     +'<!-- Modals -->'
     +'<div id="bl-comments-modal" style="display:none;position:fixed;inset:0;background:rgba(0,20,35,.6);z-index:99999;align-items:center;justify-content:center"></div>'
     +'<div id="bl-ship-modal" style="display:none;position:fixed;inset:0;background:rgba(0,20,35,.6);z-index:99999;align-items:center;justify-content:center"></div>';
+}
+
+async function handleClassificationChange(selectEl, itemId, prevClass){
+  const newClass=selectEl.value;
+  // If selecting Shipped, open the ship modal to record quantity
+  if(newClass==='Shipped' && prevClass!=='Shipped'){
+    const item=window._backlogItems?.find(i=>i.id===itemId);
+    if(item){
+      // First update the classification
+      await updateBacklogField(itemId,'classification','Shipped');
+      const[bg,txt]=CLS_COLORS['Shipped']||['#E8F5EC','#166534'];
+      selectEl.style.background=bg;selectEl.style.color=txt;selectEl.style.borderColor=bg;
+      selectEl.dataset.prev='Shipped';
+      // Open ship modal
+      openShipModal(itemId, item.qty_ordered, Number(item.qty_shipped||0));
+    }
+    return;
+  }
+  // If moving FROM Shipped to anything else, ask about resetting qty
+  if(prevClass==='Shipped' && newClass!=='Shipped'){
+    const reset=confirm('Esta linha estava marcada como Embarcada.\n\nDeseja resetar a quantidade embarcada para 0 e devolver tudo para o saldo em aberto?\n\nClique OK para resetar ou Cancelar para manter a quantidade embarcada.');
+    if(reset){
+      // Reset qty_shipped to 0
+      await sb.from('backlog_items').update({
+        qty_shipped:0, classification:newClass,
+        updated_at:new Date().toISOString(), updated_by:cProfile?.full_name||'Admin'
+      }).eq('id',itemId);
+      // Update local cache
+      const itm=window._backlogItems?.find(i=>i.id===itemId);
+      if(itm){itm.qty_shipped=0;itm.classification=newClass;}
+      // Update select colors
+      const[bg,txt]=CLS_COLORS[newClass]||['#F0F0F0','#333'];
+      selectEl.style.background=bg;selectEl.style.color=txt;selectEl.style.borderColor=bg;
+      selectEl.dataset.prev=newClass;
+      refreshBacklogKPIs();
+      // Re-render the qty cells in this row
+      const row=document.getElementById('bl-row-'+itemId);
+      if(row){
+        const cells=row.querySelectorAll('td');
+        // Emb. cell (index 5), Aberto cell (index 6)
+        if(cells[5]) cells[5].textContent='0';
+        const qty=window._backlogItems?.find(i=>i.id===itemId)?.qty_ordered||0;
+        if(cells[6]){cells[6].textContent=qty;cells[6].style.color='var(--blue)';}
+        // Value open (index 8)
+        const price=window._backlogItems?.find(i=>i.id===itemId)?.unit_price||0;
+        if(cells[8]){cells[8].textContent=fmt(qty*price);cells[8].style.fontWeight='600';}
+      }
+      return;
+    }
+  }
+  // Normal classification change
+  await updateBacklogField(itemId,'classification',newClass);
+  const[bg,txt]=CLS_COLORS[newClass]||['#F0F0F0','#333'];
+  selectEl.style.background=bg;selectEl.style.color=txt;selectEl.style.borderColor=bg;
+  selectEl.dataset.prev=newClass;
 }
 
 async function updateBacklogField(itemId, field, value){
@@ -1599,12 +1780,14 @@ const getTotal=()=>getItems().reduce((s,i)=>s+i.total,0);
 
 // VIEWS
 function showView(v){
-  ['dashboard','catalog','quote','confirm'].forEach(x=>{
+  ['dashboard','catalog','quote','confirm','mybacklog'].forEach(x=>{
     const el=document.getElementById('view-'+x);if(el)el.style.display=x===v?'block':'none';
   });
   // quote button: show when in catalog or dashboard
   const qb=document.getElementById('quote-btn');
-  if(qb)qb.style.display=['catalog','dashboard'].includes(v)?'inline-flex':'none';
+  if(qb)qb.style.display=['catalog','dashboard','mybacklog'].includes(v)?'inline-flex':'none';
+  const mob=document.getElementById('myorders-btn');
+  if(mob)mob.style.display=v==='mybacklog'?'none':'inline-flex';
   // dashboard button: hide when already in dashboard
   const db=document.getElementById('dash-btn');
   if(db)db.style.display=v==='dashboard'?'none':'inline-flex';
