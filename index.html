@@ -3503,7 +3503,8 @@ async function saveClientTarget(userId, year){
 async function saveClientSWOAFTarget(userId, year){
   const input=document.getElementById('ct-swoaf-'+userId);
   const val=parseFloat(input?.value)||0;
-  const{error}=await sb.from('targets').upsert({user_id:userId,year,target_swoaf_usd:val},{onConflict:'user_id,year'});
+  // Include target_usd:0 as default to satisfy NOT NULL constraint on new rows
+  const{error}=await sb.from('targets').upsert({user_id:userId,year,target_swoaf_usd:val,target_usd:parseFloat(document.getElementById('ct-'+userId)?.value)||0},{onConflict:'user_id,year'});
   if(error){alert('Erro: '+error.message);return;}
   const btn=event.target;btn.textContent='✓ Salvo';btn.style.background='#5B2D99';
   setTimeout(()=>{btn.textContent='Salvar';btn.style.background=''},2000);
