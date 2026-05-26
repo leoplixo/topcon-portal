@@ -463,7 +463,7 @@ const I18N={
     all:'Todos',segAG:'AG · Agriculture',segFD:'FD · Feed',segSWOAF:'SW-OAF',
     priceScheduled:'Scheduled',priceSpot:'SPOT',
     addToCart:'Adicionar',addMore:'+ Adicionar',listPrice:'List Price',
-    inStock:t('inStock'),lowStock:t('lowStock'),outOfStock:t('outOfStock'),
+    inStock:'Em estoque',lowStock:'Últimas unidades',outOfStock:'Sem estoque',
     // Quote
     quoteTitle:'Orçamento',backToCatalog:'← Voltar ao catálogo',
     priceType:'Tipo de preço:',qty:'Qtd',unitPrice:'Preço unit.',total:'Total',
@@ -495,11 +495,11 @@ const I18N={
     notConfigured:'Configure sua meta',windowOpenStatus:'aberta até',
     goalNotSet:'Meta anual não definida',goalNotSetMsg:'Entre em contato com sua equipe Topcon para configurar sua meta.',
     myOrdersStatus:'Meus Pedidos em Processo',
-    totalLines:t('totalLines'),inProcessing:t('inProcessing'),dispatched:t('dispatched'),
+    totalLines:'Total de linhas',inProcessing:'Em processamento',dispatched:'Despachados',
     qtyOrdered:'Qtd Pedida',qtyShipped:'Despachado',qtyOpen:'Em Aberto',
     availDate:'Disponib. Prevista',statusCol:'Status',
-    noItemsInProcess:t('noItemsInProcess'),
-    noOrdersInProcess:t('noOrdersInProcess'),
+    noItemsInProcess:'Nenhum item em processamento no momento.',
+    noOrdersInProcess:'Nenhum pedido em processamento.',
     // Status labels (client-friendly)
     statusAwaitingMaterial:'⏳ Aguardando material',statusAwaitingDoc:'📄 Aguardando documentação',
     statusAnalysis:'🔒 Em análise',statusLate:'📅 Atraso previsto',
@@ -517,8 +517,8 @@ const I18N={
     spotQuoteWarning:'⚠️ <strong>Atenção:</strong> Fora da janela e abaixo de 75% do objetivo. Use preço <strong>SPOT</strong>.',
     spotBlock:'⚠️ Pedido bloqueado em preço Scheduled.\n\nVocê atingiu {pct}% do objetivo acumulado (mínimo 75%).\n\nEste pedido será enviado com preço SPOT.',
     // Admin orders
-    awaitingReview:t('awaitingReview'),approvedSent:t('approvedSent'),
-    forwardToSalesOps:t('forwardToSalesOps'),saveReview:t('saveReview'),
+    awaitingReview:'Aguardando revisão',approvedSent:'Aprovado e enviado',
+    forwardToSalesOps:'Encaminhar para Sales OPS:',saveReview:'Salvar revisão',
     notes:'Observações…',originalPrice:'Preço original',
     addDiscount:'Desc. adicional/un',finalPriceCol:'Preço final/un',
     original:'Original:',discount:'Desc.:',finalTotal:'Final:',
@@ -529,35 +529,35 @@ const I18N={
     openLines:'Linhas em aberto',valueOpen:'Valor em aberto',
     willShipMonth:'Previsto embarcar',forecastRevenue:'Faturamento previsto',
     alreadyShipped:'Já embarcado',atRisk:'Em aberto / risco',
-    filterPN:'PN ou descrição…',filterAllClients:t('filterAllClients'),
-    filterAllCls:t('filterAllCls'),filterAllDest:t('filterAllDest'),
-    filterShipMonth:t('filterShipMonth'),filterYes:t('filterYes'),filterNo:t('filterNo'),
+    filterPN:'PN ou descrição…',filterAllClients:'Todos os clientes',
+    filterAllCls:'Todas classificações',filterAllDest:'Todos destinos',
+    filterShipMonth:'Embarca no mês?',filterYes:'✅ Sim',filterNo:'❌ Não',
     colClient:'Cliente',colOrder:'Pedido',colPN:'PN',colDesc:'Descrição',
     colQty:'Qtd',colShipped:'Emb.',colOpen:'Aberto',colPrice:'Preço unit.',
     colValueOpen:'Valor aberto',colDelivery:'Dt. Entrega',colAvail:'Disponib.',
     colShipMonth:'Embarca?',colClass:'Classificação',colComments:'Comentários',
-    colActions:'Ações',exportExcel:t('exportExcel'),
-    noBacklogYet:t('noBacklogYet'),
-    backlogAutoMsg:t('backlogAutoMsg'),
+    colActions:'Ações',exportExcel:'⬇ Exportar Excel/CSV',
+    noBacklogYet:'Nenhum item no backlog ainda.',
+    backlogAutoMsg:'Items são criados automaticamente quando pedidos são encaminhados para Sales OPS.',
     // Comments modal
     commentsTitle:'Comentários',noComments:'Nenhum comentário ainda.',
-    addComment:'Adicionar comentário…',saveComment:t('saveComment'),
+    addComment:'Adicionar comentário…',saveComment:'Salvar comentário',
     // Ship modal
     registerShipment:'Registrar embarque',shipQtyOrdered:'Qtd pedida:',
     shipQtyShipped:'Já embarcado:',shipQtyOpen:'Em aberto:',
     shipQtyNow:'Quantidade embarcada agora',shipDate:'Data de embarque',
-    shipNotes:'Observações',confirmShipment:t('confirmShipment'),
+    shipNotes:'Observações',confirmShipment:'Confirmar embarque',
     // Cutoffs
     cutoffsTitle:'Cutoffs mensais',
-    cutoffsSub:t('cutoffsSub'),
+    cutoffsSub:'Dia limite de embarque por cliente — válido todo mês. Ex: dia 20 = todo mês o dia 20 é o cutoff.',
     cutoffClient:'Cliente',cutoffGroup:'Grupo',cutoffDay:'Cutoff (dia do mês)',
-    cutoffEvery:t('cutoffEvery'),cutoffEveryMonth:t('cutoffEveryMonth'),cutoffSave:'Salvar',
+    cutoffEvery:'Todo dia',cutoffEveryMonth:'de cada mês',cutoffSave:'Salvar',
     // Admin dashboard
     admDashTitle:'Dashboard Gerencial FY2026',
-    admRevMonth:t('admRevMonth'),admSchedSpot:t('admSchedSpot'),
-    admPerfClient:t('admPerfClient'),
-    admBacklogDest:t('admBacklogDest'),
-    admBacklogCls:t('admBacklogCls'),admWindows:'Janelas FY2026',
+    admRevMonth:'Receita mensal — FY2026',admSchedSpot:'Scheduled vs SPOT',
+    admPerfClient:'Performance por cliente — FY2026',
+    admBacklogDest:'Backlog por destino (valor em aberto)',
+    admBacklogCls:'Backlog por classificação',admWindows:'Janelas FY2026',
     admWindowOpen:'aberta',admTotalRev:'Receita FY2026',admTotalTarget:'Meta total',
     admActiveOrders:'Pedidos ativos',admBacklogOpen:'Backlog aberto',
     admForecast:'Faturamento previsto',admShipped:'Já embarcado',
@@ -581,8 +581,8 @@ const I18N={
     swoafNoticeTitle:'Itens SW-OAF — Aviso Importante',
     swoafNoticeMsg:'Este portal é recomendado apenas para <strong>consulta de preço</strong> dos itens SW-OAF.',
     swoafNoticeCTA:'A compra destes itens deve ser realizada exclusivamente através do portal <strong>TAP</strong>.',
-    swoafNoticeBtn:t('swoafNoticeBtn'),
-    swoafTargetNote:t('swoafTargetNote'),
+    swoafNoticeBtn:'Entendido',
+    swoafTargetNote:'Sinais, softwares e assinaturas. Compras exclusivamente pelo portal TAP.',
   },
   es:{
     welcome:'Bienvenido',emailLabel:'Correo electrónico',passLabel:'Contraseña',loginBtn:'Ingresar',
@@ -597,7 +597,7 @@ const I18N={
     all:'Todos',segAG:'AG · Agriculture',segFD:'FD · Feed',segSWOAF:'SW-OAF',
     priceScheduled:'Programado',priceSpot:'SPOT',
     addToCart:'Agregar',addMore:'+ Agregar',listPrice:'Precio de lista',
-    inStock:'En stock',lowStock:t('lowStock'),outOfStock:'Sin stock',
+    inStock:'En stock',lowStock:'Últimas unidades',outOfStock:'Sin stock',
     quoteTitle:'Presupuesto',backToCatalog:'← Volver al catálogo',
     priceType:'Tipo de precio:',qty:'Cant',unitPrice:'Precio unit.',total:'Total',
     exportPDF:'📄 Exportar PDF',sendOrder:'Enviar pedido →',sending:'Enviando…',
@@ -626,7 +626,7 @@ const I18N={
     notConfigured:'Configure su meta',windowOpenStatus:'abierta hasta',
     goalNotSet:'Meta anual no configurada',goalNotSetMsg:'Contacte a su equipo Topcon para configurar su meta.',
     myOrdersStatus:'Mis Pedidos en Proceso',
-    totalLines:'Total de líneas',inProcessing:'En procesamiento',dispatched:t('dispatched'),
+    totalLines:'Total de líneas',inProcessing:'En procesamiento',dispatched:'Despachados',
     qtyOrdered:'Cant. Pedida',qtyShipped:'Despachado',qtyOpen:'Pendiente',
     availDate:'Disponib. Prevista',statusCol:'Estado',
     noItemsInProcess:'Ningún artículo en procesamiento por el momento.',
@@ -663,7 +663,7 @@ const I18N={
     colQty:'Cant',colShipped:'Emb.',colOpen:'Abierto',colPrice:'Precio unit.',
     colValueOpen:'Valor abierto',colDelivery:'Fch. Entrega',colAvail:'Disponib.',
     colShipMonth:'¿Embarca?',colClass:'Clasificación',colComments:'Comentarios',
-    colActions:'Acciones',exportExcel:t('exportExcel'),
+    colActions:'Acciones',exportExcel:'⬇ Exportar Excel/CSV',
     linesUpdated:'{n} línea(s) · Actualizado ahora',
     noBacklogYet:'Ningún artículo en el backlog aún.',
     backlogAutoMsg:'Los artículos se crean automáticamente cuando los pedidos se envían a Sales OPS.',
@@ -672,7 +672,7 @@ const I18N={
     registerShipment:'Registrar embarque',shipQtyOrdered:'Cant. pedida:',
     shipQtyShipped:'Ya embarcado:',shipQtyOpen:'Pendiente:',
     shipQtyNow:'Cantidad embarcada ahora',shipDate:'Fecha de embarque',
-    shipNotes:'Observaciones',confirmShipment:t('confirmShipment'),
+    shipNotes:'Observaciones',confirmShipment:'Confirmar embarque',
     cutoffsTitle:'Cutoffs mensuales',
     cutoffsSub:'Día límite de embarque por cliente — válido cada mes. Ej: día 20 = cada mes el día 20 es el cutoff.',
     cutoffClient:'Cliente',cutoffGroup:'Grupo',cutoffDay:'Cutoff (día del mes)',
@@ -701,7 +701,7 @@ const I18N={
     swoafNoticeTitle:'Artículos SW-OAF — Aviso Importante',
     swoafNoticeMsg:'Este portal es recomendado solo para <strong>consulta de precios</strong> de los artículos SW-OAF.',
     swoafNoticeCTA:'La compra de estos artículos debe realizarse exclusivamente a través del portal <strong>TAP</strong>.',
-    swoafNoticeBtn:t('swoafNoticeBtn'),
+    swoafNoticeBtn:'Entendido',
     swoafTargetNote:'Señales, software y suscripciones. Compras exclusivamente en el portal TAP.',
   },
   en:{
@@ -717,7 +717,7 @@ const I18N={
     all:'All',segAG:'AG · Agriculture',segFD:'FD · Feed',segSWOAF:'SW-OAF',
     priceScheduled:'Scheduled',priceSpot:'SPOT',
     addToCart:'Add',addMore:'+ Add',listPrice:'List Price',
-    inStock:t('inStock'),lowStock:t('lowStock'),outOfStock:t('outOfStock'),
+    inStock:'In stock',lowStock:'Low stock',outOfStock:'Out of stock',
     quoteTitle:'Quote',backToCatalog:'← Back to catalog',
     priceType:'Price type:',qty:'Qty',unitPrice:'Unit price',total:'Total',
     exportPDF:'📄 Export PDF',sendOrder:'Send order →',sending:'Sending…',
@@ -798,7 +798,7 @@ const I18N={
     cutoffClient:'Client',cutoffGroup:'Group',cutoffDay:'Cutoff (day of month)',
     cutoffEvery:'Every day',cutoffEveryMonth:'of each month',cutoffSave:'Save',
     admDashTitle:'Management Dashboard FY2026',
-    admRevMonth:'Monthly revenue — FY2026',admSchedSpot:t('admSchedSpot'),
+    admRevMonth:'Monthly revenue — FY2026',admSchedSpot:'Scheduled vs SPOT',
     admPerfClient:'Client performance — FY2026',
     admBacklogDest:'Backlog by destination (open value)',
     admBacklogCls:'Backlog by classification',admWindows:'FY2026 Windows',
@@ -1090,7 +1090,7 @@ async function renderDashboard(){
   // Fetch in parallel
   const[targetRes,windowsRes,ordersRes]=await Promise.all([
     sb.from('targets').select('target_usd,target_swoaf_usd').eq('user_id',cUser.id).eq('year',FISCAL_YEAR).single(),
-    sb.from('windows').select('*').eq('year',FISCAL_YEAR).order('window_number'),
+    sb.from('windows').select('*').order('window_number'),
     sb.from('orders').select('id,reference,total_usd,final_total_usd,price_type,created_at,requested_delivery_date,status,order_items(pn,description,unit_price,quantity)')
       .eq('user_id',cUser.id).gte('created_at',FISCAL_START.toISOString()).order('created_at',{ascending:false})
   ]);
@@ -1325,8 +1325,8 @@ async function checkClientEligibility(){
   if(!cUser||!cGroup) return {eligible:true,inWindow:false,purchased:0,accTarget:0,minThreshold:0};
   const FISCAL_START='2026-04-01';
   const[winRes,targetRes,ordersRes]=await Promise.all([
-    sb.from('windows').select('*').eq('year',2026).order('window_number'),
-    sb.from('targets').select('target_usd').eq('user_id',cUser.id).eq('year',2026).single(),
+    sb.from('windows').select('*').order('window_number'),
+    sb.from('targets').select('target_usd').eq('user_id',cUser.id).eq('year',FISCAL_YEAR).single(),
     sb.from('orders').select('total_usd,final_total_usd,status').eq('user_id',cUser.id)
       .gte('created_at',FISCAL_START).neq('status','cancelled')
   ]);
@@ -2272,161 +2272,10 @@ function setTab(btn,tab){
 }
 async function renderAdminTab(tab){
   const el=document.getElementById('admin-content');
+  if(!el) return;
 
 
   if(tab==='admindash'){
-    el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando dashboard…</div></div>';
-    const FISCAL_START='2026-04-01', FISCAL_YEAR=2026;
-    const[ordersRes,targetsRes,windowsRes]=await Promise.all([
-      sb.from('orders').select('*,user_profiles(full_name,id),client_groups(label),order_items(unit_price,quantity,additional_discount)')
-        .gte('created_at',FISCAL_START).neq('status','cancelled').order('created_at',{ascending:true}),
-      sb.from('targets').select('*,user_profiles(full_name)').eq('year',FISCAL_YEAR),
-      sb.from('windows').select('*').eq('year',FISCAL_YEAR).order('window_number')
-    ]);
-    const orders=ordersRes.data||[], targets=targetsRes.data||[], windows=windowsRes.data||[];
-    const oTotal=o=>Number(o.final_total_usd||o.total_usd||0);
-    const totalRev=orders.reduce((s,o)=>s+oTotal(o),0);
-    const pending=orders.filter(o=>o.status==='pending').length;
-    const avgTicket=orders.length?totalRev/orders.length:0;
-    const schedRev=orders.filter(o=>o.price_type==='scheduled').reduce((s,o)=>s+oTotal(o),0);
-    const spotRev=orders.filter(o=>o.price_type==='spot').reduce((s,o)=>s+oTotal(o),0);
-    const totalTarget=targets.reduce((s,t)=>s+Number(t.target_usd),0);
-    const today=new Date();
-    const closedW=windows.filter(w=>new Date(w.close_date)<today);
-    const closedM=closedW.reduce((s,w)=>s+w.months_covered,0);
-    const accTarget=totalTarget*(closedM/12);
-    const MK=['2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'];
-    const ML=['Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez','Jan','Fev','Mar'];
-    const revByMonth={};MK.forEach(m=>revByMonth[m]=0);
-    orders.forEach(o=>{const mk=(o.requested_delivery_date||o.created_at||'').slice(0,7);if(revByMonth[mk]!==undefined)revByMonth[mk]+=oTotal(o);});
-    const revByClient={};
-    orders.forEach(o=>{const n=o.user_profiles?.full_name||'—';revByClient[n]=(revByClient[n]||0)+oTotal(o);});
-    const clientRev=Object.entries(revByClient).sort((a,b)=>b[1]-a[1]);
-    const pnRev={};
-    orders.forEach(o=>(o.order_items||[]).forEach(i=>{
-      const t=(Number(i.unit_price)-Number(i.additional_discount||0))*Number(i.quantity);
-      pnRev[i.pn]=(pnRev[i.pn]||0)+t;
-    }));
-    const topPNs=Object.entries(pnRev).sort((a,b)=>b[1]-a[1]).slice(0,10);
-    const targetMap={};
-    targets.forEach(t=>targetMap[t.user_id]={target:Number(t.target_usd),name:t.user_profiles?.full_name||'?'});
-    const revByUID={};
-    orders.forEach(o=>{if(o.user_profiles?.id)revByUID[o.user_profiles.id]=(revByUID[o.user_profiles.id]||0)+oTotal(o);});
-
-    // Build KPI cards
-    const kpis=[
-      {icon:'💰',label:'Receita Total FY26',val:fmt(totalRev),color:'var(--blue)'},
-      {icon:'🎯',label:'Meta Total FY26',val:fmt(totalTarget),color:'var(--ag-green)'},
-      {icon:'📈',label:'% da Meta',val:totalTarget>0?(totalRev/totalTarget*100).toFixed(0)+'%':'—',color:totalRev>=accTarget*0.75?'var(--ag-green)':'#C0392B'},
-      {icon:'📋',label:'Pedidos Ativos',val:orders.length,color:'var(--blue)'},
-      {icon:'⏳',label:'Aguardando Revisão',val:pending,color:pending>0?'#D97706':'var(--ag-green)'},
-      {icon:'🧾',label:'Ticket Médio',val:fmt(avgTicket),color:'var(--t2)'},
-    ];
-    let kpiHtml='';
-    kpis.forEach(k=>{
-      kpiHtml+='<div class="dash-card" style="padding:16px;margin-bottom:0">';
-      kpiHtml+='<div style="font-size:22px;margin-bottom:6px">'+k.icon+'</div>';
-      kpiHtml+='<p style="font-size:11px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">'+k.label+'</p>';
-      kpiHtml+='<p style="font-size:20px;font-weight:700;color:'+k.color+';letter-spacing:-.02em">'+k.val+'</p>';
-      kpiHtml+='</div>';
-    });
-
-    // Client targets
-    let targetsHtml='';
-    const COLORS=['var(--blue)','var(--ag-green)','#E67E22','#9B59B6','#E74C3C','#16A085'];
-    Object.entries(targetMap).forEach(([uid,t])=>{
-      const rev=revByUID[uid]||0;
-      const pct=t.target>0?Math.min(100,(rev/t.target*100)):0;
-      const eligible=closedM>0?rev>=(t.target*(closedM/12)*0.75):true;
-      const badge=eligible?'<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#E8F5EC;color:#166534;font-weight:600">✅ Scheduled</span>':'<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#FEF3C7;color:#92400E;font-weight:600">⚠️ Em risco</span>';
-      const accLine=closedM>0?'<div style="position:absolute;top:-3px;left:'+Math.min(100,(accTarget/totalTarget*100))+'%;width:2px;height:14px;background:#C0392B;border-radius:2px"></div>':'';
-      targetsHtml+='<div style="margin-bottom:14px">';
-      targetsHtml+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">';
-      targetsHtml+='<div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px;font-weight:500">'+t.name+'</span>'+badge+'</div>';
-      targetsHtml+='<div style="text-align:right"><span style="font-size:13px;font-weight:600;color:var(--blue)">'+fmt(rev)+'</span><span style="font-size:11px;color:var(--tm)"> / '+fmt(t.target)+'</span></div>';
-      targetsHtml+='</div>';
-      targetsHtml+='<div style="position:relative;background:var(--g100);border-radius:10px;height:8px">';
-      targetsHtml+='<div style="height:100%;border-radius:10px;background:'+(eligible?'var(--ag-green)':'#E67E22')+';width:'+pct+'%;transition:width .6s"></div>'+accLine;
-      targetsHtml+='</div>';
-      targetsHtml+='<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--tm);margin-top:3px"><span>'+pct.toFixed(0)+'% da meta anual</span><span>Meta: '+fmt(t.target)+'</span></div>';
-      targetsHtml+='</div>';
-    });
-    if(!targetsHtml) targetsHtml='<p style="font-size:13px;color:var(--tm)">Nenhuma meta configurada. Acesse Clientes para definir metas.</p>';
-
-    // Client revenue bars
-    let clientHtml='';
-    if(clientRev.length){
-      const maxR=clientRev[0][1];
-      clientRev.forEach(([name,rev],i)=>{
-        const pct=maxR>0?(rev/maxR*100):0;
-        clientHtml+='<div style="margin-bottom:10px">';
-        clientHtml+='<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="font-weight:500">'+name+'</span><span>'+fmt(rev)+'</span></div>';
-        clientHtml+='<div style="background:var(--g100);border-radius:6px;height:6px"><div style="height:100%;border-radius:6px;background:'+COLORS[i%COLORS.length]+';width:'+pct+'%"></div></div>';
-        clientHtml+='</div>';
-      });
-    } else clientHtml='<p style="font-size:13px;color:var(--tm)">Nenhum pedido ainda.</p>';
-
-    // Top PNs
-    let pnHtml='';
-    if(topPNs.length){
-      const maxP=topPNs[0][1];
-      topPNs.forEach(([pn,rev],i)=>{
-        const pct=maxP>0?(rev/maxP*100):0;
-        pnHtml+='<div style="margin-bottom:8px">';
-        pnHtml+='<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px"><span style="font-family:\'JetBrains Mono\',monospace;color:var(--blue)">'+pn+'</span><span style="font-weight:600">'+fmt(rev)+'</span></div>';
-        pnHtml+='<div style="background:var(--g100);border-radius:4px;height:5px"><div style="height:100%;border-radius:4px;background:var(--blue);width:'+pct+'%;opacity:'+(1-i*0.07)+'"></div></div>';
-        pnHtml+='</div>';
-      });
-    } else pnHtml='<p style="font-size:13px;color:var(--tm)">Nenhum item em pedidos ainda.</p>';
-
-    // Windows
-    let winHtml='';
-    windows.forEach(w=>{
-      const isOpen=today>=new Date(w.open_date)&&today<=new Date(w.close_date);
-      const isPast=new Date(w.close_date)<today;
-      const dot=isOpen?'🟢':isPast?'⚫':'⚪';
-      const wTarget=totalTarget*(w.months_covered/12);
-      winHtml+='<div style="background:var(--g50);border:1px solid '+(isOpen?'var(--blue)':'var(--border)')+';border-radius:var(--r-md);padding:12px">';
-      winHtml+='<p style="font-size:13px;font-weight:600;margin-bottom:3px">'+dot+' '+w.name+'</p>';
-      winHtml+='<p style="font-size:11px;color:var(--tm);margin-bottom:6px">'+new Date(w.open_date).toLocaleDateString('pt-BR')+' – '+new Date(w.close_date).toLocaleDateString('pt-BR')+'</p>';
-      winHtml+='<p style="font-size:13px;font-weight:700;color:var(--blue)">'+fmt(wTarget)+'</p>';
-      winHtml+='<p style="font-size:10px;color:var(--tm)">objetivo janela · '+w.months_covered+' meses</p>';
-      winHtml+='</div>';
-    });
-
-    // Assemble
-    el.innerHTML=
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">'+
-        '<h1 class="page-title">'+t('admDashTitle')+'</h1>'+
-        '<span style="font-size:12px;color:var(--tm)">'+orders.length+' pedido(s) ativo(s)</span>'+
-      '</div>'+
-      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">'+kpiHtml+'</div>'+
-      '<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px">'+
-        '<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Receita por mês (FY2026)</p><canvas id="chart-monthly" height="120"></canvas></div>'+
-        '<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Scheduled vs SPOT</p><canvas id="chart-ptype" height="160"></canvas>'+
-          '<div style="margin-top:12px">'+
-            '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--blue)">● Scheduled</span><span style="font-weight:600">'+fmt(schedRev)+'</span></div>'+
-            '<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:#E67E22">● SPOT</span><span style="font-weight:600">'+fmt(spotRev)+'</span></div>'+
-          '</div></div>'+
-      '</div>'+
-      '<div class="dash-card" style="margin-bottom:16px"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Performance por cliente vs meta acumulada</p>'+targetsHtml+'</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'+
-        '<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Receita por cliente</p>'+clientHtml+'</div>'+
-        '<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Top 10 PNs por receita</p>'+pnHtml+'</div>'+
-      '</div>'+
-      '<div class="dash-card"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Janelas FY2026</p>'+
-        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">'+winHtml+'</div></div>';
-
-    // Charts
-    requestAnimationFrame(()=>{
-      const mCtx=document.getElementById('chart-monthly');
-      if(mCtx) new Chart(mCtx,{type:'bar',data:{labels:ML,datasets:[{label:'USD',data:MK.map(m=>revByMonth[m]||0),backgroundColor:'rgba(10,140,250,0.7)',borderColor:'rgba(10,140,250,1)',borderWidth:1,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'USD '+ctx.raw.toLocaleString('en-US',{minimumFractionDigits:0})}}},scales:{y:{ticks:{callback:v=>'$'+Number(v).toLocaleString('en-US',{maximumFractionDigits:0})},grid:{color:'rgba(0,0,0,0.05)'}},x:{grid:{display:false}}}}});
-      const pCtx=document.getElementById('chart-ptype');
-      if(pCtx&&(schedRev+spotRev)>0) new Chart(pCtx,{type:'doughnut',data:{labels:['Scheduled','SPOT'],datasets:[{data:[schedRev,spotRev],backgroundColor:['rgba(10,140,250,0.8)','rgba(230,126,34,0.8)'],borderWidth:0}]},options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'USD '+ctx.raw.toLocaleString('en-US',{minimumFractionDigits:0})}}},cutout:'65%'}});
-    });
-  }
-
-    if(tab==='admindash'){
     const pw=document.getElementById('admin-page-wrap');
     if(pw) pw.style.maxWidth='1060px';
     el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando dashboard…</div></div>';
@@ -2436,7 +2285,7 @@ async function renderAdminTab(tab){
       sb.from('orders').select('id,total_usd,final_total_usd,price_type,status,created_at,user_profiles(full_name),client_groups(label)')
         .gte('created_at',FISCAL_START).neq('status','cancelled').order('created_at'),
       sb.from('targets').select('user_id,target_usd,user_profiles(full_name)'),
-      sb.from('windows').select('*').eq('year',2026).order('window_number'),
+      sb.from('windows').select('*').order('window_number'),
       sb.from('user_profiles').select('id,full_name,client_groups(label)').eq('is_admin',false).neq('role','salesops').eq('active',true),
       sb.from('backlog_items').select('classification,will_ship_month,unit_price,qty_ordered,qty_shipped,destination')
     ]);
