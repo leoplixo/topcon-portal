@@ -883,6 +883,11 @@ function applyLangToStatic(){
   const dashBtn=document.getElementById('dash-btn');if(dashBtn)dashBtn.textContent=t('dashboard');
   // Search
   const searchEl=document.getElementById('cat-search');if(searchEl)searchEl.placeholder=t('searchPlaceholder');
+  // Catalog segment filter buttons
+  const fb=document.getElementById('cat-filter-all');if(fb)fb.textContent=t('all');
+  const fab=document.getElementById('cat-filter-ag');if(fab)fab.textContent=t('segAG');
+  const ffb=document.getElementById('cat-filter-fd');if(ffb)ffb.textContent=t('segFD');
+  const fsw=document.getElementById('cat-filter-sw');if(fsw)fsw.textContent=t('segSWOAF');
   // Highlight active lang button
   updateLangButtons();
 }
@@ -1326,7 +1331,7 @@ async function checkClientEligibility(){
   const FISCAL_START='2026-04-01';
   const[winRes,targetRes,ordersRes]=await Promise.all([
     sb.from('windows').select('*').order('window_number'),
-    sb.from('targets').select('target_usd').eq('user_id',cUser.id).eq('year',FISCAL_YEAR).single(),
+    sb.from('targets').select('target_usd,target_swoaf_usd').eq('user_id',cUser.id).eq('year',FISCAL_YEAR).single(),
     sb.from('orders').select('total_usd,final_total_usd,status').eq('user_id',cUser.id)
       .gte('created_at',FISCAL_START).neq('status','cancelled')
   ]);
