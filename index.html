@@ -249,9 +249,9 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
     <div class="controls">
       <input class="search-inp" id="cat-search" placeholder="Buscar por PN, produto ou descrição…" oninput="renderCatalog()"/>
       <div class="tog-group" id="seg-tog">
-        <button class="tog-btn active" onclick="setSeg(this,'ALL')">Todos</button>
-        <button class="tog-btn" onclick="setSeg(this,'AG')">AG · Agriculture</button>
-        <button class="tog-btn" onclick="setSeg(this,'FD')">FD · Feed</button>
+        <button class="tog-btn active" onclick="setSeg(this,'ALL')">${t('all')}</button>
+        <button class="tog-btn" onclick="setSeg(this,'AG')">${t('segAG')}</button>
+        <button class="tog-btn" onclick="setSeg(this,'FD')">${t('segFD')}</button>
       </div>
       <div class="tog-group" id="pt-tog-cat">
         <button class="tog-btn active" onclick="setPT(this,'scheduled')">Scheduled</button>
@@ -448,26 +448,37 @@ try{LANG=localStorage.getItem('topcon_lang')||'pt';}catch(e){}
 
 const I18N={
   pt:{
+    // Auth
     welcome:'Bem-vindo',emailLabel:'E-mail',passLabel:'Senha',loginBtn:'Entrar',
     loginSub:'Acesse com as credenciais fornecidas pela sua equipe Topcon.',
+    loginErr:'E-mail ou senha incorretos.',profileNotFound:'Perfil não encontrado. Contacte o administrador.',
     heroLabel:'Topcon Agriculture & Feed LATAM',heroTitle:'Topcon Portal',
     heroSub:'Catálogo de peças, consulta de preços, orçamentos e pedidos — tudo em um lugar seguro.',
+    // Nav
     logout:'Sair',quote:'Orçamento',dashboard:'Dashboard',catalog:'Catálogo',
-    orders:'Pedidos',clients:'Clientes',uploadCSV:'Upload CSV',
+    myOrders:'Meus Pedidos',orders:'Pedidos',clients:'Clientes',uploadCSV:'Upload CSV',
+    backlogTab:'Backlog',cutoffsTab:'Cutoffs',fullCatalog:'Catálogo completo',
+    // Catalog
     searchPlaceholder:'Buscar por PN, produto ou descrição…',
-    all:'Todos',priceScheduled:'Scheduled',priceSpot:'SPOT',
+    all:'Todos',segAG:'AG · Agriculture',segFD:'FD · Feed',segSWOAF:'SW-OAF',
+    priceScheduled:'Scheduled',priceSpot:'SPOT',
     addToCart:'Adicionar',addMore:'+ Adicionar',listPrice:'List Price',
+    inStock:t('inStock'),lowStock:t('lowStock'),outOfStock:t('outOfStock'),
+    // Quote
     quoteTitle:'Orçamento',backToCatalog:'← Voltar ao catálogo',
     priceType:'Tipo de preço:',qty:'Qtd',unitPrice:'Preço unit.',total:'Total',
     exportPDF:'📄 Exportar PDF',sendOrder:'Enviar pedido →',sending:'Enviando…',
     emptyQuote:'Orçamento vazio',emptyQuoteMsg:'Adicione itens pelo catálogo.',
     goToCatalog:'Ir ao catálogo',
-    orderSent:'Pedido enviado!',orderSentMsg:'Recebemos seu pedido. Nossa equipe entrará em contato em breve.',
-    orderRef:'Referência:',newOrder:'+ Novo orçamento',
     deliveryLabel:'📦 Mês de retirada na Topcon',
     deliveryNote:'O mês selecionado representa quando os itens estarão prontos para retirada na Topcon.',
     deliveryPlaceholder:'— Selecione o mês desejado —',
     subtotal:'Subtotal',shipping:'Frete',shippingNote:'A consultar',estimatedTotal:'Total estimado',
+    descColumn:'Desc. adicional/un',finalPrice:'Preço final/un',lineTotal:'Total linha',
+    // Confirm
+    orderSent:'Pedido enviado!',orderSentMsg:'Recebemos seu pedido. Nossa equipe entrará em contato em breve.',
+    orderRef:'Referência:',newOrder:'+ Novo orçamento',
+    // Dashboard client
     hello:'Olá,',nextWindow:'Próxima janela',
     accProgress:'PROGRESSO ACUMULADO',accGoal:'Objetivo acumulado',
     bought:'Comprado (FY26)',minimum:'Mínimo 75%',
@@ -475,14 +486,27 @@ const I18N={
     orderHistory:'HISTÓRICO DE PEDIDOS FY2026',noOrders:'Nenhum pedido registrado no FY2026',
     windows:'JANELAS DE PROGRAMAÇÃO FY2026',
     windowNote:'Durante a janela todos têm acesso ao preço programado. Após o encerramento, é necessário ≥75% do objetivo acumulado.',
-    windowObjective:'{n} meses · objetivo janela',
-    closedWindows:'{n} janela(s) fechada(s)',
+    windowObjective:'{n} meses · objetivo janela',closedWindows:'{n} janela(s) fechada(s)',
     myOrdersTimeline:'MEUS PEDIDOS — TIMELINE FY2026',
     noDeliveryDate:'Sem data de entrega definida ({n} pedido(s)):',
     sentOn:'Enviado:',deliveryReq:'Entrega solicitada:',nItems:'{n} item(s)',
-    pending:'pending',confirmed:'confirmado',shipped:'enviado',cancelled:'cancelado',forwarded:'aprovado e enviado',
+    pending:'pendente',confirmed:'confirmado',shipped:'enviado',cancelled:'cancelado',forwarded:'aprovado e enviado',
     scheduledStatus:'Preço Programado ativo',spotStatus:'Preço Spot aplicado',
     notConfigured:'Configure sua meta',windowOpenStatus:'aberta até',
+    goalNotSet:'Meta anual não definida',goalNotSetMsg:'Entre em contato com sua equipe Topcon para configurar sua meta.',
+    myOrdersStatus:'Meus Pedidos em Processo',
+    totalLines:t('totalLines'),inProcessing:t('inProcessing'),dispatched:t('dispatched'),
+    qtyOrdered:'Qtd Pedida',qtyShipped:'Despachado',qtyOpen:'Em Aberto',
+    availDate:'Disponib. Prevista',statusCol:'Status',
+    noItemsInProcess:t('noItemsInProcess'),
+    noOrdersInProcess:t('noOrdersInProcess'),
+    // Status labels (client-friendly)
+    statusAwaitingMaterial:'⏳ Aguardando material',statusAwaitingDoc:'📄 Aguardando documentação',
+    statusAnalysis:'🔒 Em análise',statusLate:'📅 Atraso previsto',
+    statusAwaitingPickup:'📦 Aguardando retirada',statusPartial:'🔀 Entrega parcial',
+    statusConsolidating:'⏳ Aguardando consolidação do pedido',
+    statusDispatched:'✅ Despachado',statusProcessing:'🔄 Em processamento',
+    // Eligibility banners
     spotOnly:'⚠️ <strong>Apenas SPOT disponível.</strong>',
     spotOnlyDetail:'Você atingiu {pct}% do objetivo acumulado (mínimo 75%). Pedidos fora da janela serão processados com preço SPOT.',
     spotMissing:'Faltam <strong>{amt}</strong> para atingir o mínimo de 75% e recuperar o preço programado.',
@@ -492,30 +516,100 @@ const I18N={
     windowOpenQuote:'🔓 <strong>{name} aberta</strong> — Preço Programado disponível.',
     spotQuoteWarning:'⚠️ <strong>Atenção:</strong> Fora da janela e abaixo de 75% do objetivo. Use preço <strong>SPOT</strong>.',
     spotBlock:'⚠️ Pedido bloqueado em preço Scheduled.\n\nVocê atingiu {pct}% do objetivo acumulado (mínimo 75%).\n\nEste pedido será enviado com preço SPOT.',
-    goalNotSet:'Meta anual não definida',
-    myOrdersStatus:'Meus Pedidos em Processo',goalNotSetMsg:'Entre em contato com sua equipe Topcon para configurar sua meta.',
+    // Admin orders
+    awaitingReview:t('awaitingReview'),approvedSent:t('approvedSent'),
+    forwardToSalesOps:t('forwardToSalesOps'),saveReview:t('saveReview'),
+    notes:'Observações…',originalPrice:'Preço original',
+    addDiscount:'Desc. adicional/un',finalPriceCol:'Preço final/un',
+    original:'Original:',discount:'Desc.:',finalTotal:'Final:',
+    forwardingTo:'Encaminhado para {dest} em {date}',preparing:'Preparando…',
+    pendingReview:'{n} aguardando revisão',allOrders:'Todos os pedidos ({n})',
+    // Backlog admin
+    backlogTitle:'Backlog Operacional',linesUpdated:'{n} linha(s) · Atualizado agora',
+    openLines:'Linhas em aberto',valueOpen:'Valor em aberto',
+    willShipMonth:'Previsto embarcar',forecastRevenue:'Faturamento previsto',
+    alreadyShipped:'Já embarcado',atRisk:'Em aberto / risco',
+    filterPN:'PN ou descrição…',filterAllClients:t('filterAllClients'),
+    filterAllCls:t('filterAllCls'),filterAllDest:t('filterAllDest'),
+    filterShipMonth:t('filterShipMonth'),filterYes:t('filterYes'),filterNo:t('filterNo'),
+    colClient:'Cliente',colOrder:'Pedido',colPN:'PN',colDesc:'Descrição',
+    colQty:'Qtd',colShipped:'Emb.',colOpen:'Aberto',colPrice:'Preço unit.',
+    colValueOpen:'Valor aberto',colDelivery:'Dt. Entrega',colAvail:'Disponib.',
+    colShipMonth:'Embarca?',colClass:'Classificação',colComments:'Comentários',
+    colActions:'Ações',exportExcel:t('exportExcel'),
+    noBacklogYet:t('noBacklogYet'),
+    backlogAutoMsg:t('backlogAutoMsg'),
+    // Comments modal
+    commentsTitle:'Comentários',noComments:'Nenhum comentário ainda.',
+    addComment:'Adicionar comentário…',saveComment:t('saveComment'),
+    // Ship modal
+    registerShipment:'Registrar embarque',shipQtyOrdered:'Qtd pedida:',
+    shipQtyShipped:'Já embarcado:',shipQtyOpen:'Em aberto:',
+    shipQtyNow:'Quantidade embarcada agora',shipDate:'Data de embarque',
+    shipNotes:'Observações',confirmShipment:t('confirmShipment'),
+    // Cutoffs
+    cutoffsTitle:'Cutoffs mensais',
+    cutoffsSub:t('cutoffsSub'),
+    cutoffClient:'Cliente',cutoffGroup:'Grupo',cutoffDay:'Cutoff (dia do mês)',
+    cutoffEvery:t('cutoffEvery'),cutoffEveryMonth:t('cutoffEveryMonth'),cutoffSave:'Salvar',
+    // Admin dashboard
+    admDashTitle:'Dashboard Gerencial FY2026',
+    admRevMonth:t('admRevMonth'),admSchedSpot:t('admSchedSpot'),
+    admPerfClient:t('admPerfClient'),
+    admBacklogDest:t('admBacklogDest'),
+    admBacklogCls:t('admBacklogCls'),admWindows:'Janelas FY2026',
+    admWindowOpen:'aberta',admTotalRev:'Receita FY2026',admTotalTarget:'Meta total',
+    admActiveOrders:'Pedidos ativos',admBacklogOpen:'Backlog aberto',
+    admForecast:'Faturamento previsto',admShipped:'Já embarcado',
+    admClientsCount:'{n} clientes',admPendingReview:'{n} aguardando revisão',
+    admLinesOpen:'linhas em aberto',admLines:'linhas',admCycle:'no ciclo',
+    admScheduled:'Elegível Scheduled',admAtRisk:'Em risco',
+    // Clients tab
+    clientsTitle:'Clientes',newClient:'+ Novo acesso',
+    colFullName:'Nome completo',colEmail:'E-mail',colGroup:'Grupo de preço',
+    colSegment:'Seg.',colTargetParts:'Meta AG/FD FY{year}',colTargetSWOAF:'Meta SW-OAF FY{year}',
+    colManagerEmail:'E-mail gerente',colStatus:'Status',
+    activeLabel:'Ativo',inactiveLabel:'Inativo',
+    saveTarget:'Salvar',editClient:'Editar',deactivate:'Desativar',activate:'Ativar',
+    // Upload CSV
+    uploadTitle:'Upload de Catálogo',uploadInstructions:'Selecione um arquivo CSV com os dados do catálogo.',
+    downloadTemplate:'⬇ Baixar CSV atual',
+    // Months
+    jan:'janeiro',feb:'fevereiro',mar:'março',apr:'abril',may:'maio',jun:'junho',
+    jul:'julho',aug:'agosto',sep:'setembro',oct:'outubro',nov:'novembro',dec:'dezembro',
+    // SW-OAF notice
+    swoafNoticeTitle:'Itens SW-OAF — Aviso Importante',
+    swoafNoticeMsg:'Este portal é recomendado apenas para <strong>consulta de preço</strong> dos itens SW-OAF.',
+    swoafNoticeCTA:'A compra destes itens deve ser realizada exclusivamente através do portal <strong>TAP</strong>.',
+    swoafNoticeBtn:t('swoafNoticeBtn'),
+    swoafTargetNote:t('swoafTargetNote'),
   },
   es:{
     welcome:'Bienvenido',emailLabel:'Correo electrónico',passLabel:'Contraseña',loginBtn:'Ingresar',
     loginSub:'Accede con las credenciales proporcionadas por tu equipo Topcon.',
+    loginErr:'Correo o contraseña incorrectos.',profileNotFound:'Perfil no encontrado. Contacta al administrador.',
     heroLabel:'Topcon Agriculture & Feed LATAM',heroTitle:'Portal Topcon',
     heroSub:'Catálogo de piezas, precios, presupuestos y pedidos — todo en un lugar seguro.',
     logout:'Salir',quote:'Presupuesto',dashboard:'Dashboard',catalog:'Catálogo',
-    orders:'Pedidos',clients:'Clientes',uploadCSV:'Cargar CSV',
+    myOrders:'Mis Pedidos',orders:'Pedidos',clients:'Clientes',uploadCSV:'Cargar CSV',
+    backlogTab:'Backlog',cutoffsTab:'Cutoffs',fullCatalog:'Catálogo completo',
     searchPlaceholder:'Buscar por PN, producto o descripción…',
-    all:'Todos',priceScheduled:'Programado',priceSpot:'SPOT',
+    all:'Todos',segAG:'AG · Agriculture',segFD:'FD · Feed',segSWOAF:'SW-OAF',
+    priceScheduled:'Programado',priceSpot:'SPOT',
     addToCart:'Agregar',addMore:'+ Agregar',listPrice:'Precio de lista',
+    inStock:'En stock',lowStock:t('lowStock'),outOfStock:'Sin stock',
     quoteTitle:'Presupuesto',backToCatalog:'← Volver al catálogo',
     priceType:'Tipo de precio:',qty:'Cant',unitPrice:'Precio unit.',total:'Total',
     exportPDF:'📄 Exportar PDF',sendOrder:'Enviar pedido →',sending:'Enviando…',
     emptyQuote:'Presupuesto vacío',emptyQuoteMsg:'Agrega artículos desde el catálogo.',
     goToCatalog:'Ir al catálogo',
-    orderSent:'¡Pedido enviado!',orderSentMsg:'Recibimos tu pedido. Nuestro equipo se pondrá en contacto pronto.',
-    orderRef:'Referencia:',newOrder:'+ Nuevo presupuesto',
     deliveryLabel:'📦 Mes de retiro en Topcon',
     deliveryNote:'El mes seleccionado representa cuándo los artículos estarán listos para retiro en Topcon.',
     deliveryPlaceholder:'— Seleccione el mes deseado —',
     subtotal:'Subtotal',shipping:'Flete',shippingNote:'A consultar',estimatedTotal:'Total estimado',
+    descColumn:'Desc. adicional/un',finalPrice:'Precio final/un',lineTotal:'Total línea',
+    orderSent:'¡Pedido enviado!',orderSentMsg:'Recibimos tu pedido. Nuestro equipo se pondrá en contacto pronto.',
+    orderRef:'Referencia:',newOrder:'+ Nuevo presupuesto',
     hello:'Hola,',nextWindow:'Próxima ventana',
     accProgress:'PROGRESO ACUMULADO',accGoal:'Objetivo acumulado',
     bought:'Comprado (FY26)',minimum:'Mínimo 75%',
@@ -523,14 +617,25 @@ const I18N={
     orderHistory:'HISTORIAL DE PEDIDOS FY2026',noOrders:'Ningún pedido registrado en FY2026',
     windows:'VENTANAS DE PROGRAMACIÓN FY2026',
     windowNote:'Durante la ventana todos tienen acceso al precio programado. Tras el cierre, se necesita ≥75% del objetivo acumulado.',
-    windowObjective:'{n} meses · objetivo ventana',
-    closedWindows:'{n} ventana(s) cerrada(s)',
+    windowObjective:'{n} meses · objetivo ventana',closedWindows:'{n} ventana(s) cerrada(s)',
     myOrdersTimeline:'MIS PEDIDOS — TIMELINE FY2026',
     noDeliveryDate:'Sin fecha de entrega definida ({n} pedido(s)):',
     sentOn:'Enviado:',deliveryReq:'Entrega solicitada:',nItems:'{n} artículo(s)',
     pending:'pendiente',confirmed:'confirmado',shipped:'enviado',cancelled:'cancelado',forwarded:'aprobado y enviado',
     scheduledStatus:'Precio Programado activo',spotStatus:'Precio Spot aplicado',
     notConfigured:'Configure su meta',windowOpenStatus:'abierta hasta',
+    goalNotSet:'Meta anual no configurada',goalNotSetMsg:'Contacte a su equipo Topcon para configurar su meta.',
+    myOrdersStatus:'Mis Pedidos en Proceso',
+    totalLines:'Total de líneas',inProcessing:'En procesamiento',dispatched:t('dispatched'),
+    qtyOrdered:'Cant. Pedida',qtyShipped:'Despachado',qtyOpen:'Pendiente',
+    availDate:'Disponib. Prevista',statusCol:'Estado',
+    noItemsInProcess:'Ningún artículo en procesamiento por el momento.',
+    noOrdersInProcess:'Ningún pedido en procesamiento.',
+    statusAwaitingMaterial:'⏳ Esperando material',statusAwaitingDoc:'📄 Esperando documentación',
+    statusAnalysis:'🔒 En análisis',statusLate:'📅 Retraso previsto',
+    statusAwaitingPickup:'📦 Esperando retiro',statusPartial:'🔀 Entrega parcial',
+    statusConsolidating:'⏳ Esperando consolidación del pedido',
+    statusDispatched:'✅ Despachado',statusProcessing:'🔄 En proceso',
     spotOnly:'⚠️ <strong>Solo SPOT disponible.</strong>',
     spotOnlyDetail:'Ha alcanzado {pct}% del objetivo acumulado (mínimo 75%). Los pedidos fuera de la ventana se procesarán con precio SPOT.',
     spotMissing:'Faltan <strong>{amt}</strong> para alcanzar el mínimo del 75%.',
@@ -540,30 +645,91 @@ const I18N={
     windowOpenQuote:'🔓 <strong>{name} abierta</strong> — Precio Programado disponible.',
     spotQuoteWarning:'⚠️ <strong>Atención:</strong> Fuera de la ventana y por debajo del 75%. Use precio <strong>SPOT</strong>.',
     spotBlock:'⚠️ Pedido bloqueado en precio Programado.\n\nHa alcanzado {pct}% del objetivo acumulado (mínimo 75%).\n\nEste pedido se procesará con precio SPOT.',
-    goalNotSet:'Meta anual no configurada',
-    myOrdersStatus:'Mis Pedidos en Proceso',goalNotSetMsg:'Contacte a su equipo Topcon para configurar su meta.',
+    awaitingReview:'Esperando revisión',approvedSent:'Aprobado y enviado',
+    forwardToSalesOps:'Enviar a Sales OPS:',saveReview:'Guardar revisión',
+    notes:'Observaciones…',originalPrice:'Precio original',
+    addDiscount:'Desc. adicional/un',finalPriceCol:'Precio final/un',
+    original:'Original:',discount:'Desc.:',finalTotal:'Total final:',
+    forwardingTo:'Enviado a {dest} el {date}',preparing:'Preparando…',
+    pendingReview:'{n} esperando revisión',allOrders:'Todos los pedidos ({n})',
+    backlogTitle:'Backlog Operacional',linesUpdated:'{n} línea(s) · Actualizado ahora',
+    openLines:'Líneas abiertas',valueOpen:'Valor abierto',
+    willShipMonth:'Previsto embarcar',forecastRevenue:'Facturación prevista',
+    alreadyShipped:'Ya embarcado',atRisk:'Abierto / en riesgo',
+    filterPN:'PN o descripción…',filterAllClients:'Todos los clientes',
+    filterAllCls:'Todas las clasificaciones',filterAllDest:'Todos los destinos',
+    filterShipMonth:'¿Embarca este mes?',filterYes:'✅ Sí',filterNo:'❌ No',
+    colClient:'Cliente',colOrder:'Pedido',colPN:'PN',colDesc:'Descripción',
+    colQty:'Cant',colShipped:'Emb.',colOpen:'Abierto',colPrice:'Precio unit.',
+    colValueOpen:'Valor abierto',colDelivery:'Fch. Entrega',colAvail:'Disponib.',
+    colShipMonth:'¿Embarca?',colClass:'Clasificación',colComments:'Comentarios',
+    colActions:'Acciones',exportExcel:t('exportExcel'),
+    linesUpdated:'{n} línea(s) · Actualizado ahora',
+    noBacklogYet:'Ningún artículo en el backlog aún.',
+    backlogAutoMsg:'Los artículos se crean automáticamente cuando los pedidos se envían a Sales OPS.',
+    commentsTitle:'Comentarios',noComments:'Ningún comentario aún.',
+    addComment:'Agregar comentario…',saveComment:'Guardar comentario',
+    registerShipment:'Registrar embarque',shipQtyOrdered:'Cant. pedida:',
+    shipQtyShipped:'Ya embarcado:',shipQtyOpen:'Pendiente:',
+    shipQtyNow:'Cantidad embarcada ahora',shipDate:'Fecha de embarque',
+    shipNotes:'Observaciones',confirmShipment:t('confirmShipment'),
+    cutoffsTitle:'Cutoffs mensuales',
+    cutoffsSub:'Día límite de embarque por cliente — válido cada mes. Ej: día 20 = cada mes el día 20 es el cutoff.',
+    cutoffClient:'Cliente',cutoffGroup:'Grupo',cutoffDay:'Cutoff (día del mes)',
+    cutoffEvery:'Cada día',cutoffEveryMonth:'de cada mes',cutoffSave:'Guardar',
+    admDashTitle:'Dashboard Gerencial FY2026',
+    admRevMonth:'Ingresos mensuales — FY2026',admSchedSpot:'Programado vs SPOT',
+    admPerfClient:'Rendimiento por cliente — FY2026',
+    admBacklogDest:'Backlog por destino (valor abierto)',
+    admBacklogCls:'Backlog por clasificación',admWindows:'Ventanas FY2026',
+    admWindowOpen:'abierta',admTotalRev:'Ingresos FY2026',admTotalTarget:'Meta total',
+    admActiveOrders:'Pedidos activos',admBacklogOpen:'Backlog abierto',
+    admForecast:'Facturación prevista',admShipped:'Ya embarcado',
+    admClientsCount:'{n} clientes',admPendingReview:'{n} esperando revisión',
+    admLinesOpen:'líneas abiertas',admLines:'líneas',admCycle:'en el ciclo',
+    admScheduled:'Elegible Programado',admAtRisk:'En riesgo',
+    clientsTitle:'Clientes',newClient:'+ Nuevo acceso',
+    colFullName:'Nombre completo',colEmail:'Correo',colGroup:'Grupo de precio',
+    colSegment:'Seg.',colTargetParts:'Meta AG/FD FY{year}',colTargetSWOAF:'Meta SW-OAF FY{year}',
+    colManagerEmail:'Correo del gerente',colStatus:'Estado',
+    activeLabel:'Activo',inactiveLabel:'Inactivo',
+    saveTarget:'Guardar',editClient:'Editar',deactivate:'Desactivar',activate:'Activar',
+    uploadTitle:'Carga de Catálogo',uploadInstructions:'Seleccione un archivo CSV con los datos del catálogo.',
+    downloadTemplate:'⬇ Descargar CSV actual',
+    jan:'enero',feb:'febrero',mar:'marzo',apr:'abril',may:'mayo',jun:'junio',
+    jul:'julio',aug:'agosto',sep:'septiembre',oct:'octubre',nov:'noviembre',dec:'diciembre',
+    swoafNoticeTitle:'Artículos SW-OAF — Aviso Importante',
+    swoafNoticeMsg:'Este portal es recomendado solo para <strong>consulta de precios</strong> de los artículos SW-OAF.',
+    swoafNoticeCTA:'La compra de estos artículos debe realizarse exclusivamente a través del portal <strong>TAP</strong>.',
+    swoafNoticeBtn:t('swoafNoticeBtn'),
+    swoafTargetNote:'Señales, software y suscripciones. Compras exclusivamente en el portal TAP.',
   },
   en:{
     welcome:'Welcome',emailLabel:'Email',passLabel:'Password',loginBtn:'Sign In',
     loginSub:'Sign in with the credentials provided by your Topcon team.',
+    loginErr:'Incorrect email or password.',profileNotFound:'Profile not found. Please contact your administrator.',
     heroLabel:'Topcon Agriculture & Feed LATAM',heroTitle:'Topcon Portal',
     heroSub:'Parts catalog, pricing, quotes and orders — all in one secure place.',
     logout:'Sign Out',quote:'Quote',dashboard:'Dashboard',catalog:'Catalog',
-    orders:'Orders',clients:'Clients',uploadCSV:'Upload CSV',
+    myOrders:'My Orders',orders:'Orders',clients:'Clients',uploadCSV:'Upload CSV',
+    backlogTab:'Backlog',cutoffsTab:'Cutoffs',fullCatalog:'Full Catalog',
     searchPlaceholder:'Search by PN, product or description…',
-    all:'All',priceScheduled:'Scheduled',priceSpot:'SPOT',
+    all:'All',segAG:'AG · Agriculture',segFD:'FD · Feed',segSWOAF:'SW-OAF',
+    priceScheduled:'Scheduled',priceSpot:'SPOT',
     addToCart:'Add',addMore:'+ Add',listPrice:'List Price',
+    inStock:t('inStock'),lowStock:t('lowStock'),outOfStock:t('outOfStock'),
     quoteTitle:'Quote',backToCatalog:'← Back to catalog',
     priceType:'Price type:',qty:'Qty',unitPrice:'Unit price',total:'Total',
     exportPDF:'📄 Export PDF',sendOrder:'Send order →',sending:'Sending…',
     emptyQuote:'Empty quote',emptyQuoteMsg:'Add items from the catalog.',
     goToCatalog:'Go to catalog',
-    orderSent:'Order sent!',orderSentMsg:'We received your order. Our team will be in touch soon.',
-    orderRef:'Reference:',newOrder:'+ New quote',
     deliveryLabel:'📦 Pickup month at Topcon',
     deliveryNote:'The selected month is when items will be ready for pickup at Topcon.',
     deliveryPlaceholder:'— Select desired month —',
     subtotal:'Subtotal',shipping:'Freight',shippingNote:'To be confirmed',estimatedTotal:'Estimated total',
+    descColumn:'Addl. disc./unit',finalPrice:'Final/unit',lineTotal:'Line total',
+    orderSent:'Order sent!',orderSentMsg:'We received your order. Our team will be in touch soon.',
+    orderRef:'Reference:',newOrder:'+ New quote',
     hello:'Hello,',nextWindow:'Next window',
     accProgress:'ACCUMULATED PROGRESS',accGoal:'Accumulated target',
     bought:'Purchased (FY26)',minimum:'Minimum 75%',
@@ -571,14 +737,25 @@ const I18N={
     orderHistory:'ORDER HISTORY FY2026',noOrders:'No orders recorded in FY2026',
     windows:'FY2026 PROGRAMMING WINDOWS',
     windowNote:'During the window everyone has access to scheduled pricing. After closing, ≥75% of accumulated target is required.',
-    windowObjective:'{n} months · window target',
-    closedWindows:'{n} window(s) closed',
+    windowObjective:'{n} months · window target',closedWindows:'{n} window(s) closed',
     myOrdersTimeline:'MY ORDERS — FY2026 TIMELINE',
     noDeliveryDate:'No delivery date defined ({n} order(s)):',
     sentOn:'Sent:',deliveryReq:'Requested delivery:',nItems:'{n} item(s)',
     pending:'pending',confirmed:'confirmed',shipped:'shipped',cancelled:'cancelled',forwarded:'approved & sent',
     scheduledStatus:'Scheduled price active',spotStatus:'SPOT price applied',
     notConfigured:'Set up your target',windowOpenStatus:'open until',
+    goalNotSet:'Annual target not set',goalNotSetMsg:'Contact your Topcon team to set up your target.',
+    myOrdersStatus:'My Orders in Process',
+    totalLines:'Total lines',inProcessing:'In process',dispatched:'Dispatched',
+    qtyOrdered:'Qty Ordered',qtyShipped:'Shipped',qtyOpen:'Open',
+    availDate:'Est. Availability',statusCol:'Status',
+    noItemsInProcess:'No items in process at the moment.',
+    noOrdersInProcess:'No orders in process.',
+    statusAwaitingMaterial:'⏳ Awaiting material',statusAwaitingDoc:'📄 Awaiting documentation',
+    statusAnalysis:'🔒 Under review',statusLate:'📅 Delayed',
+    statusAwaitingPickup:'📦 Awaiting pickup',statusPartial:'🔀 Partial delivery',
+    statusConsolidating:'⏳ Awaiting order consolidation',
+    statusDispatched:'✅ Dispatched',statusProcessing:'🔄 In process',
     spotOnly:'⚠️ <strong>SPOT pricing only.</strong>',
     spotOnlyDetail:'You have reached {pct}% of the accumulated target (minimum 75%). Orders outside the window will be processed at SPOT price.',
     spotMissing:'<strong>{amt}</strong> still needed to reach the 75% minimum.',
@@ -588,12 +765,68 @@ const I18N={
     windowOpenQuote:'🔓 <strong>{name} open</strong> — Scheduled price available.',
     spotQuoteWarning:'⚠️ <strong>Note:</strong> Outside window and below 75% of target. Use <strong>SPOT</strong> price.',
     spotBlock:'⚠️ Order blocked at Scheduled price.\n\nYou have reached {pct}% of accumulated target (minimum 75%).\n\nThis order will be processed at SPOT price.',
-    goalNotSet:'Annual target not set',
-    myOrdersStatus:'My Orders in Process',goalNotSetMsg:'Contact your Topcon team to set up your target.',
+    awaitingReview:'Awaiting review',approvedSent:'Approved & sent',
+    forwardToSalesOps:'Forward to Sales OPS:',saveReview:'Save review',
+    notes:'Notes…',originalPrice:'Original price',
+    addDiscount:'Addl. disc./unit',finalPriceCol:'Final/unit',
+    original:'Original:',discount:'Disc.:',finalTotal:'Final:',
+    forwardingTo:'Forwarded to {dest} on {date}',preparing:'Preparing…',
+    pendingReview:'{n} awaiting review',allOrders:'All orders ({n})',
+    backlogTitle:'Operational Backlog',linesUpdated:'{n} line(s) · Updated now',
+    openLines:'Open lines',valueOpen:'Open value',
+    willShipMonth:'Forecast to ship',forecastRevenue:'Forecast revenue',
+    alreadyShipped:'Already shipped',atRisk:'Open / at risk',
+    filterPN:'PN or description…',filterAllClients:'All clients',
+    filterAllCls:'All classifications',filterAllDest:'All destinations',
+    filterShipMonth:'Ships this month?',filterYes:'✅ Yes',filterNo:'❌ No',
+    colClient:'Client',colOrder:'Order',colPN:'PN',colDesc:'Description',
+    colQty:'Qty',colShipped:'Ship.',colOpen:'Open',colPrice:'Unit price',
+    colValueOpen:'Open value',colDelivery:'Del. Date',colAvail:'Avail.',
+    colShipMonth:'Ships?',colClass:'Classification',colComments:'Comments',
+    colActions:'Actions',exportExcel:'⬇ Export Excel/CSV',
+    linesUpdated:'{n} line(s) · Updated now',
+    noBacklogYet:'No items in backlog yet.',
+    backlogAutoMsg:'Items are created automatically when orders are forwarded to Sales OPS.',
+    commentsTitle:'Comments',noComments:'No comments yet.',
+    addComment:'Add a comment…',saveComment:'Save comment',
+    registerShipment:'Register shipment',shipQtyOrdered:'Qty ordered:',
+    shipQtyShipped:'Already shipped:',shipQtyOpen:'Open qty:',
+    shipQtyNow:'Quantity shipped now',shipDate:'Shipment date',
+    shipNotes:'Notes',confirmShipment:'Confirm shipment',
+    cutoffsTitle:'Monthly Cutoffs',
+    cutoffsSub:'Shipment cutoff day per client — valid every month. E.g. day 20 = the 20th of every month is the cutoff.',
+    cutoffClient:'Client',cutoffGroup:'Group',cutoffDay:'Cutoff (day of month)',
+    cutoffEvery:'Every day',cutoffEveryMonth:'of each month',cutoffSave:'Save',
+    admDashTitle:'Management Dashboard FY2026',
+    admRevMonth:'Monthly revenue — FY2026',admSchedSpot:t('admSchedSpot'),
+    admPerfClient:'Client performance — FY2026',
+    admBacklogDest:'Backlog by destination (open value)',
+    admBacklogCls:'Backlog by classification',admWindows:'FY2026 Windows',
+    admWindowOpen:'open',admTotalRev:'FY2026 Revenue',admTotalTarget:'Total target',
+    admActiveOrders:'Active orders',admBacklogOpen:'Open backlog',
+    admForecast:'Forecast revenue',admShipped:'Already shipped',
+    admClientsCount:'{n} clients',admPendingReview:'{n} awaiting review',
+    admLinesOpen:'open lines',admLines:'lines',admCycle:'in cycle',
+    admScheduled:'Scheduled eligible',admAtRisk:'At risk',
+    clientsTitle:'Clients',newClient:'+ New access',
+    colFullName:'Full name',colEmail:'Email',colGroup:'Price group',
+    colSegment:'Seg.',colTargetParts:'AG/FD Target FY{year}',colTargetSWOAF:'SW-OAF Target FY{year}',
+    colManagerEmail:'Manager email',colStatus:'Status',
+    activeLabel:'Active',inactiveLabel:'Inactive',
+    saveTarget:'Save',editClient:'Edit',deactivate:'Deactivate',activate:'Activate',
+    uploadTitle:'Catalog Upload',uploadInstructions:'Select a CSV file with catalog data.',
+    downloadTemplate:'⬇ Download current CSV',
+    jan:'January',feb:'February',mar:'March',apr:'April',may:'May',jun:'June',
+    jul:'July',aug:'August',sep:'September',oct:'October',nov:'November',dec:'December',
+    swoafNoticeTitle:'SW-OAF Items — Important Notice',
+    swoafNoticeMsg:'This portal is recommended for <strong>price consultation only</strong> for SW-OAF items.',
+    swoafNoticeCTA:'Purchases of these items must be made exclusively through the <strong>TAP</strong> portal.',
+    swoafNoticeBtn:'Understood',
+    swoafTargetNote:'Signals, software and subscriptions. Purchases exclusively via TAP portal.',
   }
 };
 
-// Unified translation function - replaces both t() and tx()
+// Unified translation function
 const t=(key,vars={})=>{
   let s=(I18N[LANG]||I18N.pt)[key];
   if(s===undefined) s=(I18N.pt[key]||key);
@@ -602,9 +835,7 @@ const t=(key,vars={})=>{
   }
   return s;
 };
-// tx is now just an alias for t
 const tx=t;
-
 
 function setLang(lang){
   LANG=lang;
@@ -780,15 +1011,15 @@ async function renderMyBacklog(){
 
   // Simple status label for clients (no internal classification names)
   const clientStatus=(cls)=>{
-    if(cls==='Shipped') return {label:'✅ Despachado',bg:'#E8F5EC',color:'#166534'};
-    if(cls==='PN Short') return {label:'⏳ Aguardando material',bg:'#FEF3C7',color:'#92400E'};
-    if(cls==='Missing Doc') return {label:'📄 Aguardando documentação',bg:'#FFF0E6',color:'#C05000'};
-    if(cls==='Credit Hold') return {label:'🔒 Em análise',bg:'#FDECEA',color:'#7B1E1E'};
-    if(cls==='Late Delivery') return {label:'📅 Atraso previsto',bg:'#FDECEA',color:'#C0392B'};
-    if(cls==='Pick up pending') return {label:'📦 Aguardando retirada',bg:'#E6F1FB',color:'#185FA5'};
-    if(cls==='Partial') return {label:'🔀 Entrega parcial',bg:'#FEF9EC',color:'#A16207'};
-    if(cls==='Ship Complete') return {label:'⏳ Aguardando consolidação do pedido',bg:'#EDE0F9',color:'#5B2D99'};
-    return {label:'🔄 Em processamento',bg:'var(--g100)',color:'var(--t2)'};
+    if(cls==='Shipped') return {label:t('statusDispatched'),bg:'#E8F5EC',color:'#166534'};
+    if(cls==='PN Short') return {label:t('statusAwaitingMaterial'),bg:'#FEF3C7',color:'#92400E'};
+    if(cls==='Missing Doc') return {label:t('statusAwaitingDoc'),bg:'#FFF0E6',color:'#C05000'};
+    if(cls==='Credit Hold') return {label:t('statusAnalysis'),bg:'#FDECEA',color:'#7B1E1E'};
+    if(cls==='Late Delivery') return {label:t('statusLate'),bg:'#FDECEA',color:'#C0392B'};
+    if(cls==='Pick up pending') return {label:t('statusAwaitingPickup'),bg:'#E6F1FB',color:'#185FA5'};
+    if(cls==='Partial') return {label:t('statusPartial'),bg:'#FEF9EC',color:'#A16207'};
+    if(cls==='Ship Complete') return {label:t('statusConsolidating'),bg:'#EDE0F9',color:'#5B2D99'};
+    return {label:t('statusProcessing'),bg:'var(--g100)',color:'var(--t2)'};
   };
 
   let html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">'
@@ -818,7 +1049,7 @@ async function renderMyBacklog(){
       +'<div style="overflow-x:auto">'
       +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
       +'<thead><tr style="background:var(--g100)">'
-      +['PN','Descrição','Qtd Pedida','Despachado','Em Aberto','Disponib. Prevista','Status']
+      +['PN','Descrição',t('qtyOrdered'),t('qtyShipped'),t('qtyOpen'),t('availDate'),t('statusCol')]
         .map(h=>'<th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--t2);white-space:nowrap">'+h+'</th>').join('')
       +'</tr></thead><tbody>'
       +lines.map((item,idx)=>{
@@ -1222,7 +1453,7 @@ function renderBacklogGrid(el, items, isAdmin){
 
   el.innerHTML=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">'
-    +'<h1 class="page-title">Backlog Operacional</h1>'
+    +'<h1 class="page-title">'+t('backlogTitle')+'</h1>'
     +'<span style="font-size:12px;color:var(--tm)">'+filtered.length+' linha(s) · Atualizado agora</span>'
     +'</div>'
     // KPI row
@@ -1236,8 +1467,8 @@ function renderBacklogGrid(el, items, isAdmin){
       const forecastVal=forecastItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
       return [
         {icon:'📋',label:'Em aberto',count:openItems.length,val:fmt(openVal),color:'var(--blue)',kpi:'open',kpiv:'value'},
-        {icon:'🎯',label:'Previsto embarcar',count:forecastItems.length,val:fmt(forecastVal),color:'#D97706',kpi:'ship',kpiv:'forecast'},
-        {icon:'✅',label:'Já embarcado',count:shippedItems.length,val:fmt(shippedVal),color:'#166534',kpi:'shipped',kpiv:'shippedval'},
+        {icon:'🎯',label:t('willShipMonth'),count:forecastItems.length,val:fmt(forecastVal),color:'#D97706',kpi:'ship',kpiv:'forecast'},
+        {icon:'✅',label:t('alreadyShipped'),count:shippedItems.length,val:fmt(shippedVal),color:'#166534',kpi:'shipped',kpiv:'shippedval'},
       ].map(k=>'<div class="dash-card" style="padding:14px;margin-bottom:0;border-left:3px solid '+k.color+'">'
         +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
         +'<div style="font-size:18px">'+k.icon+'</div>'
@@ -1250,7 +1481,7 @@ function renderBacklogGrid(el, items, isAdmin){
     +'</div>'
     // Filters
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:var(--r-md)">'
-    +'<input id="bl-filter-pn" placeholder="PN ou descrição…" value="'+backlogFilters.pn+'"'
+    +'<input id="bl-filter-pn" placeholder="'+t('filterPN')+'" value="'+backlogFilters.pn+'"'
     +' oninput="backlogFilters.pn=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')"'
     +' style="flex:2;min-width:150px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"/>'
     +'<select id="bl-filter-client" oninput="backlogFilters.client=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:130px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
@@ -1271,7 +1502,7 @@ function renderBacklogGrid(el, items, isAdmin){
     +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
     +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
     +'<thead><tr style="background:var(--g100)">'
-    +['Cliente','Pedido','PN','Descrição','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Dt. Entrega','Disponib.',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
+    +[t('colClient'),t('colOrder'),t('colPN'),t('colDesc'),t('colQty'),t('colShipped'),t('colOpen'),(isAdmin||isAdmin==='salesops')?t('colPrice'):'',(isAdmin||isAdmin==='salesops')?t('colValueOpen'):'',t('colDelivery'),t('colAvail'),isAdmin===true?t('colShipMonth'):isAdmin==='salesops'?t('colShipMonth'):'',t('colClass'),t('colComments'),t('colActions')].filter(Boolean)
       .map(h=>'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
     +filtered.map((item,idx)=>{
@@ -1519,7 +1750,7 @@ function openBacklogComments(itemId){
   modal.style.display='flex';
   modal.innerHTML='<div style="background:#fff;border-radius:16px;width:90%;max-width:520px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
     +'<div style="padding:18px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
-    +'<div><p style="font-size:14px;font-weight:700">Comentários</p>'
+    +'<div><p style="font-size:14px;font-weight:700">'+t('commentsTitle')+'</p>'
     +'<p style="font-size:11px;color:var(--tm);font-family:\'JetBrains Mono\',monospace">'+item.pn+' · '+item.client_name+'</p></div>'
     +'<button onclick="document.getElementById(\'bl-comments-modal\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--tm)">×</button>'
     +'</div>'
@@ -1531,10 +1762,10 @@ function openBacklogComments(itemId){
       +'</div>'
       +'<p style="font-size:13px;color:var(--t1)">'+cm.comment+'</p>'
       +'</div>').join('')
-    :'<p style="text-align:center;color:var(--tm);font-size:13px;padding:20px">Nenhum comentário ainda.</p>')
+    :'<p style="text-align:center;color:var(--tm);font-size:13px;padding:20px">'+t('noComments')+'</p>')
     +'</div>'
     +'<div style="padding:14px 20px;border-top:1px solid var(--border)">'
-    +'<textarea id="bl-new-comment" placeholder="Adicionar comentário…" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box"></textarea>'
+    +'<textarea id="bl-new-comment" placeholder="'+t('addComment')+'" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box"></textarea>'
     +'<button onclick="saveBacklogComment(\''+itemId+'\')" style="margin-top:8px;width:100%;background:var(--blue);color:#fff;border:none;border-radius:var(--r-md);padding:9px;font-size:13px;font-weight:600;cursor:pointer">Salvar comentário</button>'
     +'</div></div>';
   modal.addEventListener('click',e=>{if(e.target===modal)modal.style.display='none';});
@@ -1571,7 +1802,7 @@ function openShipModal(itemId, qtyOrdered, qtyShipped){
   modal.style.display='flex';
   modal.innerHTML='<div style="background:#fff;border-radius:16px;width:90%;max-width:380px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
-    +'<h3 style="font-size:16px;font-weight:700">Registrar embarque</h3>'
+    +'<h3 style="font-size:16px;font-weight:700">'+t('registerShipment')+'</h3>'
     +'<button onclick="document.getElementById(\'bl-ship-modal\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--tm)">×</button>'
     +'</div>'
     +'<p style="font-size:13px;color:var(--tm);margin-bottom:14px">Qtd pedida: <strong>'+qtyOrdered+'</strong> · Já embarcado: <strong>'+qtyShipped+'</strong> · Em aberto: <strong>'+qtyOpen+'</strong></p>'
@@ -1687,7 +1918,7 @@ async function renderCutoffsTab(el){
   ]);
   const clients=clientsRes.data||[];
   const cutoffMap={};(cutoffsRes.data||[]).forEach(r=>cutoffMap[r.user_id]=r.cutoff_day);
-  el.innerHTML='<h1 class="page-title" style="margin-bottom:4px">Cutoffs mensais</h1>'
+  el.innerHTML='<h1 class="page-title" style="margin-bottom:4px">'+t('cutoffsTitle')+'</h1>'
     +'<p class="page-sub" style="margin-bottom:14px">Dia limite de embarque por cliente — válido todo mês. Ex: dia 20 = todo mês o dia 20 é o cutoff.</p>'
     +'<div style="border-radius:var(--r-md);border:1px solid var(--border);overflow:hidden">'
     +'<table class="dtbl" style="font-size:13px"><thead><tr>'
@@ -2166,7 +2397,7 @@ async function renderAdminTab(tab){
     // Assemble
     el.innerHTML=
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">'+
-        '<h1 class="page-title">Dashboard Gerencial FY2026</h1>'+
+        '<h1 class="page-title">'+t('admDashTitle')+'</h1>'+
         '<span style="font-size:12px;color:var(--tm)">'+orders.length+' pedido(s) ativo(s)</span>'+
       '</div>'+
       '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">'+kpiHtml+'</div>'+
@@ -2285,12 +2516,12 @@ async function renderAdminTab(tab){
       // ── KPI Row 1: Revenue
       +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">'
       +[
-        {icon:'💰',label:'Receita FY2026',val:fmt(totalRev),sub:pctTarget+'% da meta',color:'var(--blue)'},
-        {icon:'🎯',label:'Meta total',val:fmt(totalTarget),sub:clients.length+' clientes',color:'var(--t2)'},
-        {icon:'📋',label:'Pedidos ativos',val:orders.length,sub:pending+' aguardando revisão',color:pending>0?'#D97706':'var(--t2)'},
-        {icon:'📦',label:'Backlog aberto',val:blOpen,sub:'linhas em aberto',color:'#C05000'},
-        {icon:'✅',label:'Faturamento previsto',val:fmt(blWillShipVal),sub:blWillShip+' linhas',color:'#166534'},
-        {icon:'🚚',label:'Já embarcado',val:fmt(blShippedVal),sub:'no ciclo',color:'#5B2D99'},
+        {icon:'💰',label:t('admTotalRev'),val:fmt(totalRev),sub:pctTarget+'% da meta',color:'var(--blue)'},
+        {icon:'🎯',label:t('admTotalTarget'),val:fmt(totalTarget),sub:clients.length+' clientes',color:'var(--t2)'},
+        {icon:'📋',label:t('admActiveOrders'),val:orders.length,sub:pending+' aguardando revisão',color:pending>0?'#D97706':'var(--t2)'},
+        {icon:'📦',label:t('admBacklogOpen'),val:blOpen,sub:'linhas em aberto',color:'#C05000'},
+        {icon:'✅',label:t('forecastRevenue'),val:fmt(blWillShipVal),sub:blWillShip+' linhas',color:'#166534'},
+        {icon:'🚚',label:t('alreadyShipped'),val:fmt(blShippedVal),sub:'no ciclo',color:'#5B2D99'},
       ].map(k=>
         '<div class="dash-card" style="padding:14px;margin-bottom:0">'
         +'<div style="font-size:20px;margin-bottom:4px">'+k.icon+'</div>'
@@ -2458,7 +2689,7 @@ async function renderAdminTab(tab){
         oninput="filterCatalogTable(this.value)"
         style="flex:1;min-width:240px;padding:8px 14px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;background:#fff"/>
       <div class="tog-group">
-        <button class="tog-btn active" onclick="filterCatalogSeg(this,'ALL')">Todos</button>
+        <button class="tog-btn active" onclick="filterCatalogSeg(this,'ALL')">${t('all')}</button>
         <button class="tog-btn" onclick="filterCatalogSeg(this,'AG')">AG</button>
         <button class="tog-btn" onclick="filterCatalogSeg(this,'FD')">FD</button>
       </div>
@@ -3380,7 +3611,7 @@ async function saveOrderEdit(orderId){
   // Refresh orders tab to show updated values
   const btn=event.target;
   btn.textContent='✓ Revisão salva';btn.style.background='#3A8C4C';
-  setTimeout(()=>{btn.textContent='Salvar revisão';btn.style.background='';renderAdminTab('orders');},1500);
+  setTimeout(()=>{btn.textContent=t('saveReview');btn.style.background='';renderAdminTab('orders');},1500);
 }
 
 async function changeItemQty(itemId,orderId,delta,unitPrice){
@@ -3441,11 +3672,11 @@ function showSWOAFNotice(){
   modal.innerHTML='<div style="background:#fff;border-radius:16px;padding:28px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
     +'<div style="text-align:center;margin-bottom:16px">'
     +'<div style="font-size:40px;margin-bottom:8px">ℹ️</div>'
-    +'<h3 style="font-size:17px;font-weight:700;color:#001423;margin-bottom:8px">Itens SW-OAF — Aviso Importante</h3>'
+    +'<h3 style="font-size:17px;font-weight:700;color:#001423;margin-bottom:8px">'+t('swoafNoticeTitle')+'</h3>'
     +'<p style="font-size:14px;color:#4B4B4B;line-height:1.6;margin-bottom:8px">'
     +'Este portal é recomendado apenas para <strong>consulta de preço</strong> dos itens SW-OAF.</p>'
     +'<p style="font-size:14px;color:#C0392B;font-weight:600;line-height:1.6">'
-    +'A compra destes itens deve ser realizada exclusivamente através do portal <strong>TAP</strong>.</p>'
+    +'<p style="font-size:14px;color:#C0392B;font-weight:600;line-height:1.6">'+t('swoafNoticeCTA')+'</p>'
     +'</div>'
     +'<button onclick="document.getElementById(\'swoaf-modal\').remove()" '
     +'style="width:100%;background:var(--blue);color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px">Entendido</button>'
