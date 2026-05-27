@@ -1327,9 +1327,7 @@ function renderBacklogGrid(el, items, isAdmin){
         +'</tr>';
     }).join('')
     +'</tbody></table></div>'
-    +'<!-- Modals -->'
-    +'<div id="bl-comments-modal" style="display:none;position:fixed;inset:0;background:rgba(0,20,35,.6);z-index:99999;align-items:center;justify-content:center"></div>'
-    +'<div id="bl-ship-modal" style="display:none;position:fixed;inset:0;background:rgba(0,20,35,.6);z-index:99999;align-items:center;justify-content:center"></div>';
+        ;
 }
 
 async function handleClassificationChange(selectEl, itemId, prevClass){
@@ -3767,5 +3765,9 @@ function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classL
 function showLoader(id,msg){const el=document.getElementById(id);if(el)el.innerHTML=`<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>${msg}</div></div>`;}
 // login handled by form submit
 </script>
+
+  <!-- ── Backlog Modals (fixed, body-level) ── -->
+  <div id="bl-comments-modal" style="display:none;position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;align-items:center;justify-content:center"></div>
+  <div id="bl-ship-modal"     style="display:none;position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;align-items:center;justify-content:center"></div>
 </body>
 </html>
