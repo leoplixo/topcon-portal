@@ -1099,7 +1099,7 @@ async function checkClientEligibility(){
   if(!cUser||!cGroup) return {eligible:true,inWindow:false,purchased:0,accTarget:0,minThreshold:0};
   // OEM accounts always get Scheduled pricing — skip all window/threshold checks
   if(cProfile?.is_oem){
-    clientEligibility={eligible:true,inWindow:true,isOEM:true,purchased:0,accTarget:0,minThreshold:0};
+    clientEligibility={eligible:true,inWindow:true,isOEM:true,windowName:'',purchased:0,accTarget:0,minThreshold:0};
     return clientEligibility;
   }
   const FISCAL_START='2026-04-01';
@@ -1982,6 +1982,7 @@ function renderCatalog(){
 // CART
 function addToCart(pn){cart[pn]=(cart[pn]||0)+1;updBadge();renderCatalog();}
 function changeQty(pn,d){cart[pn]=(cart[pn]||0)+d;if(cart[pn]<=0)delete cart[pn];updBadge();renderQuote();renderCatalog();}
+function setQty(pn,val){const n=parseInt(val);if(!isNaN(n)&&n>=1){cart[pn]=n;}else{delete cart[pn];}updBadge();renderQuote();renderCatalog();}
 function updBadge(){
   const n=Object.values(cart).reduce((s,v)=>s+v,0);
   const b=document.getElementById('cart-badge');
@@ -2037,7 +2038,11 @@ function goQuote(){
   if(noteEl&&clientEligibility){
     if(clientEligibility.inWindow){
       noteEl.style.display='block';
-      noteEl.innerHTML='<div style="padding:10px 16px;background:#E6F1FB;border:1px solid var(--blue-200);border-radius:var(--r-md);font-size:13px;color:var(--blue-dark)">'+tx('windowOpenQuote',{name:clientEligibility.windowName})+'</div>';
+      if(clientEligibility.isOEM){
+        noteEl.innerHTML='<div style="padding:10px 16px;background:#EDE0F9;border:1px solid #C9A6E8;border-radius:var(--r-md);font-size:13px;color:#5B2D99">⭐ <strong>Conta OEM</strong> — Preço Scheduled sempre disponível.</div>';
+      } else {
+        noteEl.innerHTML='<div style="padding:10px 16px;background:#E6F1FB;border:1px solid var(--blue-200);border-radius:var(--r-md);font-size:13px;color:var(--blue-dark)">'+tx('windowOpenQuote',{name:clientEligibility.windowName})+'</div>';
+      }
     } else if(!clientEligibility.eligible){
       noteEl.style.display='block';
       noteEl.innerHTML='<div style="padding:10px 16px;background:#FEF3C7;border:1px solid #FAC775;border-radius:var(--r-md);font-size:13px;color:#92400E">'+tx('spotQuoteWarning')+'</div>';
@@ -2070,7 +2075,9 @@ function renderQuote(){
       <td>${i.description}</td>
       <td style="text-align:center"><div class="qty-ctrl" style="justify-content:center">
         <button class="qty-btn" onclick="changeQty('${i.pn}',-1)">−</button>
-        <span style="min-width:24px;text-align:center;font-weight:600">${i.qty}</span>
+        <input type="number" min="1" value="${i.qty}"
+          onchange="setQty('${i.pn}',this.value)"
+          style="width:52px;text-align:center;font-weight:600;font-size:13px;border:1px solid var(--border-md);border-radius:6px;padding:3px 4px;font-family:inherit"/>
         <button class="qty-btn" onclick="changeQty('${i.pn}',1)">+</button>
       </div></td>
       <td style="text-align:right;color:var(--t2)">${fmt(i.price)}</td>
