@@ -886,7 +886,12 @@ async function renderDashboard(){
 
   // Eligibility
   let eligible,statusText,statusColor;
-  if(!annualTarget){
+  // OEM accounts always get Scheduled — bypass all window/threshold logic
+  if(cProfile?.is_oem){
+    eligible=true;
+    statusText='⭐ Conta OEM — Scheduled sempre disponível';
+    statusColor='#5B2D99';
+  } else if(!annualTarget){
     eligible=null; statusText='Meta não configurada'; statusColor='var(--tm)';
   } else if(currentWindow){
     eligible=true;
@@ -1092,9 +1097,14 @@ async function renderDashboard(){
 
 async function checkClientEligibility(){
   if(!cUser||!cGroup) return {eligible:true,inWindow:false,purchased:0,accTarget:0,minThreshold:0};
+  // OEM accounts always get Scheduled pricing — skip all window/threshold checks
+  if(cProfile?.is_oem){
+    clientEligibility={eligible:true,inWindow:true,isOEM:true,purchased:0,accTarget:0,minThreshold:0};
+    return clientEligibility;
+  }
   const FISCAL_START='2026-04-01';
   const[winRes,targetRes,ordersRes]=await Promise.all([
-    sb.from('windows').select('*').eq('year',2026).order('window_number'),
+    sb.from('windows').select('*').order('window_number'),
     sb.from('targets').select('target_usd').eq('user_id',cUser.id).eq('year',2026).single(),
     sb.from('orders').select('total_usd,final_total_usd,status').eq('user_id',cUser.id)
       .gte('created_at',FISCAL_START).neq('status','cancelled')
@@ -1912,7 +1922,11 @@ function renderCatalog(){
   if(banner&&clientEligibility){
     if(clientEligibility.inWindow){
       banner.style.display='block';
-      banner.innerHTML='<div style="padding:10px 16px;background:#E6F1FB;border:1px solid var(--blue-200);border-radius:var(--r-md);font-size:13px;color:var(--blue-dark);display:flex;align-items:center;gap:8px">🔓 <strong>'+clientEligibility.windowName+' aberta</strong> — Preço Scheduled disponível para todos durante este período.</div>';
+      if(clientEligibility.isOEM){
+        banner.innerHTML='<div style="padding:10px 16px;background:#EDE0F9;border:1px solid #C9A6E8;border-radius:var(--r-md);font-size:13px;color:#5B2D99;display:flex;align-items:center;gap:8px">⭐ <strong>Conta OEM</strong> — Preço Scheduled sempre disponível.</div>';
+      } else {
+        banner.innerHTML='<div style="padding:10px 16px;background:#E6F1FB;border:1px solid var(--blue-200);border-radius:var(--r-md);font-size:13px;color:var(--blue-dark);display:flex;align-items:center;gap:8px">🔓 <strong>'+clientEligibility.windowName+' aberta</strong> — Preço Scheduled disponível para todos durante este período.</div>';
+      }
     } else if(!clientEligibility.eligible){
       banner.style.display='block';
       const _pct=(clientEligibility.accTarget>0?(clientEligibility.purchased/clientEligibility.accTarget*100).toFixed(0):'0');
@@ -2103,7 +2117,7 @@ async function sendOrder(){
   // Enforce eligibility rule
   if(priceType==='scheduled'){
     const el=clientEligibility||await checkClientEligibility();
-    if(!el.eligible&&!el.inWindow){
+    if(!el.eligible&&!el.inWindow&&!el.isOEM){
       const pct=el.accTarget>0?(el.purchased/el.accTarget*100).toFixed(0):0;
       alert(tx('spotBlock',{pct}));
       // Switch to SPOT automatically
@@ -2349,7 +2363,7 @@ async function renderAdminTab(tab){
       sb.from('orders').select('id,total_usd,final_total_usd,price_type,status,created_at,user_profiles(full_name),client_groups(label)')
         .gte('created_at',FISCAL_START).neq('status','cancelled').order('created_at'),
       sb.from('targets').select('user_id,target_usd,user_profiles(full_name)'),
-      sb.from('windows').select('*').eq('year',2026).order('window_number'),
+      sb.from('windows').select('*').order('window_number'),
       sb.from('user_profiles').select('id,full_name,client_groups(label)').eq('is_admin',false).neq('role','salesops').eq('active',true),
       sb.from('backlog_items').select('classification,will_ship_month,unit_price,qty_ordered,qty_shipped,destination')
     ]);
