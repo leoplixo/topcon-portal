@@ -1267,6 +1267,14 @@ function renderBacklogGrid(el, items, isAdmin){
     +'</select>'
     +(isAdmin?'<select id="bl-filter-ship" oninput="backlogFilters.shipMonth=this.value;renderBacklogGrid(document.getElementById(\'admin-content\')||document.querySelector(\'[id*=content]\'),window._backlogItems,true)" style="flex:1;min-width:130px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"><option value="">Embarca no mês?</option><option value="yes"'+(backlogFilters.shipMonth==='yes'?' selected':'')+'>✅ Sim</option><option value="no"'+(backlogFilters.shipMonth==='no'?' selected':'')+'>❌ Não</option></select>':'')
     +'</div>'
+    // Export / Import toolbar
+    +'<div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">'
+    +'<button onclick="exportBacklogCSV()" style="display:flex;align-items:center;gap:6px;padding:7px 14px;background:#fff;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-weight:600;color:var(--t2);cursor:pointer">⬇ Exportar CSV</button>'
+    +(isAdmin===true
+      ?'<label style="display:flex;align-items:center;gap:6px;padding:7px 14px;background:#fff;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-weight:600;color:var(--t2);cursor:pointer">⬆ Importar CSV<input type="file" accept=".csv" style="display:none" onchange="importBacklogCSV(this)"></label>'
+      +'<span id="bl-import-status" style="font-size:12px"></span>'
+      :'')
+    +'</div>'
     // Table
     +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
     +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
@@ -1444,6 +1452,7 @@ function exportBacklogCSV(){
     if(f.shipMonth==='no'&&item.will_ship_month!==false)return false;
     return true;
   });
+  // PT-BR: semicolon separator, comma decimal
   const headers=['Cliente','Destino','Pedido','PN','Descrição','Qtd Pedida','Qtd Embarcada','Qtd Aberta','Preço Unit.','Valor Aberto','Data Entrega','Disponibilidade','Embarca no Mês','Classificação','Último Comentário','Última Atualização','Atualizado por'];
   const rows=filtered.map(i=>{
     const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
@@ -1457,8 +1466,8 @@ function exportBacklogCSV(){
       i.qty_ordered,
       Number(i.qty_shipped||0),
       open,
-      Number(i.unit_price||0).toFixed(2),
-      (open*Number(i.unit_price||0)).toFixed(2),
+      Number(i.unit_price||0).toFixed(2).replace('.',','),
+      (open*Number(i.unit_price||0)).toFixed(2).replace('.',','),
       i.availability_date||'',
       i.availability_date?new Date(i.availability_date+'T12:00:00').toLocaleDateString('pt-BR'):'',
       i.will_ship_month===true?'Sim':i.will_ship_month===false?'Não':'',
@@ -1470,7 +1479,7 @@ function exportBacklogCSV(){
   });
   const csv=[headers,...rows].map(r=>r.map(v=>{
     const s=String(v??'');
-    return s.includes(',')||s.includes('"')||s.includes('\n')?'"'+s.replace(/"/g,'""')+'"':s;
+    return s.includes(';')||s.includes('"')||s.includes('\n')?'"'+s.replace(/"/g,'""')+'"':s;
   }).join(',')).join('\n');
   const bom='﻿';
   const blob=new Blob([bom+csv],{type:'text/csv;charset=utf-8'});
@@ -1479,6 +1488,143 @@ function exportBacklogCSV(){
   a.href=url;
   a.download='Backlog_Topcon_'+new Date().toISOString().slice(0,10)+'.csv';
   a.click();URL.revokeObjectURL(url);
+}
+
+async function importBacklogCSV(input){
+  const file=input.files[0];
+  if(!file)return;
+  const statusEl=document.getElementById('bl-import-status');
+  if(statusEl)statusEl.innerHTML='<span style="color:var(--tm)">Lendo arquivo…</span>';
+  try{
+    const text=await file.text();
+    // Auto-detect separator
+    const firstLine=text.replace(/^\uFEFF/,'').split('\n')[0];
+    const sep=firstLine.includes(';')?';':',';
+    const lines=text.replace(/^\uFEFF/,'').split('\n').filter(l=>l.trim());
+    const hdrs=lines[0].split(sep).map(h=>h.trim().replace(/"/g,'').toLowerCase());
+
+    // Map columns: find key columns by header name
+    const col=(names)=>{
+      for(const n of names){
+        const i=hdrs.findIndex(h=>h.includes(n));
+        if(i>=0)return i;
+      }
+      return -1;
+    };
+    const iPN         =col(['pn','part number','part_number']);
+    const iPedido     =col(['pedido','order','referência','referencia','reference']);
+    const iDisp       =col(['disponib','availab','data disp']);
+    const iClass      =col(['classif','classificação','classification']);
+    const iShipMonth  =col(['embarca','ship_month','will_ship','embarca no m']);
+    const iComment    =col(['comentário','comment','último coment']);
+    const iQtyShipped =col(['qtd embarcada','qty embarcada','shipped','embarcada']);
+
+    if(iPN<0||iPedido<0){
+      if(statusEl)statusEl.innerHTML='<span style="color:#C0392B">❌ Colunas obrigatórias não encontradas (PN, Pedido)</span>';
+      input.value='';return;
+    }
+
+    const parseDate=s=>{
+      if(!s)return null;
+      s=s.trim().replace(/"/g,'');
+      // DD/MM/YYYY
+      const ptDate=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if(ptDate)return ptDate[3]+'-'+ptDate[2].padStart(2,'0')+'-'+ptDate[1].padStart(2,'0');
+      // Already ISO
+      if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);
+      return null;
+    };
+
+    const VALID_CLS=['Incomplete Order','PN Short','Credit Hold','Pick up pending',
+      'Missing Doc','Late Delivery','Ship Complete','Partial','Shipped'];
+
+    let updated=0,skipped=0,errors=0;
+    const allItems=window._backlogItems||[];
+
+    for(let i=1;i<lines.length;i++){
+      const raw=lines[i];
+      if(!raw.trim())continue;
+      // Parse CSV line (handle quoted fields)
+      const cols=[];let cur='',inQ=false;
+      for(let ci=0;ci<raw.length;ci++){
+        if(raw[ci]==='"'){inQ=!inQ;}
+        else if(raw[ci]===sep&&!inQ){cols.push(cur.trim());cur='';}
+        else cur+=raw[ci];
+      }
+      cols.push(cur.trim());
+
+      const getCol=(idx)=>idx>=0?(cols[idx]||'').replace(/"/g,'').trim():'';
+      const pn=getCol(iPN);
+      const ref=getCol(iPedido);
+      if(!pn||!ref)continue;
+
+      // Find matching backlog item
+      const item=allItems.find(it=>it.pn===pn&&it.order_reference===ref);
+      if(!item){skipped++;continue;}
+
+      const updates={};
+
+      // Availability date
+      if(iDisp>=0){
+        const d=parseDate(getCol(iDisp));
+        if(d)updates.availability_date=d;
+      }
+      // Classification
+      if(iClass>=0){
+        const cls=getCol(iClass);
+        if(VALID_CLS.includes(cls))updates.classification=cls;
+      }
+      // Will ship month
+      if(iShipMonth>=0){
+        const s=getCol(iShipMonth).toLowerCase();
+        if(s==='sim'||s==='yes'||s==='true'||s==='1')updates.will_ship_month=true;
+        else if(s==='não'||s==='nao'||s==='no'||s==='false'||s==='0')updates.will_ship_month=false;
+      }
+      // Qty shipped
+      if(iQtyShipped>=0){
+        const v=parseFloat(getCol(iQtyShipped).replace(',','.'));
+        if(!isNaN(v)&&v>=0)updates.qty_shipped=v;
+      }
+
+      if(Object.keys(updates).length===0){skipped++;continue;}
+
+      updates.updated_by=cProfile?.full_name||'Import CSV';
+      updates.updated_at=new Date().toISOString();
+
+      const{error}=await sb.from('backlog_items').update(updates).eq('id',item.id);
+      if(error){errors++;console.error('Import error row '+i,error);}
+      else{
+        // Update local cache
+        Object.assign(item,updates);
+        updated++;
+        // If comment column exists and has content, save it
+        if(iComment>=0){
+          const comm=getCol(iComment);
+          if(comm){
+            await sb.from('backlog_comments').insert({
+              backlog_item_id:item.id,
+              comment:'[Import CSV] '+comm,
+              author_name:cProfile?.full_name||'Import',
+              author_role:cProfile?.role||'admin',
+            });
+          }
+        }
+      }
+    }
+
+    const msg=updated+' linha(s) atualizada(s)'+(skipped?' · '+skipped+' não encontrada(s)':'')+(errors?' · '+errors+' erro(s)':'');
+    if(statusEl)statusEl.innerHTML='<span style="color:#166534;font-weight:600">✅ '+msg+'</span>';
+
+    // Refresh grid
+    const el=document.getElementById('admin-content');
+    if(el&&window._backlogItems){
+      renderBacklogGrid(el,window._backlogItems,true);
+    }
+  }catch(err){
+    if(statusEl)statusEl.innerHTML='<span style="color:#C0392B">❌ Erro: '+err.message+'</span>';
+    console.error('importBacklogCSV error:',err);
+  }
+  input.value='';
 }
 
 function refreshBacklogKPIs(){
