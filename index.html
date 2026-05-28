@@ -693,9 +693,16 @@ async function setLang(lang){
   const screenSO=document.getElementById('screen-salesops');
   if(screenAdmin&&screenAdmin.style.display!=='none'){
     const activeTab=document.querySelector('.atab.active');
-    if(activeTab) renderAdminTab(activeTab.getAttribute('onclick')?.match(/'(\w+)'/)?.[1]||'admindash');
+    const tabName=activeTab?.getAttribute('onclick')?.match(/'([\w]+)'/)?.[1]||'admindash';
+    await renderAdminTab(tabName);
+    const ac=document.getElementById('admin-content');
+    if(ac) translateDOM(ac);
   }
-  if(screenSO&&screenSO.style.display!=='none') renderSalesOpsBacklog();
+  if(screenSO&&screenSO.style.display!=='none'){
+    await renderSalesOpsBacklog();
+    const sc=document.getElementById('salesops-content');
+    if(sc) translateDOM(sc);
+  }
   // Update lang buttons in all screens
   updateLangButtons();
 }
@@ -728,6 +735,86 @@ function applyLangToStatic(){
   updateLangButtons();
 }
 let catalog=[], cart={}, priceType='scheduled', segFilter='ALL';
+// ── DOM auto-translation ─────────────────────────────────────────
+// Called after any screen renders — translates all visible text nodes
+const _domTransPending = new Set();
+
+async function translateDOM(el){
+  if(!el || LANG==='pt') return;
+  // Collect all text nodes with meaningful content
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode(node){
+      const txt = node.textContent.trim();
+      // Skip empty, pure numbers, codes, USD amounts, dates
+      if(!txt || txt.length < 2) return NodeFilter.FILTER_REJECT;
+      if(/^[\d\s\.,\-\+\$\/\%\:]+$/.test(txt)) return NodeFilter.FILTER_REJECT;
+      if(/^USD\s?[\.\d,]+$/.test(txt)) return NodeFilter.FILTER_REJECT;
+      if(/^\d{4,}$/.test(txt)) return NodeFilter.FILTER_REJECT; // PN numbers
+      if(/^(TOP|FY|PN)\-/.test(txt)) return NodeFilter.FILTER_REJECT; // refs
+      if(/^[A-Z\d\-\.]{6,}$/.test(txt)) return NodeFilter.FILTER_REJECT; // part numbers
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const nodes = [];
+  let node;
+  while((node = walker.nextNode())) nodes.push(node);
+
+  for(const textNode of nodes){
+    const original = textNode.textContent.trim();
+    if(!original || original.length < 2) continue;
+    const ck = original + '|' + LANG;
+    if(_atCache[ck]){
+      // Already in cache — apply immediately
+      textNode.textContent = textNode.textContent.replace(original, _atCache[ck]);
+    } else if(!_domTransPending.has(ck)){
+      _domTransPending.add(ck);
+      // Fetch and update async
+      _fetchAndApplyTranslation(textNode, original);
+    }
+  }
+}
+
+async function _fetchAndApplyTranslation(textNode, original){
+  const ck = original + '|' + LANG;
+  // Check Supabase cache
+  try{
+    const{data} = await sb.from('translations').select('translated')
+      .eq('lang', LANG).eq('key_text', original).single();
+    if(data?.translated){
+      _atCache[ck] = data.translated;
+      if(textNode.textContent.includes(original))
+        textNode.textContent = textNode.textContent.replace(original, data.translated);
+      return;
+    }
+  }catch(e){}
+  // Google Translate
+  try{
+    const tl = LANG==='es'?'es':'en';
+    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=pt&tl='+tl+'&dt=t&q='+encodeURIComponent(original);
+    const res = await fetch(url);
+    const json = await res.json();
+    const translated = json[0].map(x=>x[0]).join('');
+    _atCache[ck] = translated;
+    if(textNode.textContent.includes(original))
+      textNode.textContent = textNode.textContent.replace(original, translated);
+    // Save to Supabase
+    sb.from('translations').upsert({lang:LANG,key_text:original,translated},{onConflict:'lang,key_text'}).then(()=>{});
+  }catch(e){}
+}
+
+// ── Auto-translate on DOM changes for admin/salesops ─────────────
+function initTranslationObserver(){
+  const targets = ['admin-content','salesops-content'];
+  targets.forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    const obs = new MutationObserver(()=>{
+      if(LANG!=='pt') setTimeout(()=>translateDOM(el), 100);
+    });
+    obs.observe(el, {childList:true, subtree:false});
+  });
+}
+
 // ── Cart persistence ─────────────────────────────────────────────
 function saveCartDraft(){
   if(!cUser)return;
@@ -826,6 +913,7 @@ async function afterLogin(){
     document.getElementById('u-nm').textContent=profile.full_name;
     document.getElementById('u-grp').textContent='· '+(cGroup?.label||'');
     showScreen('client');
+  initTranslationObserver();
   // Preload translations if not PT
   if(LANG!=='pt') preloadTranslations(LANG).then(()=>{
     applyLangToStatic();
