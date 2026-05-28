@@ -371,7 +371,7 @@ initEmailJS();
 // ── EmailJS config — replace with your values ──────────────────
 // EMAILJS_PUBLIC_KEY, SERVICE_ID, TEMPLATE IDs are set above in const declarations
 
-async function sendOrderEmail(order, items, clientName, groupLabel, deliveryDate){
+async function sendOrderEmail(order, items, clientName, groupLabel, deliveryDate, packagingPref, shippingPref, orderComments){
   if(EMAILJS_PUBLIC_KEY === 'YOUR_EMAILJS_PUBLIC_KEY') return;
   try {
     const itemsText = items.map(i=>i.pn+' | '+i.description+' | Qtd: '+i.qty+' | Unit: '+fmt(i.price)+' | Total: '+fmt(i.total)).join('\n');
@@ -387,6 +387,9 @@ async function sendOrderEmail(order, items, clientName, groupLabel, deliveryDate
       items_list:    itemsText,
       total_usd:     fmt(total),
       portal_url:    window.location.origin,
+      packaging:     packagingPref==='pallet'?'Paletizado':'Caixas soltas / Separadas',
+      shipping_type: shippingPref==='complete'?'Ship Complete':'Envio parcial',
+      comments:      orderComments||'—',
     };
     // Fetch admin notification emails from DB
     const{data:admins}=await sb.from('user_profiles').select('notification_email').eq('is_admin',true).not('notification_email','is',null);
@@ -475,6 +478,14 @@ const I18N={
     orderSent:'Pedido enviado!',orderSentMsg:'Recebemos seu pedido. Nossa equipe entrará em contato em breve.',
     orderRef:'Referência:',newOrder:'+ Novo orçamento',
     deliveryLabel:'📦 Mês de retirada na Topcon',
+    packagingLabel:'📦 Embalagem',
+    packagingPallet:'Paletizado',
+    packagingLoose:'Caixas soltas / Separadas',
+    shippingLabel:'🚚 Tipo de envio',
+    shippingComplete:'Ship Complete — enviar apenas quando todos os itens estiverem prontos',
+    shippingPartial:'Envio parcial — enviar conforme os itens ficam disponíveis',
+    commentsLabel:'💬 Comentários sobre o pedido (opcional)',
+    commentsPlaceholder:'Ex: atenção especial ao PN X, contato para entrega, instruções adicionais…',
     deliveryNote:'O mês selecionado representa quando os itens estarão prontos para retirada na Topcon.',
     deliveryPlaceholder:'— Selecione o mês desejado —',
     subtotal:'Subtotal',shipping:'Frete',shippingNote:'A consultar',estimatedTotal:'Total estimado',
@@ -523,6 +534,14 @@ const I18N={
     orderSent:'¡Pedido enviado!',orderSentMsg:'Recibimos tu pedido. Nuestro equipo se pondrá en contacto pronto.',
     orderRef:'Referencia:',newOrder:'+ Nuevo presupuesto',
     deliveryLabel:'📦 Mes de retiro en Topcon',
+    packagingLabel:'📦 Embalaje',
+    packagingPallet:'Paletizado',
+    packagingLoose:'Cajas sueltas / Separadas',
+    shippingLabel:'🚚 Tipo de envío',
+    shippingComplete:'Ship Complete — enviar solo cuando todos los artículos estén listos',
+    shippingPartial:'Envío parcial — enviar a medida que los artículos estén disponibles',
+    commentsLabel:'💬 Comentarios sobre el pedido (opcional)',
+    commentsPlaceholder:'Ej: atención especial al PN X, contacto de entrega, instrucciones adicionales…',
     deliveryNote:'El mes seleccionado representa cuándo los artículos estarán listos para retiro en Topcon.',
     deliveryPlaceholder:'— Seleccione el mes deseado —',
     subtotal:'Subtotal',shipping:'Flete',shippingNote:'A consultar',estimatedTotal:'Total estimado',
@@ -571,6 +590,14 @@ const I18N={
     orderSent:'Order sent!',orderSentMsg:'We received your order. Our team will be in touch soon.',
     orderRef:'Reference:',newOrder:'+ New quote',
     deliveryLabel:'📦 Pickup month at Topcon',
+    packagingLabel:'📦 Packaging',
+    packagingPallet:'Palletized',
+    packagingLoose:'Loose boxes / Separated',
+    shippingLabel:'🚚 Shipping type',
+    shippingComplete:'Ship Complete — ship only when all items are ready',
+    shippingPartial:'Partial shipment — ship as items become available',
+    commentsLabel:'💬 Order comments (optional)',
+    commentsPlaceholder:'E.g.: special attention to PN X, delivery contact, additional instructions…',
     deliveryNote:'The selected month is when items will be ready for pickup at Topcon.',
     deliveryPlaceholder:'— Select desired month —',
     subtotal:'Subtotal',shipping:'Freight',shippingNote:'To be confirmed',estimatedTotal:'Estimated total',
@@ -2236,6 +2263,18 @@ function renderCatalog(){
 
 // CART
 function addToCart(pn){cart[pn]=(cart[pn]||0)+1;updBadge();renderCatalog();}
+function highlightOrderPref(type){
+  if(type==='pkg'){
+    const v=document.querySelector('input[name="packaging"]:checked')?.value;
+    document.getElementById('pkg-pallet-wrap').style.borderColor=v==='pallet'?'var(--blue)':'var(--border)';
+    document.getElementById('pkg-loose-wrap').style.borderColor=v==='loose'?'var(--blue)':'var(--border)';
+  } else {
+    const v=document.querySelector('input[name="shippingtype"]:checked')?.value;
+    document.getElementById('ship-complete-wrap').style.borderColor=v==='complete'?'var(--blue)':'var(--border)';
+    document.getElementById('ship-partial-wrap').style.borderColor=v==='partial'?'var(--blue)':'var(--border)';
+  }
+  document.getElementById('order-prefs-err')?.style && (document.getElementById('order-prefs-err').style.display='none');
+}
 function changeQty(pn,d){cart[pn]=(cart[pn]||0)+d;if(cart[pn]<=0)delete cart[pn];updBadge();renderQuote();renderCatalog();}
 function setQty(pn,val){const n=parseInt(val);if(!isNaN(n)&&n>=1){cart[pn]=n;}else{delete cart[pn];}updBadge();renderQuote();renderCatalog();}
 function updBadge(){
@@ -2368,6 +2407,43 @@ function renderQuote(){
         Considere o tempo de transporte até o seu destino final ao escolher a data.
       </p>
     </div>
+    <div style="margin-top:16px;padding:16px;background:#fff;border:1px solid var(--border);border-radius:var(--r-lg)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+        <!-- Packaging -->
+        <div>
+          <p style="font-size:12px;font-weight:600;color:var(--t2);margin-bottom:8px">${t('packagingLabel')} <span style="color:#C0392B">*</span></p>
+          <label style="display:flex;align-items:flex-start;gap:8px;padding:10px;border:2px solid var(--border);border-radius:var(--r-md);cursor:pointer;margin-bottom:6px;transition:border-color .15s" id="pkg-pallet-wrap">
+            <input type="radio" name="packaging" value="pallet" style="margin-top:2px;accent-color:var(--blue)" onchange="highlightOrderPref('pkg')"/>
+            <span style="font-size:13px">${t('packagingPallet')}</span>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:8px;padding:10px;border:2px solid var(--border);border-radius:var(--r-md);cursor:pointer;transition:border-color .15s" id="pkg-loose-wrap">
+            <input type="radio" name="packaging" value="loose" style="margin-top:2px;accent-color:var(--blue)" onchange="highlightOrderPref('pkg')"/>
+            <span style="font-size:13px">${t('packagingLoose')}</span>
+          </label>
+        </div>
+        <!-- Shipping type -->
+        <div>
+          <p style="font-size:12px;font-weight:600;color:var(--t2);margin-bottom:8px">${t('shippingLabel')} <span style="color:#C0392B">*</span></p>
+          <label style="display:flex;align-items:flex-start;gap:8px;padding:10px;border:2px solid var(--border);border-radius:var(--r-md);cursor:pointer;margin-bottom:6px;transition:border-color .15s" id="ship-complete-wrap">
+            <input type="radio" name="shippingtype" value="complete" style="margin-top:2px;accent-color:var(--blue)" onchange="highlightOrderPref('ship')"/>
+            <span style="font-size:13px">${t('shippingComplete')}</span>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:8px;padding:10px;border:2px solid var(--border);border-radius:var(--r-md);cursor:pointer;transition:border-color .15s" id="ship-partial-wrap">
+            <input type="radio" name="shippingtype" value="partial" style="margin-top:2px;accent-color:var(--blue)" onchange="highlightOrderPref('ship')"/>
+            <span style="font-size:13px">${t('shippingPartial')}</span>
+          </label>
+        </div>
+      </div>
+      <!-- Comments -->
+      <div>
+        <p style="font-size:12px;font-weight:600;color:var(--t2);margin-bottom:6px">${t('commentsLabel')}</p>
+        <textarea id="order-comments" placeholder="${t('commentsPlaceholder')}"
+          style="width:100%;min-height:72px;padding:10px 12px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box"></textarea>
+      </div>
+      <div id="order-prefs-err" style="display:none;margin-top:8px;font-size:12px;color:#C0392B;font-weight:600">
+        ⚠️ Selecione embalagem e tipo de envio antes de continuar.
+      </div>
+    </div>
     <div class="actions" style="margin-top:12px">
       <button class="btn btn-outline" onclick="exportPDF()">📄 Exportar PDF</button>
       <button class="btn btn-primary" id="send-btn" onclick="sendOrder()">Enviar pedido →</button>
@@ -2377,6 +2453,18 @@ function renderQuote(){
 // ORDER
 async function sendOrder(){
   const btn=document.getElementById('send-btn');
+  // Validate packaging & shipping prefs
+  const packaging=document.querySelector('input[name="packaging"]:checked')?.value;
+  const shippingPref=document.querySelector('input[name="shippingtype"]:checked')?.value;
+  const orderComments=document.getElementById('order-comments')?.value?.trim()||'';
+  if(!packaging||!shippingPref){
+    const errEl=document.getElementById('order-prefs-err');
+    if(errEl) errEl.style.display='block';
+    // highlight missing
+    if(!packaging){highlightOrderPref('pkg');document.getElementById('pkg-pallet-wrap').style.borderColor='#C0392B';document.getElementById('pkg-loose-wrap').style.borderColor='#C0392B';}
+    if(!shippingPref){highlightOrderPref('ship');document.getElementById('ship-complete-wrap').style.borderColor='#C0392B';document.getElementById('ship-partial-wrap').style.borderColor='#C0392B';}
+    return;
+  }
   // Enforce eligibility rule
   if(priceType==='scheduled'){
     const el=clientEligibility||await checkClientEligibility();
@@ -2395,7 +2483,8 @@ async function sendOrder(){
   const deliveryDate=document.getElementById('delivery-date')?.value||null;
   const {data:order,error:oErr}=await sb.from('orders').insert({
     reference:ref,user_id:cUser.id,group_id:cGroup.id,price_type:priceType,
-    total_usd:total,requested_delivery_date:deliveryDate
+    total_usd:total,requested_delivery_date:deliveryDate,
+    packaging_pref:packaging||null,shipping_pref:shippingPref||null,order_comments:orderComments||null
   }).select().single();
   if(oErr){alert('Erro ao enviar pedido. Tente novamente.');if(btn){btn.disabled=false;btn.textContent='Enviar pedido →';}return;}
   const itemsPayload=items.map(i=>({order_id:order.id,part_id:i.id,pn:i.pn,description:i.description,unit_price:i.price,quantity:i.qty}));
@@ -2933,6 +3022,8 @@ requestAnimationFrame(()=>{
             <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${o.price_type==='scheduled'?'#E6F1FB':'#FEF3C7'};color:${o.price_type==='scheduled'?'#185FA5':'#92400E'};font-weight:600">${o.price_type==='scheduled'?'Scheduled':'SPOT'}</span>
             <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#E6F1FB;color:var(--blue)">📦 ${delivStr}</span>
             ${o.forwarded_to?`<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#E0F4F6;color:#0A7A8C;font-weight:600">→ ${o.forwarded_to}</span>`:''}
+            ${o.packaging_pref?`<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#F3E8FF;color:#5B2D99;font-weight:600">📦 ${o.packaging_pref==='pallet'?'Paletizado':'Cx. soltas'}</span>`:''}
+            ${o.shipping_pref?`<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#F0FFF4;color:#166534;font-weight:600">🚚 ${o.shipping_pref==='complete'?'Ship Complete':'Envio parcial'}</span>`:''}
             ${o.status==='cancelled'?`<button onclick="deleteOrder('${o.id}',event)" style="font-size:11px;padding:2px 10px;border-radius:10px;background:#FDECEA;color:#C0392B;border:1px solid #FECACA;font-weight:600;cursor:pointer">🗑 Excluir</button>`:''}
           </div>
           <div style="text-align:right;min-width:110px">
@@ -2954,6 +3045,7 @@ requestAnimationFrame(()=>{
             <select id="del-${o.id}" style="padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit">
               <option value="">📦 Sem data</option>${monthOpts}
             </select>
+            ${o.order_comments?`<div style="padding:6px 10px;background:#F3E8FF;border:1px solid #C9A6E8;border-radius:var(--r-md);font-size:12px;color:#5B2D99;margin-bottom:8px">💬 <strong>Comentário do cliente:</strong> ${o.order_comments}</div>`:''}
             <input type="text" id="notes-${o.id}" value="${o.edit_notes||''}" placeholder="Observações…"
               style="flex:1;min-width:160px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-family:inherit"/>
             <button class="btn btn-primary btn-sm" onclick="saveOrderEdit('${o.id}')">Salvar revisão</button>
@@ -3368,6 +3460,9 @@ async function forwardOrder(orderId, destination){
     L.group+': '+(order.client_groups?.label||'—'),
     L.orderDate+': '+new Date(order.created_at).toLocaleDateString('pt-BR'),
     L.delivery+': '+delivStr,
+    ...(order.packaging_pref?[`${isEN?'PACKAGING':isES?'EMBALAJE':'EMBALAGEM'}: ${order.packaging_pref==='pallet'?(isEN?'Palletized':isES?'Paletizado':'Paletizado'):(isEN?'Loose boxes':isES?'Cajas sueltas':'Caixas soltas')}`]:[]),
+    ...(order.shipping_pref?[`${isEN?'SHIPPING TYPE':isES?'TIPO DE ENVÍO':'TIPO DE ENVIO'}: ${order.shipping_pref==='complete'?(isEN?'Ship Complete':isES?'Ship Complete':'Ship Complete'):(isEN?'Partial shipment':isES?'Envío parcial':'Envio parcial')}`]:[]),
+    ...(order.order_comments?[`${isEN?'CLIENT COMMENTS':isES?'COMENTARIOS DEL CLIENTE':'COMENTÁRIOS DO CLIENTE'}: ${order.order_comments}`]:[]),
     L.priceType+': '+(order.price_type==='scheduled'?L.scheduled:L.spot),
     '',L.items+':',
     ...items.map(i=>{
