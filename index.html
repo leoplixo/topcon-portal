@@ -594,22 +594,72 @@ const I18N={
 };
 
 // Unified translation function - replaces both t() and tx()
+// ── Auto-translation cache ───────────────────────────────────────
+const _atCache={};       // { 'ptText|lang': 'translated' }
+const _atPending=new Set(); // keys being fetched
+
 const t=(key,vars={})=>{
   let s=(I18N[LANG]||I18N.pt)[key];
   if(s===undefined) s=(I18N.pt[key]||key);
-  if(vars && typeof vars === 'object'){
-    Object.entries(vars).forEach(([k,v])=>{ s=s.replace(new RegExp('{'+k+'}','g'),v); });
+  // Auto-translate: if lang!=pt and we got the PT fallback, try cache
+  if(LANG!=='pt'){
+    const ptVal=I18N.pt[key]||key;
+    const ck=ptVal+'|'+LANG;
+    if(_atCache[ck]) s=_atCache[ck];
+    else _scheduleTranslate(ptVal);
+  }
+  if(vars&&typeof vars==='object'){
+    Object.entries(vars).forEach(([k,v])=>{s=s.replace(new RegExp('{'+k+'}','g'),v);});
   }
   return s;
 };
-// tx is now just an alias for t
 const tx=t;
 
+async function _scheduleTranslate(ptText){
+  if(!ptText||LANG==='pt') return;
+  const ck=ptText+'|'+LANG;
+  if(_atCache[ck]||_atPending.has(ck)) return;
+  _atPending.add(ck);
+  // Check Supabase cache first
+  try{
+    const{data}=await sb.from('translations').select('translated').eq('lang',LANG).eq('key_text',ptText).single();
+    if(data?.translated){ _atCache[ck]=data.translated; return; }
+  }catch(e){}
+  // Call Google Translate free endpoint
+  try{
+    const tl=LANG==='es'?'es':'en';
+    const url='https://translate.googleapis.com/translate_a/single?client=gtx&sl=pt&tl='+tl+'&dt=t&q='+encodeURIComponent(ptText);
+    const res=await fetch(url);
+    const json=await res.json();
+    const translated=json[0].map(x=>x[0]).join('');
+    _atCache[ck]=translated;
+    // Save to Supabase for next time
+    sb.from('translations').upsert({lang:LANG,key_text:ptText,translated},{onConflict:'lang,key_text'}).then(()=>{});
+  }catch(e){ console.warn('AutoTranslate error:',ptText,e); }
+}
 
-function setLang(lang){
+async function preloadTranslations(lang){
+  if(lang==='pt') return;
+  try{
+    const{data}=await sb.from('translations').select('key_text,translated').eq('lang',lang);
+    (data||[]).forEach(r=>{ _atCache[r.key_text+'|'+lang]=r.translated; });
+  }catch(e){}
+  // Also seed any I18N PT values not yet translated
+  const ptKeys=Object.keys(I18N.pt);
+  const missing=ptKeys.filter(k=>!_atCache[(I18N.pt[k]||k)+'|'+lang]);
+  for(const k of missing.slice(0,50)){ // batch first 50 to avoid rate limits
+    _scheduleTranslate(I18N.pt[k]||k);
+    await new Promise(r=>setTimeout(r,30)); // small delay between calls
+  }
+}
+
+
+async function setLang(lang){
   LANG=lang;
   try{localStorage.setItem('topcon_lang',lang);}catch(e){}
   updateLangButtons();
+  // Preload translations from cache before re-rendering
+  await preloadTranslations(lang);
   applyLangToStatic();
   // Re-render current dynamic view
   const screenClient=document.getElementById('screen-client');
@@ -754,6 +804,10 @@ async function afterLogin(){
     document.getElementById('u-nm').textContent=profile.full_name;
     document.getElementById('u-grp').textContent='· '+(cGroup?.label||'');
     showScreen('client');
+  // Preload translations if not PT
+  if(LANG!=='pt') preloadTranslations(LANG).then(()=>{
+    applyLangToStatic();
+  });
   // Restore cart draft if any
   const draftSavedAt = loadCartDraft();
   if(draftSavedAt){
