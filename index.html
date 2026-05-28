@@ -744,12 +744,25 @@ const _noTranslate = new Set([
 ]);
 
 async function loadNoTranslateList(){
+  _noTranslateReady = false;
   try{
-    // Load client names
-    const{data:profiles}=await sb.from('user_profiles').select('full_name').eq('is_admin',false);
-    (profiles||[]).forEach(p=>{ if(p.full_name) _noTranslate.add(p.full_name.trim()); });
-    // Load part descriptions (first word / brand name protection)
-    // Parts PN and descriptions handled by regex filter
+    const[profilesRes, backlogRes] = await Promise.all([
+      sb.from('user_profiles').select('full_name').eq('is_admin',false),
+      sb.from('backlog_items').select('client_name').limit(500)
+    ]);
+    (profilesRes.data||[]).forEach(p=>{
+      if(p.full_name){
+        _noTranslate.add(p.full_name.trim());
+        _noTranslate.add(p.full_name.trim().toUpperCase());
+        _noTranslate.add(p.full_name.trim().toLowerCase());
+      }
+    });
+    (backlogRes.data||[]).forEach(b=>{
+      if(b.client_name){
+        _noTranslate.add(b.client_name.trim());
+        _noTranslate.add(b.client_name.trim().toUpperCase());
+      }
+    });
   }catch(e){}
 }
 
@@ -767,17 +780,25 @@ function _shouldTranslate(txt){
   if(/^TOP\-\d+/.test(t)) return false;
   // Skip email addresses
   if(t.includes('@')) return false;
-  // Skip known client/company names
+  // Skip known client/company names (case-insensitive)
   if(_noTranslate.has(t)) return false;
-  // Skip if text is a substring of any no-translate entry
+  if(_noTranslate.has(t.toUpperCase())) return false;
+  if(_noTranslate.has(t.toLowerCase())) return false;
+  const tLow = t.toLowerCase();
   for(const name of _noTranslate){
-    if(t === name || name.includes(t) && t.length > 4) return false;
+    if(name.toLowerCase() === tLow) return false;
   }
   return true;
 }
 
+let _noTranslateReady = false;
 async function translateDOM(el){
   if(!el || LANG==='pt') return;
+  // Wait for client name list if not ready
+  if(!_noTranslateReady){
+    await loadNoTranslateList();
+    _noTranslateReady = true;
+  }
   // Collect all text nodes with meaningful content
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
     acceptNode(node){
