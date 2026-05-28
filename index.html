@@ -2482,6 +2482,12 @@ async function renderAdminTab(tab){
     ]);
 
     const orders=ordersRes.data||[];
+
+    const targets=targetsRes.data||[];
+    const windows=windowsRes.data||[];
+    const clients=clientsRes.data||[];
+    const backlog=backlogRes.data||[];
+
     const costMap={};(partsRes.data||[]).forEach(p=>costMap[p.pn]=Number(p.cost));
     const TARGET_M=40;
     const mItems=orders.flatMap(o=>(o.order_items||[]).map(i=>({
@@ -2500,11 +2506,6 @@ async function renderAdminTab(tab){
     const byDest={};mItems.forEach(i=>{if(i.dest&&i.dest!=='—'){if(!byDest[i.dest])byDest[i.dest]=[];byDest[i.dest].push(i);}});
     const destM=Object.entries(byDest).map(([n,it])=>({n,m:wCalc(it),r:it.reduce((s,i)=>s+i.fp*i.qty,0)})).filter(x=>x.m!==null).sort((a,b)=>a.n.localeCompare(b.n));
     const overallM=wCalc(mItems);
-
-    const targets=targetsRes.data||[];
-    const windows=windowsRes.data||[];
-    const clients=clientsRes.data||[];
-    const backlog=backlogRes.data||[];
 
     const oTotal=o=>Number(o.final_total_usd||o.total_usd||0);
     const totalRev=orders.reduce((s,o)=>s+oTotal(o),0);
