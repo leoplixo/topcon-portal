@@ -738,6 +738,43 @@ let catalog=[], cart={}, priceType='scheduled', segFilter='ALL';
 // ── DOM auto-translation ─────────────────────────────────────────
 // Called after any screen renders — translates all visible text nodes
 const _domTransPending = new Set();
+// Names/terms that must NEVER be translated (client names, product names, etc.)
+const _noTranslate = new Set([
+  // These are populated on login from user_profiles + catalog
+]);
+
+async function loadNoTranslateList(){
+  try{
+    // Load client names
+    const{data:profiles}=await sb.from('user_profiles').select('full_name').eq('is_admin',false);
+    (profiles||[]).forEach(p=>{ if(p.full_name) _noTranslate.add(p.full_name.trim()); });
+    // Load part descriptions (first word / brand name protection)
+    // Parts PN and descriptions handled by regex filter
+  }catch(e){}
+}
+
+function _shouldTranslate(txt){
+  const t = txt.trim();
+  if(!t || t.length < 2) return false;
+  // Skip pure numbers, symbols, USD amounts
+  if(/^[\d\s\.,\-\+\$\/\%\:]+$/.test(t)) return false;
+  // Skip ALL CAPS text (part descriptions, product names)
+  if(t.length > 3 && t === t.toUpperCase() && /[A-Z]/.test(t)) return false;
+  if(/^USD\s?[\d\.,]+$/.test(t)) return false;
+  // Skip part numbers (6+ uppercase chars/numbers)
+  if(/^[A-Z0-9][A-Z0-9\-\.]{5,}$/.test(t)) return false;
+  // Skip order references
+  if(/^TOP\-\d+/.test(t)) return false;
+  // Skip email addresses
+  if(t.includes('@')) return false;
+  // Skip known client/company names
+  if(_noTranslate.has(t)) return false;
+  // Skip if text is a substring of any no-translate entry
+  for(const name of _noTranslate){
+    if(t === name || name.includes(t) && t.length > 4) return false;
+  }
+  return true;
+}
 
 async function translateDOM(el){
   if(!el || LANG==='pt') return;
@@ -745,14 +782,7 @@ async function translateDOM(el){
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
     acceptNode(node){
       const txt = node.textContent.trim();
-      // Skip empty, pure numbers, codes, USD amounts, dates
-      if(!txt || txt.length < 2) return NodeFilter.FILTER_REJECT;
-      if(/^[\d\s\.,\-\+\$\/\%\:]+$/.test(txt)) return NodeFilter.FILTER_REJECT;
-      if(/^USD\s?[\.\d,]+$/.test(txt)) return NodeFilter.FILTER_REJECT;
-      if(/^\d{4,}$/.test(txt)) return NodeFilter.FILTER_REJECT; // PN numbers
-      if(/^(TOP|FY|PN)\-/.test(txt)) return NodeFilter.FILTER_REJECT; // refs
-      if(/^[A-Z\d\-\.]{6,}$/.test(txt)) return NodeFilter.FILTER_REJECT; // part numbers
-      return NodeFilter.FILTER_ACCEPT;
+        return _shouldTranslate(txt) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
     }
   });
   const nodes = [];
@@ -914,6 +944,7 @@ async function afterLogin(){
     document.getElementById('u-grp').textContent='· '+(cGroup?.label||'');
     showScreen('client');
   initTranslationObserver();
+  loadNoTranslateList(); // load client names to protect from translation
   // Preload translations if not PT
   if(LANG!=='pt') preloadTranslations(LANG).then(()=>{
     applyLangToStatic();
