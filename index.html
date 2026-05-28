@@ -3131,6 +3131,7 @@ async function renderAdminTab(tab){
           </div>
           <div style="display:flex;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);align-items:center;flex-wrap:wrap">
             <span style="font-size:12px;font-weight:600;color:var(--t2)">Encaminhar para Sales OPS:</span>
+            ${o.forwarded_to?`<span style="font-size:11px;background:#FEF3C7;color:#92400E;padding:3px 10px;border-radius:6px;font-weight:600;margin-left:4px">⚠️ Já encaminhado para ${o.forwarded_to} — reencaminhar vai sobrepor o backlog</span>`:``}
             <button class="btn btn-sm" style="background:#E0F4F6;color:#0A7A8C;border:1px solid #A0D4DC;font-weight:600" onclick="this.textContent='⏳ Preparando...';this.disabled=true;forwardOrder('${o.id}','Madrid')">📤 Madri</button>
             <button class="btn btn-sm" style="background:#E8F5EC;color:#3A8C4C;border:1px solid #B8DCBF;font-weight:600" onclick="this.textContent='⏳ Preparando...';this.disabled=true;forwardOrder('${o.id}','Fort Atkinson')">📤 Fort Atkinson</button>
             ${o.forwarded_to?`<span style="font-size:12px;color:var(--tm)">Encaminhado para <strong>${o.forwarded_to}</strong> em ${new Date(o.forwarded_at).toLocaleDateString('pt-BR')}</span>`:''}
@@ -3406,6 +3407,13 @@ function updateItemFinal(itemId, unitPrice, orderId){
 
 async function forwardOrder(orderId, destination){
   try{
+  // Check if already forwarded and warn
+  const card=document.getElementById('order-card-'+orderId);
+  const alreadyFwd=card?.querySelector('[data-forwarded]')?.dataset.forwarded;
+  if(alreadyFwd){
+    const ok=confirm('Este pedido já foi encaminhado para '+alreadyFwd+'.\n\nEncaminhar novamente vai sobrepor o backlog existente com os dados atuais.\n\nContinuar?');
+    if(!ok) return;
+  }
   // Auto-save all discount values currently visible on screen
   const editRows=document.querySelectorAll('#items-'+orderId+' tr');
   let calcFinalTotal=0;
@@ -3529,7 +3537,10 @@ async function forwardOrder(orderId, destination){
       classification:     'Incomplete Order',
       updated_by:         cProfile?.full_name||'Admin',
     }));
-    await sb.from('backlog_items').upsert(backlogRows,{onConflict:'order_item_id'});
+    await sb.from('backlog_items').upsert(backlogRows,{
+      onConflict:'order_item_id',
+      ignoreDuplicates:false  // always overwrite existing row with new values
+    });
   }catch(e){console.warn('Backlog creation error:',e);}
 
   // Show modal with direct mailto link (avoids browser popup blocker)
