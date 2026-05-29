@@ -1037,9 +1037,22 @@ async function renderMyBacklog(){
   }
 
   const{data:items}=await sb.from('backlog_items')
-    .select('id,order_reference,pn,description,qty_ordered,qty_shipped,availability_date,classification,unit_price,price_type,backlog_shipments(qty_shipped,ship_date)')
+    .select('id,order_reference,pn,description,qty_ordered,qty_shipped,availability_date,classification,unit_price,price_type')
     .in('order_id',orderIds)
     .order('order_reference');
+
+  // Fetch real shipments separately (avoid FK join dependency)
+  let shipmentsMap={};
+  if(items?.length){
+    const backlogIds=items.map(i=>i.id);
+    const{data:shipments}=await sb.from('backlog_shipments')
+      .select('backlog_item_id,qty_shipped,ship_date')
+      .in('backlog_item_id',backlogIds);
+    (shipments||[]).forEach(s=>{
+      if(!shipmentsMap[s.backlog_item_id]) shipmentsMap[s.backlog_item_id]=[];
+      shipmentsMap[s.backlog_item_id].push(s);
+    });
+  }
 
   if(!items?.length){
     el.innerHTML='<h1 class="page-title" style="margin-bottom:8px">Meus Pedidos em Processo</h1>'
@@ -1105,7 +1118,7 @@ async function renderMyBacklog(){
       +'</tr></thead><tbody>'
       +lines.map((item,idx)=>{
         // Use real shipped qty from backlog_shipments if available
-        const realShipped=(item.backlog_shipments||[]).reduce((s,r)=>s+Number(r.qty_shipped||0),0);
+        const realShipped=(shipmentsMap[item.id]||[]).reduce((s,r)=>s+Number(r.qty_shipped||0),0);
         const qtyShipped=realShipped>0?realShipped:Number(item.qty_shipped||0);
         const open=Math.max(0,Number(item.qty_ordered||0)-qtyShipped);
         const{label,bg,color}=clientStatus(item.classification);
