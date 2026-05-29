@@ -1027,9 +1027,10 @@ async function renderMyBacklog(){
   if(!el)return;
   el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>';
 
-  // Fetch backlog items for this client's orders
-  const{data:orders}=await sb.from('orders').select('id').eq('user_id',cUser.id);
+  // Fetch orders for this user (all statuses, including forwarded)
+  const{data:orders}=await sb.from('orders').select('id,reference,status,requested_delivery_date').eq('user_id',cUser.id);
   const orderIds=(orders||[]).map(o=>o.id);
+
   if(!orderIds.length){
     el.innerHTML='<h1 class="page-title" style="margin-bottom:16px">'+t('myOrdersStatus')+'</h1>'
       +'<div class="empty"><div class="empty-icon">📦</div><p style="font-size:14px;font-weight:500">Nenhum pedido em processamento.</p></div>';
@@ -1037,12 +1038,16 @@ async function renderMyBacklog(){
   }
 
   const{data:items}=await sb.from('backlog_items')
-    .select('order_reference,pn,description,qty_ordered,qty_shipped,availability_date,classification')
+    .select('id,order_reference,pn,description,qty_ordered,qty_shipped,availability_date,classification,unit_price,price_type')
     .in('order_id',orderIds)
     .order('order_reference');
 
+  // Build a map of order delivery dates by reference
+  const orderDeliveryMap={};
+  (orders||[]).forEach(o=>{if(o.reference)orderDeliveryMap[o.reference]=o.requested_delivery_date;});
+
   if(!items?.length){
-    el.innerHTML='<h1 class="page-title" style="margin-bottom:8px">Meus Pedidos em Processo</h1>'
+    el.innerHTML='<h1 class="page-title" style="margin-bottom:8px">'+t('myOrdersStatus')+'</h1>'
       +'<p class="page-sub" style="margin-bottom:20px">Acompanhamento de ordens em andamento</p>'
       +'<div class="empty"><div class="empty-icon">✅</div><p style="font-size:14px;font-weight:500">Nenhum item em processamento no momento.</p></div>';
     return;
@@ -1053,28 +1058,28 @@ async function renderMyBacklog(){
   const openLines=items.filter(i=>i.classification!=='Shipped').length;
   const shippedLines=items.filter(i=>i.classification==='Shipped').length;
 
-  // Group by order
+  // Group by order reference
   const byOrder={};
   items.forEach(i=>{
     if(!byOrder[i.order_reference])byOrder[i.order_reference]=[];
     byOrder[i.order_reference].push(i);
   });
 
-  // Simple status label for clients (no internal classification names)
+  // Client-friendly status labels (hides internal classification names)
   const clientStatus=(cls)=>{
-    if(cls==='Shipped') return {label:'✅ Despachado',bg:'#E8F5EC',color:'#166534'};
-    if(cls==='PN Short') return {label:'⏳ Aguardando material',bg:'#FEF3C7',color:'#92400E'};
-    if(cls==='Missing Doc') return {label:'📄 Aguardando documentação',bg:'#FFF0E6',color:'#C05000'};
-    if(cls==='Credit Hold') return {label:'🔒 Em análise',bg:'#FDECEA',color:'#7B1E1E'};
-    if(cls==='Late Delivery') return {label:'📅 Atraso previsto',bg:'#FDECEA',color:'#C0392B'};
-    if(cls==='Pick up pending') return {label:'📦 Aguardando retirada',bg:'#E6F1FB',color:'#185FA5'};
-    if(cls==='Partial') return {label:'🔀 Entrega parcial',bg:'#FEF9EC',color:'#A16207'};
-    if(cls==='Ship Complete') return {label:'⏳ Aguardando consolidação do pedido',bg:'#EDE0F9',color:'#5B2D99'};
-    return {label:'🔄 Em processamento',bg:'var(--g100)',color:'var(--t2)'};
+    if(cls==='Shipped')         return {label:'✅ Despachado',           bg:'#E8F5EC',color:'#166534'};
+    if(cls==='PN Short')        return {label:'⏳ Aguardando material',  bg:'#FEF3C7',color:'#92400E'};
+    if(cls==='Missing Doc')     return {label:'📄 Aguardando documentação',bg:'#FFF0E6',color:'#C05000'};
+    if(cls==='Credit Hold')     return {label:'🔒 Em análise',           bg:'#FDECEA',color:'#7B1E1E'};
+    if(cls==='Late Delivery')   return {label:'📅 Atraso previsto',      bg:'#FDECEA',color:'#C0392B'};
+    if(cls==='Pick up pending') return {label:'📦 Aguardando retirada',  bg:'#E6F1FB',color:'#185FA5'};
+    if(cls==='Partial')         return {label:'🔀 Entrega parcial',      bg:'#FEF9EC',color:'#A16207'};
+    if(cls==='Ship Complete')   return {label:'⏳ Aguardando consolidação',bg:'#EDE0F9',color:'#5B2D99'};
+    return                             {label:'🔄 Em processamento',      bg:'var(--g100)',color:'var(--t2)'};
   };
 
   let html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">'
-    +'<div><h1 class="page-title">Meus Pedidos em Processo</h1>'
+    +'<div><h1 class="page-title">'+t('myOrdersStatus')+'</h1>'
     +'<p class="page-sub" style="margin-bottom:0">Acompanhamento item a item dos pedidos encaminhados</p></div>'
     +'</div>'
     // KPIs
@@ -1092,29 +1097,44 @@ async function renderMyBacklog(){
 
   // Table per order
   Object.entries(byOrder).forEach(([ref,lines])=>{
+    // Requested delivery date from the order
+    const reqDelivery=orderDeliveryMap[ref];
+    const delivStr=reqDelivery?new Date(reqDelivery+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}):'—';
+
     html+='<div class="dash-card" style="margin-bottom:14px;padding:0;overflow:hidden">'
-      +'<div style="padding:12px 16px;background:var(--g50);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
+      +'<div style="padding:12px 16px;background:var(--g50);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
+      +'<div style="display:flex;align-items:center;gap:14px">'
       +'<span style="font-family:monospace;font-size:13px;font-weight:700;color:var(--blue)">'+ref+'</span>'
+      +(reqDelivery?'<span style="font-size:11px;color:var(--tm)">📅 Entrega solicitada: <strong style="color:var(--t2)">'+delivStr+'</strong></span>':'')
+      +'</div>'
       +'<span style="font-size:11px;color:var(--tm)">'+lines.length+' item(s)</span>'
       +'</div>'
       +'<div style="overflow-x:auto">'
       +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
       +'<thead><tr style="background:var(--g100)">'
-      +['PN','Descrição','Qtd Pedida','Despachado','Em Aberto','Disponib. Prevista','Status']
+      +['PN','Descrição','Qtd Pedida','Despachado','Em Aberto','Previsão de Prontidão','Status']
         .map(h=>'<th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--t2);white-space:nowrap">'+h+'</th>').join('')
       +'</tr></thead><tbody>'
       +lines.map((item,idx)=>{
-        const open=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
+        const qtyShipped=Number(item.qty_shipped||0);
+        const open=Math.max(0,Number(item.qty_ordered||0)-qtyShipped);
         const{label,bg,color}=clientStatus(item.classification);
-        const availStr=item.availability_date?new Date(item.availability_date+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}):'—';
+        // Previsão de prontidão: availability_date do backlog item
+        const availStr=item.availability_date
+          ?new Date(item.availability_date+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'})
+          :'—';
+        // Highlight if availability is overdue
+        const isOverdue=item.availability_date&&new Date(item.availability_date)<new Date()&&item.classification!=='Shipped';
+        const availColor=isOverdue?'#C0392B':item.availability_date?'var(--blue)':'var(--tm)';
         const rowBg=idx%2===0?'#fff':'#FAFBFC';
         return '<tr style="background:'+rowBg+'">'
           +'<td style="padding:8px 12px;font-family:monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
-          +'<td style="padding:8px 12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+item.description+'">'+item.description+'</td>'
+          +'<td style="padding:8px 12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+item.description+'">'+item.description+'</td>'
           +'<td style="padding:8px 12px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
-          +'<td style="padding:8px 12px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
+          +'<td style="padding:8px 12px;text-align:center;color:#166534;font-weight:600">'+qtyShipped+'</td>'
           +'<td style="padding:8px 12px;text-align:center;font-weight:700;color:'+(open>0?'var(--blue)':'#166534')+'">'+open+'</td>'
-          +'<td style="padding:8px 12px;text-align:center;font-weight:600;color:var(--blue)">'+availStr+'</td>'
+          +'<td style="padding:8px 12px;text-align:center;font-weight:600;color:'+availColor+'">'
+          +(isOverdue?'⚠️ ':'')+availStr+'</td>'
           +'<td style="padding:8px 12px"><span style="background:'+bg+';color:'+color+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap">'+label+'</span></td>'
           +'</tr>';
       }).join('')
