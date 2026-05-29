@@ -1580,7 +1580,7 @@ function renderBacklogGrid(el, items, isAdmin){
     +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
     +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
     +'<thead><tr style="background:var(--g100)">'
-    +['Cliente','Pedido','PN','Descrição','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Dt. Entrega','Disponib.','Embarcado em',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
+    +['Cliente','Pedido','PN','Descrição','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
       .map(h=>'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
     +filtered.map((item,idx)=>{
@@ -1601,7 +1601,7 @@ function renderBacklogGrid(el, items, isAdmin){
         +'<td style="padding:5px 8px;text-align:center;font-weight:700;color:'+(qtyOpen>0?'var(--blue)':'#166534')+'">'+qtyOpen+'</td>'
         +(isAdmin?'<td style="padding:7px 10px;text-align:right;color:var(--tm)">'+fmt(item.unit_price)+'</td>'
                  +'<td style="padding:7px 10px;text-align:right;font-weight:600">'+fmt(valueOpen)+'</td>':'')
-        +'<td style="padding:5px 8px;white-space:nowrap;color:var(--tm);font-size:10px">'+(item.availability_date?new Date(item.availability_date+'T12:00:00').toLocaleDateString('pt-BR'):'—')+'</td>'
+        
         +'<td style="padding:7px 8px;white-space:nowrap;color:var(--tm);font-size:10px">'+((item.backlog_shipments&&item.backlog_shipments.length>0)?item.backlog_shipments.slice().sort((a,b)=>new Date(b.ship_date)-new Date(a.ship_date)).map(s=>'<span style="display:block">'+new Date(s.ship_date+'T12:00:00').toLocaleDateString('pt-BR')+(s.qty_shipped?' ('+s.qty_shipped+' un)':'')+'</span>').join(''):'—')+'</td>'
         +'<td style="padding:7px 10px;text-align:center">'
         +(isAdmin
