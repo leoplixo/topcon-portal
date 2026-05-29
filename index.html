@@ -157,7 +157,7 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle}
 .loader-page{min-height:50vh;display:flex;align-items:center;justify-content:center}
 .dash-card{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);padding:20px 24px;margin-bottom:16px}
-.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.dash-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px}
 .target-bar-bg{background:var(--g100);border-radius:20px;height:10px;overflow:hidden;margin:10px 0 6px}
 .target-bar-fill{height:100%;border-radius:20px;background:var(--blue);transition:width .6s ease}
 .stat-block{text-align:center;padding:16px}
@@ -2621,8 +2621,20 @@ async function renderAdminTab(tab){
     // Monthly revenue (FY2026: Apr-Mar)
     const MK=['2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'];
     const ML=['Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez','Jan','Fev','Mar'];
-    const revByMonth={};MK.forEach(m=>revByMonth[m]=0);
-    orders.forEach(o=>{const mk=(o.created_at||'').slice(0,7);if(revByMonth[mk]!==undefined)revByMonth[mk]+=oTotal(o);});
+    // Shipped: backlog items with qty_shipped > 0, by availability_date month
+    const shippedByMonth={};MK.forEach(m=>shippedByMonth[m]=0);
+    const potentialByMonth={};MK.forEach(m=>potentialByMonth[m]=0);
+    (backlog||[]).forEach(b=>{
+      const mk=(b.availability_date||'').slice(0,7);
+      if(!mk||shippedByMonth[mk]===undefined) return;
+      const shipped=Number(b.qty_shipped||0);
+      const ordered=Number(b.qty_ordered||0);
+      const price=Number(b.unit_price||0);
+      // Shipped value
+      if(shipped>0) shippedByMonth[mk]+=(shipped*price);
+      // Signaled potential: will_ship_month=true, still has open qty
+      if(b.will_ship_month&&(ordered-shipped)>0) potentialByMonth[mk]+=((ordered-shipped)*price);
+    });
 
     // Price type breakdown
     const schedRev=orders.filter(o=>o.price_type==='scheduled').reduce((s,o)=>s+oTotal(o),0);
@@ -2663,7 +2675,7 @@ async function renderAdminTab(tab){
       +'</div>'
 
       // ── KPI Row 1: Revenue
-      +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px">'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:20px">'
       +[
         {icon:'💰',label:'Receita FY2026',val:fmt(totalRev),sub:pctTarget+'% da meta',color:'var(--blue)'},
         {icon:'🎯',label:'Meta total',val:fmt(totalTarget),sub:clients.length+' clientes',color:'var(--t2)'},
@@ -2683,8 +2695,22 @@ async function renderAdminTab(tab){
 
       // ── Revenue vs Target per client
       +'<div class="dash-card" style="margin-bottom:16px">'
-      +'<p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Performance por cliente — FY2026</p>'
-      +Object.entries(targetByUser).map(([uid,t],i)=>{
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+      +'<p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:0">Performance por cliente — FY2026</p>'
+      +'<div style="display:flex;gap:6px">'
+      +['pct','rev','name'].map(s=>{
+        const active=(!window._dashSort&&s==='pct')||window._dashSort===s;
+        const label=s==='pct'?'% Meta':s==='rev'?'Receita':'A-Z';
+        return '<button onclick="window._dashSort=\''+s+'\';renderAdminTab(\'admindash\')" style="font-size:11px;padding:3px 10px;border:1px solid var(--border-md);border-radius:6px;cursor:pointer;'+(active?'background:#001423;color:#fff':'background:#fff;color:var(--t2)')+'">' +label+'</button>';
+      }).join('')
+      +'</div></div>'
+      +Object.entries(targetByUser).sort(([,a],[,b])=>{
+        const rA=revByUser[a.name]||0, rB=revByUser[b.name]||0;
+        const pA=a.target>0?rA/a.target:0, pB=b.target>0?rB/b.target:0;
+        if(window._dashSort==='rev')  return rB-rA;
+        if(window._dashSort==='name') return a.name.localeCompare(b.name);
+        return pB-pA; // default: % meta best to worst
+      }).map(([uid,t],i)=>{
         const rev=revByUser[t.name]||0;
         const pct=t.target>0?Math.min(100,(rev/t.target*100)):0;
         const accT=t.target*(closedM/12);
@@ -2709,7 +2735,7 @@ async function renderAdminTab(tab){
 
       // ── 2-column: Monthly trend + Price breakdown
       +'<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px">'
-      +'<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Receita mensal — FY2026</p><div style="position:relative;height:160px"><canvas id="adm-chart-monthly"></canvas></div></div>'
+      +'<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Embarcado vs Potencial — FY2026</p><p style="font-size:10px;color:var(--tm);margin:-10px 0 8px">🔵 Embarcado (qty_shipped × preço) · 🟠 Potencial sinalizado (will_ship_month = sim)</p><div style="position:relative;height:160px"><canvas id="adm-chart-monthly"></canvas></div></div>'
       +'<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Scheduled vs SPOT</p><canvas id="adm-chart-ptype" height="160"></canvas>'
       +'<div style="margin-top:10px">'
       +'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--blue)">● Scheduled</span><span style="font-weight:600">'+fmt(schedRev)+'</span></div>'
@@ -2770,10 +2796,14 @@ async function renderAdminTab(tab){
 requestAnimationFrame(()=>{
       const mCtx=document.getElementById('adm-chart-monthly');
       if(mCtx) new Chart(mCtx,{type:'bar',
-        data:{labels:ML,datasets:[{label:'USD',data:MK.map(m=>revByMonth[m]||0),
-          backgroundColor:'rgba(10,140,250,0.7)',borderColor:'rgba(10,140,250,1)',borderWidth:1,borderRadius:4}]},
+        data:{labels:ML,datasets:[
+          {label:'Embarcado',data:MK.map(m=>shippedByMonth[m]||0),
+            backgroundColor:'rgba(10,140,250,0.85)',borderColor:'rgba(10,140,250,1)',borderWidth:1,borderRadius:4,order:1},
+          {label:'Potencial sinalizado',data:MK.map(m=>potentialByMonth[m]||0),
+            backgroundColor:'rgba(255,165,0,0.5)',borderColor:'rgba(255,140,0,0.8)',borderWidth:1,borderRadius:4,order:2}
+        ]},
         options:{responsive:true,maintainAspectRatio:false,animation:{duration:400},
-          plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>'USD '+ctx.raw.toLocaleString('en-US',{minimumFractionDigits:0})}}},
+          plugins:{legend:{display:true,position:'top',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': USD '+ctx.raw.toLocaleString('en-US',{minimumFractionDigits:0})}}},
           scales:{y:{ticks:{callback:v=>'$'+Number(v).toLocaleString('en-US',{maximumFractionDigits:0})},grid:{color:'rgba(0,0,0,0.05)'}},x:{grid:{display:false}}}}});
       const pCtx=document.getElementById('adm-chart-ptype');
       if(pCtx&&(schedRev+spotRev)>0) new Chart(pCtx,{type:'doughnut',
