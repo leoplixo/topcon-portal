@@ -3374,14 +3374,24 @@ function updateItemFinal(itemId, unitPrice, orderId){
   recalcOrderTotals(orderId);
 }
 
+const _fwdInProgress=new Set();
 async function forwardOrder(orderId, destination){
+  // Prevent double-click / multiple simultaneous calls
+  const lockKey=orderId+'_'+destination;
+  if(_fwdInProgress.has(lockKey)) return;
+  _fwdInProgress.add(lockKey);
+  // Disable both forward buttons for this order immediately
+  const madBtn=document.querySelector(`button[onclick*="forwardOrder('${orderId}','Madrid')"]`);
+  const fatBtn=document.querySelector(`button[onclick*="forwardOrder('${orderId}','Fort Atkinson')"]`);
+  if(madBtn){madBtn.disabled=true;madBtn.style.opacity='0.5';}
+  if(fatBtn){fatBtn.disabled=true;fatBtn.style.opacity='0.5';}
   try{
   // Check if already forwarded and warn
   const card=document.getElementById('order-card-'+orderId);
   const alreadyFwd=card?.querySelector('[data-forwarded]')?.dataset.forwarded;
   if(alreadyFwd){
     const ok=confirm('Este pedido já foi encaminhado para '+alreadyFwd+'.\n\nEncaminhar novamente vai sobrepor o backlog existente com os dados atuais.\n\nContinuar?');
-    if(!ok) return;
+    if(!ok){ _fwdInProgress.delete(lockKey); if(madBtn)madBtn.disabled=false; if(fatBtn)fatBtn.disabled=false; if(madBtn)madBtn.style.opacity='1'; if(fatBtn)fatBtn.style.opacity='1'; return; }
   }
   // Auto-save all discount values currently visible on screen
   const editRows=document.querySelectorAll('#items-'+orderId+' tr');
@@ -3509,10 +3519,25 @@ async function forwardOrder(orderId, destination){
       classification:     'Incomplete Order',
       updated_by:         cProfile?.full_name||'Admin',
     }));
-    await sb.from('backlog_items').upsert(backlogRows,{
-      onConflict:'order_item_id',
-      ignoreDuplicates:false  // always overwrite existing row with new values
+    // Preserve admin-edited fields from existing backlog rows
+    const{data:existing}=await sb.from('backlog_items')
+      .select('order_item_id,classification,availability_date,will_ship_month,qty_shipped')
+      .eq('order_id',orderId);
+    const existMap={};(existing||[]).forEach(r=>{existMap[r.order_item_id]=r;});
+    // Delete all existing rows for this order then re-insert clean
+    await sb.from('backlog_items').delete().eq('order_id',orderId);
+    const rowsToInsert=backlogRows.map(row=>{
+      const prev=existMap[row.order_item_id];
+      if(prev) return {...row,
+        classification:    prev.classification    ||row.classification,
+        availability_date: prev.availability_date ||null,
+        will_ship_month:   prev.will_ship_month   ??null,
+        qty_shipped:       prev.qty_shipped        ??0,
+      };
+      return row;
     });
+    const{error:blErr}=await sb.from('backlog_items').insert(rowsToInsert);
+    if(blErr) throw blErr;
   }catch(e){console.warn('Backlog creation error:',e);}
 
   // Show modal with direct mailto link (avoids browser popup blocker)
@@ -3727,6 +3752,8 @@ async function forwardOrder(orderId, destination){
   }catch(err){
     console.error('forwardOrder error:',err);
     alert('Erro ao encaminhar pedido:\n'+err.message+'\n\nVerifique o console do browser para mais detalhes.');
+  } finally {
+    _fwdInProgress.delete(lockKey);
   }
 }
 
