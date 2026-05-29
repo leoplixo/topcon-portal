@@ -1558,6 +1558,15 @@ function renderBacklogGrid(el, items, isAdmin){
     +destinations.map(d=>'<option value="'+d+'"'+(backlogFilters.destination===d?' selected':'')+'>'+d+'</option>').join('')
     +'</select>'
     +(isAdmin?'<select id="bl-filter-ship" oninput="backlogFilters.shipMonth=this.value;renderBacklogGrid(document.getElementById(\'admin-content\')||document.querySelector(\'[id*=content]\'),window._backlogItems,true)" style="flex:1;min-width:130px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"><option value="">Embarca no mês?</option><option value="yes"'+(backlogFilters.shipMonth==='yes'?' selected':'')+'>✅ Sim</option><option value="no"'+(backlogFilters.shipMonth==='no'?' selected':'')+'>❌ Não</option></select>':'')
+    +(isAdmin===true||isAdmin==='salesops'
+      ?'<div style="display:flex;align-items:center;gap:6px">'
+       +'<label style="font-size:11px;font-weight:600;color:var(--t2);white-space:nowrap">Emb. no mês:</label>'
+       +'<input type="month" id="bl-filter-shipped" value="'+(backlogFilters.shippedMonth||'')+'"'
+       +' onchange="backlogFilters.shippedMonth=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
+       +' style="padding:5px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
+       +'<button onclick="backlogFilters.shippedMonth=\'\';document.getElementById(\'bl-filter-shipped\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer;background:#fff">✕</button>'
+       +'</div>'
+      :'')
     +'</div>'
     // Export / Import toolbar
     +'<div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">'
@@ -1571,7 +1580,7 @@ function renderBacklogGrid(el, items, isAdmin){
     +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
     +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
     +'<thead><tr style="background:var(--g100)">'
-    +['Cliente','Pedido','PN','Descrição','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Dt. Entrega','Disponib.',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
+    +['Cliente','Pedido','PN','Descrição','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Dt. Entrega','Disponib.','Embarcado em',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
       .map(h=>'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
     +filtered.map((item,idx)=>{
@@ -1593,6 +1602,7 @@ function renderBacklogGrid(el, items, isAdmin){
         +(isAdmin?'<td style="padding:7px 10px;text-align:right;color:var(--tm)">'+fmt(item.unit_price)+'</td>'
                  +'<td style="padding:7px 10px;text-align:right;font-weight:600">'+fmt(valueOpen)+'</td>':'')
         +'<td style="padding:5px 8px;white-space:nowrap;color:var(--tm);font-size:10px">'+(item.availability_date?new Date(item.availability_date+'T12:00:00').toLocaleDateString('pt-BR'):'—')+'</td>'
+        +'<td style="padding:7px 8px;white-space:nowrap;color:var(--tm);font-size:10px">'+((item.backlog_shipments&&item.backlog_shipments.length>0)?item.backlog_shipments.slice().sort((a,b)=>new Date(b.ship_date)-new Date(a.ship_date)).map(s=>'<span style="display:block">'+new Date(s.ship_date+'T12:00:00').toLocaleDateString('pt-BR')+(s.qty_shipped?' ('+s.qty_shipped+' un)':'')+'</span>').join(''):'—')+'</td>'
         +'<td style="padding:7px 10px;text-align:center">'
         +(isAdmin
           ?'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:10px;font-family:inherit;width:115px"/>'
@@ -1740,6 +1750,10 @@ function exportBacklogCSV(){
     if(f.destination&&item.destination!==f.destination)return false;
     if(f.shipMonth==='yes'&&item.will_ship_month!==true)return false;
     if(f.shipMonth==='no'&&item.will_ship_month!==false)return false;
+    if(f.shippedMonth){
+      const hasShip=(item.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===f.shippedMonth);
+      if(!hasShip)return false;
+    }
     return true;
   });
   // PT-BR: semicolon separator, comma decimal
