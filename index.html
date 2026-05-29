@@ -1028,31 +1028,18 @@ async function renderMyBacklog(){
   el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>';
 
   // Fetch backlog items for this client's orders
-  const{data:orders,error:ordErr}=await sb.from('orders').select('id,reference,status').eq('user_id',cUser.id);
+  const{data:orders}=await sb.from('orders').select('id').eq('user_id',cUser.id);
   const orderIds=(orders||[]).map(o=>o.id);
-
   if(!orderIds.length){
-    el.innerHTML='<div class="empty"><div class="empty-icon">📦</div><p>Nenhum pedido encontrado.</p></div>';
+    el.innerHTML='<h1 class="page-title" style="margin-bottom:16px">'+t('myOrdersStatus')+'</h1>'
+      +'<div class="empty"><div class="empty-icon">📦</div><p style="font-size:14px;font-weight:500">Nenhum pedido em processamento.</p></div>';
     return;
   }
 
-  const{data:items,error:blErr}=await sb.from('backlog_items')
-    .select('id,order_reference,pn,description,qty_ordered,qty_shipped,availability_date,classification,unit_price,price_type')
+  const{data:items}=await sb.from('backlog_items')
+    .select('order_reference,pn,description,qty_ordered,qty_shipped,availability_date,classification')
     .in('order_id',orderIds)
     .order('order_reference');
-
-  // Fetch real shipments separately (avoid FK join dependency)
-  let shipmentsMap={};
-  if(items?.length){
-    const backlogIds=items.map(i=>i.id);
-    const{data:shipments}=await sb.from('backlog_shipments')
-      .select('backlog_item_id,qty_shipped,ship_date')
-      .in('backlog_item_id',backlogIds);
-    (shipments||[]).forEach(s=>{
-      if(!shipmentsMap[s.backlog_item_id]) shipmentsMap[s.backlog_item_id]=[];
-      shipmentsMap[s.backlog_item_id].push(s);
-    });
-  }
 
   if(!items?.length){
     el.innerHTML='<h1 class="page-title" style="margin-bottom:8px">Meus Pedidos em Processo</h1>'
@@ -1061,7 +1048,7 @@ async function renderMyBacklog(){
     return;
   }
 
-  // Summary — use real backlog_shipments qty if available
+  // Summary
   const totalLines=items.length;
   const openLines=items.filter(i=>i.classification!=='Shipped').length;
   const shippedLines=items.filter(i=>i.classification==='Shipped').length;
@@ -1113,45 +1100,25 @@ async function renderMyBacklog(){
       +'<div style="overflow-x:auto">'
       +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
       +'<thead><tr style="background:var(--g100)">'
-      +['PN','Descrição','Qtd Pedida','Despachado','Em Aberto','Disponib. Prevista','Preço Unit.','Total Linha','Status']
+      +['PN','Descrição','Qtd Pedida','Despachado','Em Aberto','Disponib. Prevista','Status']
         .map(h=>'<th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--t2);white-space:nowrap">'+h+'</th>').join('')
       +'</tr></thead><tbody>'
       +lines.map((item,idx)=>{
-        // Use real shipped qty from backlog_shipments if available
-        const realShipped=(shipmentsMap[item.id]||[]).reduce((s,r)=>s+Number(r.qty_shipped||0),0);
-        const qtyShipped=realShipped>0?realShipped:Number(item.qty_shipped||0);
-        const open=Math.max(0,Number(item.qty_ordered||0)-qtyShipped);
+        const open=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
         const{label,bg,color}=clientStatus(item.classification);
         const availStr=item.availability_date?new Date(item.availability_date+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}):'—';
         const rowBg=idx%2===0?'#fff':'#FAFBFC';
-        const unitPrice=Number(item.unit_price||0);
-        const totalLine=unitPrice*Number(item.qty_ordered||0);
-        const priceStr=unitPrice>0?'USD '+unitPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
-        const totalStr=totalLine>0?'USD '+totalLine.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—';
         return '<tr style="background:'+rowBg+'">'
           +'<td style="padding:8px 12px;font-family:monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
           +'<td style="padding:8px 12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+item.description+'">'+item.description+'</td>'
           +'<td style="padding:8px 12px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
-          +'<td style="padding:8px 12px;text-align:center;color:#166534;font-weight:600">'+qtyShipped+'</td>'
+          +'<td style="padding:8px 12px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
           +'<td style="padding:8px 12px;text-align:center;font-weight:700;color:'+(open>0?'var(--blue)':'#166534')+'">'+open+'</td>'
-          +'<td style="padding:8px 12px;text-align:center;font-weight:600;color:'+(item.availability_date?'var(--blue)':'var(--tm)')+'">'+availStr+'</td>'
-          +'<td style="padding:8px 12px;text-align:right;font-weight:600;color:var(--t2);white-space:nowrap">'+priceStr+'</td>'
-          +'<td style="padding:8px 12px;text-align:right;font-weight:700;color:var(--t1);white-space:nowrap">'+totalStr+'</td>'
+          +'<td style="padding:8px 12px;text-align:center;font-weight:600;color:var(--blue)">'+availStr+'</td>'
           +'<td style="padding:8px 12px"><span style="background:'+bg+';color:'+color+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap">'+label+'</span></td>'
           +'</tr>';
       }).join('')
-      +'</tbody></table></div>'
-      // Order total footer
-      +(()=>{
-        const orderTotal=lines.reduce((s,item)=>s+Number(item.unit_price||0)*Number(item.qty_ordered||0),0);
-        const hasPrice=lines.some(i=>Number(i.unit_price||0)>0);
-        if(!hasPrice) return '';
-        return '<div style="padding:10px 16px;background:var(--g50);border-top:1px solid var(--border);text-align:right;font-size:13px">'
-          +'<span style="color:var(--tm)">Total do pedido: </span>'
-          +'<strong style="color:var(--t1);font-size:15px">USD '+orderTotal.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</strong>'
-          +'</div>';
-      })()
-      +'</div>';
+      +'</tbody></table></div></div>';
   });
 
   el.innerHTML=html;
