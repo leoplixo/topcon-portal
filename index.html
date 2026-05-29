@@ -1064,17 +1064,27 @@ async function renderMyBacklog(){
     byOrder[i.order_reference].push(i);
   });
 
-  // Simple status label for clients (no internal classification names)
+  // Client-friendly status — maps every internal classification to a visible label
   const clientStatus=(cls)=>{
-    if(cls==='Shipped') return {label:'✅ Despachado',bg:'#E8F5EC',color:'#166534'};
-    if(cls==='PN Short') return {label:'⏳ Aguardando material',bg:'#FEF3C7',color:'#92400E'};
-    if(cls==='Missing Doc') return {label:'📄 Aguardando documentação',bg:'#FFF0E6',color:'#C05000'};
-    if(cls==='Credit Hold') return {label:'🔒 Em análise',bg:'#FDECEA',color:'#7B1E1E'};
-    if(cls==='Late Delivery') return {label:'📅 Atraso previsto',bg:'#FDECEA',color:'#C0392B'};
-    if(cls==='Pick up pending') return {label:'📦 Aguardando retirada',bg:'#E6F1FB',color:'#185FA5'};
-    if(cls==='Partial') return {label:'🔀 Entrega parcial',bg:'#FEF9EC',color:'#A16207'};
-    if(cls==='Ship Complete') return {label:'⏳ Aguardando consolidação do pedido',bg:'#EDE0F9',color:'#5B2D99'};
-    return {label:'🔄 Em processamento',bg:'var(--g100)',color:'var(--t2)'};
+    // Shipped: item fully dispatched
+    if(cls==='Shipped')          return {label:'✅ Despachado',                        bg:'#E8F5EC',color:'#166534'};
+    // Partial: part of this PN was shipped, remainder still open
+    if(cls==='Partial')          return {label:'🔀 Envio parcial — saldo em aberto',   bg:'#FEF9EC',color:'#A16207'};
+    // Pick up pending: goods ready at Topcon, client must collect ASAP
+    if(cls==='Pick up pending')  return {label:'📦 Aguardando retirada na Topcon',     bg:'#E6F1FB',color:'#185FA5'};
+    // PN Short: stock shortage for this part number
+    if(cls==='PN Short')         return {label:'⏳ Aguardando disponibilidade',        bg:'#FEF3C7',color:'#92400E'};
+    // Missing Doc: waiting for documentation before shipment
+    if(cls==='Missing Doc')      return {label:'📄 Aguardando documentação p/ envio',  bg:'#FFF0E6',color:'#C05000'};
+    // Credit Hold: order blocked due to credit issue
+    if(cls==='Credit Hold')      return {label:'🔒 Bloqueio de crédito',               bg:'#FDECEA',color:'#7B1E1E'};
+    // Late Delivery: will not ship within current month
+    if(cls==='Late Delivery')    return {label:'📅 Entrega no próximo mês',            bg:'#FEF3C7',color:'#B45309'};
+    // Ship Complete: holding this item until full order is ready to ship together
+    if(cls==='Ship Complete')    return {label:'🔗 Aguardando completar a ordem',      bg:'#EDE0F9',color:'#5B2D99'};
+    // Incomplete Order: order received by ops, being processed
+    if(cls==='Incomplete Order') return {label:'🔄 Pedido recebido — em processamento',bg:'#EFF6FF',color:'#1D4ED8'};
+    return                              {label:'🔄 Em processamento',                  bg:'var(--g100)',color:'var(--t2)'};
   };
 
   let html='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">'
