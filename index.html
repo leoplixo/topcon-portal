@@ -2566,7 +2566,7 @@ async function renderAdminTab(tab){
       sb.from('targets').select('user_id,target_usd,user_profiles(full_name)'),
       sb.from('windows').select('*').order('window_number'),
       sb.from('user_profiles').select('id,full_name,client_groups(label)').eq('is_admin',false).neq('role','salesops').eq('active',true),
-      sb.from('backlog_items').select('classification,will_ship_month,unit_price,qty_ordered,qty_shipped,destination'),
+      sb.from('backlog_items').select('classification,will_ship_month,unit_price,qty_ordered,qty_shipped,destination,availability_date,backlog_shipments(ship_date,qty_shipped)'),
       sb.from('parts').select('pn,cost').not('cost','is',null).gt('cost',0)
     ]);
 
@@ -2621,19 +2621,25 @@ async function renderAdminTab(tab){
     // Monthly revenue (FY2026: Apr-Mar)
     const MK=['2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'];
     const ML=['Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez','Jan','Fev','Mar'];
-    // Shipped: backlog items with qty_shipped > 0, by availability_date month
+    // Shipped: use backlog_shipments.ship_date for accurate month grouping
     const shippedByMonth={};MK.forEach(m=>shippedByMonth[m]=0);
     const potentialByMonth={};MK.forEach(m=>potentialByMonth[m]=0);
     (backlog||[]).forEach(b=>{
-      const mk=(b.availability_date||'').slice(0,7);
-      if(!mk||shippedByMonth[mk]===undefined) return;
-      const shipped=Number(b.qty_shipped||0);
-      const ordered=Number(b.qty_ordered||0);
       const price=Number(b.unit_price||0);
-      // Shipped value
-      if(shipped>0) shippedByMonth[mk]+=(shipped*price);
-      // Signaled potential: will_ship_month=true, still has open qty
-      if(b.will_ship_month&&(ordered-shipped)>0) potentialByMonth[mk]+=((ordered-shipped)*price);
+      const ordered=Number(b.qty_ordered||0);
+      const shipped=Number(b.qty_shipped||0);
+      // Shipped: sum each shipment by its ship_date month
+      (b.backlog_shipments||[]).forEach(s=>{
+        const mk=(s.ship_date||'').slice(0,7);
+        if(mk&&shippedByMonth[mk]!==undefined)
+          shippedByMonth[mk]+=Number(s.qty_shipped||0)*price;
+      });
+      // Signaled potential: will_ship_month=true, availability_date in a future month, still open qty
+      if(b.will_ship_month&&(ordered-shipped)>0){
+        const mk=(b.availability_date||'').slice(0,7);
+        if(mk&&potentialByMonth[mk]!==undefined)
+          potentialByMonth[mk]+=((ordered-shipped)*price);
+      }
     });
 
     // Price type breakdown
