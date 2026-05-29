@@ -1028,18 +1028,31 @@ async function renderMyBacklog(){
   el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>';
 
   // Fetch backlog items for this client's orders
-  const{data:orders}=await sb.from('orders').select('id').eq('user_id',cUser.id);
+  const{data:orders,error:ordErr}=await sb.from('orders').select('id,reference,status').eq('user_id',cUser.id);
   const orderIds=(orders||[]).map(o=>o.id);
+
+  // DEBUG — visible on screen
+  el.innerHTML='<div style="background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:16px;margin:20px;font-size:12px;font-family:monospace">'
+    +'<b>DEBUG</b><br>user_id: '+cUser.id+'<br>'
+    +'orders: '+(orders?.length||0)+(ordErr?' ERR:'+ordErr.message:'')+'<br>'
+    +'ids: '+JSON.stringify(orderIds)+'<br>'
+    +'detail: '+JSON.stringify((orders||[]).map(o=>({id:o.id,ref:o.reference,st:o.status})))
+    +'</div>';
+
   if(!orderIds.length){
-    el.innerHTML='<h1 class="page-title" style="margin-bottom:16px">'+t('myOrdersStatus')+'</h1>'
-      +'<div class="empty"><div class="empty-icon">📦</div><p style="font-size:14px;font-weight:500">Nenhum pedido em processamento.</p></div>';
+    el.innerHTML+='<div class="empty"><div class="empty-icon">📦</div><p>Nenhum pedido encontrado.</p></div>';
     return;
   }
 
-  const{data:items}=await sb.from('backlog_items')
+  const{data:items,error:blErr}=await sb.from('backlog_items')
     .select('id,order_reference,pn,description,qty_ordered,qty_shipped,availability_date,classification,unit_price,price_type')
     .in('order_id',orderIds)
     .order('order_reference');
+
+  el.innerHTML+='<div style="background:#EDE9FE;border:1px solid #C4B5FD;border-radius:8px;padding:16px;margin:0 20px 20px;font-size:12px;font-family:monospace">'
+    +'backlog_items: '+(items?.length||0)+(blErr?' ERR:'+blErr.message:'')+'<br>'
+    +'first: '+JSON.stringify(items?.[0]||null)
+    +'</div>';
 
   // Fetch real shipments separately (avoid FK join dependency)
   let shipmentsMap={};
