@@ -1434,6 +1434,26 @@ async function checkClientEligibility(){
 
 
 // ═══════════════════════════════════════════════════════════
+// ADMIN ORDERS FILTER
+// ═══════════════════════════════════════════════════════════
+function filterAdminOrders(){
+  const search=(document.getElementById('adm-order-search')?.value||'').toLowerCase();
+  const dealer=(document.getElementById('adm-order-dealer')?.value||'').toLowerCase();
+  const status=document.getElementById('adm-order-status')?.value||'';
+  const orders=window._adminOrders||[];
+  const list=document.getElementById('adm-orders-list');
+  if(!list)return;
+  orders.forEach(o=>{
+    const card=document.getElementById('order-card-'+o.id);
+    if(!card)return;
+    const matchSearch=!search||o.reference.toLowerCase().includes(search)||(o.user_profiles?.full_name||'').toLowerCase().includes(search);
+    const matchDealer=!dealer||(o.user_profiles?.full_name||'').toLowerCase()===dealer;
+    const matchStatus=!status||o.status===status;
+    card.style.display=(matchSearch&&matchDealer&&matchStatus)?'':'none';
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
 // BACKLOG FUNCTIONS
 // ═══════════════════════════════════════════════════════════
 
@@ -2532,25 +2552,18 @@ function renderQuote(){
       <div class="sum-total"><span>Total estimado</span><span>${fmt(total)}</span></div>
     </div>
     <div style="margin-top:16px;padding:16px;background:#FEF9EC;border:1px solid #FAC775;border-radius:var(--r-md)">
-      <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:8px">
-        📦 Mês de retirada na Topcon
+      <label style="font-size:12px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">
+        📦 Data de retirada solicitada na Topcon <span style="color:#C0392B">*</span>
       </label>
-      <select id="delivery-date" style="padding:9px 12px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit;background:#fff;color:var(--t1);width:100%;max-width:320px">
-        <option value="">— Selecione o mês desejado —</option>
-        <option value="2026-05-01">Maio 2026</option>
-        <option value="2026-06-01">Junho 2026</option>
-        <option value="2026-07-01">Julho 2026</option>
-        <option value="2026-08-01">Agosto 2026</option>
-        <option value="2026-09-01">Setembro 2026</option>
-        <option value="2026-10-01">Outubro 2026</option>
-        <option value="2026-11-01">Novembro 2026</option>
-        <option value="2026-12-01">Dezembro 2026</option>
-        <option value="2027-01-01">Janeiro 2027</option>
-        <option value="2027-02-01">Fevereiro 2027</option>
-        <option value="2027-03-01">Março 2027</option>
-      </select>
+      <p style="font-size:11px;color:#92400E;margin-bottom:8px;line-height:1.5">
+        Informe a data em que você pretende retirar os itens na Topcon (dia, mês e ano). Esta data é usada pelo nosso time para planejar a disponibilidade.
+      </p>
+      <input type="date" id="delivery-date"
+        style="padding:9px 12px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit;background:#fff;color:var(--t1);width:100%;max-width:320px"
+        min="${new Date().toISOString().slice(0,10)}"
+      />
       <p style="font-size:11px;color:#854F0B;margin-top:8px;line-height:1.5">
-        ⚠️ <strong>Atenção ao tempo de logística:</strong> o mês selecionado representa quando os itens estarão prontos para <strong>retirada na Topcon</strong>. 
+        ⚠️ <strong>Atenção ao tempo de logística:</strong> a data selecionada representa quando os itens estarão prontos para <strong>retirada na Topcon</strong>. 
         Considere o tempo de transporte até o seu destino final ao escolher a data.
       </p>
     </div>
@@ -3185,11 +3198,26 @@ requestAnimationFrame(()=>{
     </div>`;
     const pendingCount=orders.filter(o=>o.status==='pending').length;
     const SC={pending:['#FEF3C7','#92400E'],cancelled:['#FDECEA','#C0392B'],forwarded:['#E0F4F6','#0A7A8C']};
-    const listHtml=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    const dealerNames=[...new Set(orders.map(o=>o.user_profiles?.full_name).filter(Boolean))].sort();
+    const listHtml=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <h2 style="font-size:15px;font-weight:600">Todos os pedidos (${orders.length})</h2>
       ${pendingCount?`<span style="background:#FEF3C7;color:#92400E;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600">⚠️ ${pendingCount} aguardando revisão</span>`:''}
     </div>
-    <div style="display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+      <input id="adm-order-search" placeholder="Referência TOP-…" oninput="filterAdminOrders()" style="padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;width:170px"/>
+      <select id="adm-order-dealer" onchange="filterAdminOrders()" style="padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
+        <option value="">Todos os dealers</option>
+        ${dealerNames.map(n=>`<option value="${n}">${n}</option>`).join('')}
+      </select>
+      <select id="adm-order-status" onchange="filterAdminOrders()" style="padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
+        <option value="">Todos os status</option>
+        <option value="pending">⏳ Aguardando revisão</option>
+        <option value="forwarded">📤 Aprovado e enviado</option>
+        <option value="cancelled">🚫 Cancelado</option>
+      </select>
+      <button onclick="document.getElementById('adm-order-search').value='';document.getElementById('adm-order-dealer').value='';document.getElementById('adm-order-status').value='';filterAdminOrders()" style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;background:#fff;cursor:pointer;color:var(--tm)">✕ Limpar</button>
+    </div>
+    <div id="adm-orders-list" style="display:flex;flex-direction:column;gap:8px">
     ${orders.map(o=>{
       const[sbg,stxt]=SC[o.status]||SC.pending;
       const delivStr=o.requested_delivery_date?new Date(o.requested_delivery_date+'T12:00:00').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'Não definida';
@@ -3291,8 +3319,10 @@ requestAnimationFrame(()=>{
         </div>
       </div>`;
     }).join('')}
-    </div>`;
+    </div></div>`;
     el.innerHTML=`<h1 class="page-title" style="margin-bottom:20px">Pedidos</h1>${tlHtml}${listHtml}`;
+    // Store orders on window for filtering
+    window._adminOrders=orders;
   }
   if(tab==='backlog'){
     await renderAdminBacklog(el);
