@@ -1614,7 +1614,7 @@ function renderBacklogGrid(el, items, isAdmin){
     +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
     +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
     +'<thead><tr style="background:var(--g100)">'
-    +['Cliente','Pedido','Sales Doc','PN','Descrição','RDD','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
+    +['Cliente','Pedido','PN','Descrição','RDD','Sales Doc','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
       .map(h=>'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
     +filtered.map((item,idx)=>{
@@ -1625,39 +1625,45 @@ function renderBacklogGrid(el, items, isAdmin){
       const commCount=item.backlog_comments?.length||0;
       const rowBg=idx%2===0?'#fff':'#FAFBFC';
       const isShipped=item.classification==='Shipped';
+      // RDD pill + edit input
+      const rddCell=(()=>{
+        const rdd=item.rdd;
+        const today=new Date(); today.setHours(0,0,0,0);
+        let pillHtml='';
+        if(rdd){
+          const rddDate=new Date(rdd+'T12:00:00');
+          const diffDays=Math.round((rddDate-today)/(1000*60*60*24));
+          const label=rddDate.toLocaleDateString('pt-BR');
+          let bg,tc;
+          if(diffDays<0){bg='#FDECEA';tc='#C0392B';}
+          else if(diffDays<=31){bg='#E6F1FB';tc='#185FA5';}
+          else if(diffDays<=62){bg='#FEF3C7';tc='#92400E';}
+          else{bg='#F1F1F1';tc='#737373';}
+          pillHtml='<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap;background:'+bg+';color:'+tc+'">📅 '+label+'</span><br>';
+        }
+        return '<td style="padding:4px 6px;white-space:nowrap">'
+          +pillHtml
+          +'<input type="date" value="'+(rdd||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'rdd\',this.value)"'
+          +' style="padding:2px 4px;border:1px solid var(--border-md);border-radius:4px;font-size:10px;font-family:inherit;width:112px;'+(rdd?'border-color:#0A7A8C;':'')+'"/>'
+          +'</td>';
+      })();
+      // Sales Doc input
+      const salesDocCell=(()=>{
+        const sdVal=item.sales_doc||'';
+        return '<td style="padding:4px 6px;white-space:nowrap">'
+          +'<input type="text" maxlength="10" placeholder="000000" value="'+sdVal+'"'
+          +' data-order-ref="'+item.order_reference+'"'
+          +' onchange="saveBacklogSalesDoc(\''+item.id+'\',\''+item.order_reference+'\',this.value,this)"'
+          +' style="width:76px;padding:3px 5px;border:1px solid var(--border-md);border-radius:4px;font-size:10px;font-family:\'JetBrains Mono\',monospace;'+(sdVal?'border-color:#0A7A8C;color:#0A7A8C;font-weight:600;':'')+'">'
+          +'</td>';
+      })();
       return '<tr id="bl-row-'+item.id+'" style="background:'+rowBg+';opacity:'+(isShipped?'0.6':'1')+'">'
         +'<td style="padding:5px 8px;font-weight:500;white-space:nowrap;font-size:11px">'+item.client_name+'</td>'
         +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--blue);white-space:nowrap">'+item.order_reference+'</td>'
-        // Sales Doc cell
-        +(()=>{
-          const sdVal=item.sales_doc||'';
-          return '<td style="padding:4px 6px;white-space:nowrap">'
-            +'<input type="text" maxlength="10" placeholder="000000" value="'+sdVal+'"'
-            +' data-order-ref="'+item.order_reference+'"'
-            +' onchange="saveBacklogSalesDoc(\''+item.id+'\',\''+item.order_reference+'\',this.value,this)"'
-            +' style="width:76px;padding:3px 5px;border:1px solid var(--border-md);border-radius:4px;font-size:10px;font-family:\'JetBrains Mono\',monospace;'+(sdVal?'border-color:#0A7A8C;color:#0A7A8C;font-weight:600;':'')+'">'
-            +'</td>';
-        })()
-        // RDD cell
-        +(()=>{
-          const rdd=item.rdd;
-          let pill='—';
-          if(rdd){
-            const today=new Date(); today.setHours(0,0,0,0);
-            const rddDate=new Date(rdd+'T12:00:00');
-            const diffDays=Math.round((rddDate-today)/(1000*60*60*24));
-            const label=rddDate.toLocaleDateString('pt-BR');
-            let bg,tc;
-            if(diffDays<0){bg='#FDECEA';tc='#C0392B';}
-            else if(diffDays<=31){bg='#E6F1FB';tc='#185FA5';}
-            else if(diffDays<=62){bg='#FEF3C7';tc='#92400E';}
-            else{bg='#F1F1F1';tc='#737373';}
-            pill='<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap;background:'+bg+';color:'+tc+'">📅 '+label+'</span>';
-          }
-          return '<td style="padding:5px 8px;white-space:nowrap">'+pill+'</td>';
-        })()
         +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
         +'<td style="padding:5px 8px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px" title="'+item.description+'">'+item.description+'</td>'
+        +rddCell
+        +salesDocCell
         +'<td style="padding:5px 8px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
         +'<td style="padding:5px 8px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
         +'<td style="padding:5px 8px;text-align:center;font-weight:700;color:'+(qtyOpen>0?'var(--blue)':'#166534')+'">'+qtyOpen+'</td>'
@@ -3694,11 +3700,12 @@ async function forwardOrder(orderId, destination){
       qty_ordered:        item.quantity,
       qty_shipped:        0,
       classification:     'Incomplete Order',
+      rdd:                order.requested_delivery_date||null,
       updated_by:         cProfile?.full_name||'Admin',
     }));
     // Preserve admin-edited fields from existing backlog rows
     const{data:existing}=await sb.from('backlog_items')
-      .select('order_item_id,classification,availability_date,will_ship_month,qty_shipped')
+      .select('order_item_id,classification,availability_date,will_ship_month,qty_shipped,rdd,sales_doc')
       .eq('order_id',orderId);
     const existMap={};(existing||[]).forEach(r=>{existMap[r.order_item_id]=r;});
     // Delete all existing rows for this order then re-insert clean
@@ -3710,6 +3717,8 @@ async function forwardOrder(orderId, destination){
         availability_date: prev.availability_date ||null,
         will_ship_month:   prev.will_ship_month   ??null,
         qty_shipped:       prev.qty_shipped        ??0,
+        rdd:               prev.rdd               ||row.rdd||null,
+        sales_doc:         prev.sales_doc          ||null,
       };
       return row;
     });
