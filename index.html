@@ -1452,7 +1452,7 @@ const CLS_COLORS={
   'Shipped':         ['#E8F5EC','#166534'],
 };
 
-let backlogFilters={client:'',pn:'',classification:'',destination:'',shipMonth:''};
+let backlogFilters={client:'',pn:'',classification:'',destination:'',shipMonth:'',rddFrom:'',rddTo:''};
 
 async function renderAdminBacklog(el){
   // Expand admin page to full width for backlog
@@ -1502,6 +1502,8 @@ function renderBacklogGrid(el, items, isAdmin){
     if(f.destination && item.destination!==f.destination) return false;
     if(f.shipMonth==='yes' && item.will_ship_month!==true) return false;
     if(f.shipMonth==='no' && item.will_ship_month!==false) return false;
+    if(f.rddFrom && item.rdd && item.rdd < f.rddFrom) return false;
+    if(f.rddTo && item.rdd && item.rdd > f.rddTo) return false;
     return true;
   });
 
@@ -1588,6 +1590,17 @@ function renderBacklogGrid(el, items, isAdmin){
        +'<button onclick="backlogFilters.shippedMonth=\'\';document.getElementById(\'bl-filter-shipped\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer;background:#fff">✕</button>'
        +'</div>'
       :'')
+    +'<div style="display:flex;align-items:center;gap:5px">'
+    +'<label style="font-size:11px;font-weight:600;color:#0A7A8C;white-space:nowrap">📅 RDD de:</label>'
+    +'<input type="date" id="bl-filter-rdd-from" value="'+(backlogFilters.rddFrom||'')+'"'
+    +' onchange="backlogFilters.rddFrom=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
+    +' style="padding:5px 8px;border:1px solid #A0D4DC;border-radius:var(--r-md);font-size:12px">'
+    +'<span style="font-size:11px;color:var(--t2)">até</span>'
+    +'<input type="date" id="bl-filter-rdd-to" value="'+(backlogFilters.rddTo||'')+'"'
+    +' onchange="backlogFilters.rddTo=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
+    +' style="padding:5px 8px;border:1px solid #A0D4DC;border-radius:var(--r-md);font-size:12px">'
+    +'<button onclick="backlogFilters.rddFrom=\'\';backlogFilters.rddTo=\'\';document.getElementById(\'bl-filter-rdd-from\').value=\'\';document.getElementById(\'bl-filter-rdd-to\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer;background:#fff">✕</button>'
+    +'</div>'
     +'</div>'
     // Export / Import toolbar
     +'<div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">'
@@ -1601,7 +1614,7 @@ function renderBacklogGrid(el, items, isAdmin){
     +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
     +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
     +'<thead><tr style="background:var(--g100)">'
-    +['Cliente','Pedido','PN','Descrição','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
+    +['Cliente','Pedido','Sales Doc','PN','Descrição','RDD','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
       .map(h=>'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
     +filtered.map((item,idx)=>{
@@ -1615,6 +1628,34 @@ function renderBacklogGrid(el, items, isAdmin){
       return '<tr id="bl-row-'+item.id+'" style="background:'+rowBg+';opacity:'+(isShipped?'0.6':'1')+'">'
         +'<td style="padding:5px 8px;font-weight:500;white-space:nowrap;font-size:11px">'+item.client_name+'</td>'
         +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--blue);white-space:nowrap">'+item.order_reference+'</td>'
+        // Sales Doc cell
+        +(()=>{
+          const sdVal=item.sales_doc||'';
+          return '<td style="padding:4px 6px;white-space:nowrap">'
+            +'<input type="text" maxlength="10" placeholder="000000" value="'+sdVal+'"'
+            +' data-order-ref="'+item.order_reference+'"'
+            +' onchange="saveBacklogSalesDoc(\''+item.id+'\',\''+item.order_reference+'\',this.value,this)"'
+            +' style="width:76px;padding:3px 5px;border:1px solid var(--border-md);border-radius:4px;font-size:10px;font-family:\'JetBrains Mono\',monospace;'+(sdVal?'border-color:#0A7A8C;color:#0A7A8C;font-weight:600;':'')+'">'
+            +'</td>';
+        })()
+        // RDD cell
+        +(()=>{
+          const rdd=item.rdd;
+          let pill='—';
+          if(rdd){
+            const today=new Date(); today.setHours(0,0,0,0);
+            const rddDate=new Date(rdd+'T12:00:00');
+            const diffDays=Math.round((rddDate-today)/(1000*60*60*24));
+            const label=rddDate.toLocaleDateString('pt-BR');
+            let bg,tc;
+            if(diffDays<0){bg='#FDECEA';tc='#C0392B';}
+            else if(diffDays<=31){bg='#E6F1FB';tc='#185FA5';}
+            else if(diffDays<=62){bg='#FEF3C7';tc='#92400E';}
+            else{bg='#F1F1F1';tc='#737373';}
+            pill='<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap;background:'+bg+';color:'+tc+'">📅 '+label+'</span>';
+          }
+          return '<td style="padding:5px 8px;white-space:nowrap">'+pill+'</td>';
+        })()
         +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
         +'<td style="padding:5px 8px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px" title="'+item.description+'">'+item.description+'</td>'
         +'<td style="padding:5px 8px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
@@ -1708,6 +1749,57 @@ async function handleClassificationChange(selectEl, itemId, prevClass){
   selectEl.dataset.prev=newClass;
 }
 
+async function saveBacklogSalesDoc(itemId, orderRef, value, inputEl){
+  const val=value.trim();
+  // Save to the item clicked
+  const{error}=await sb.from('backlog_items').update({
+    sales_doc: val||null,
+    updated_at:new Date().toISOString(),
+    updated_by:cProfile?.full_name||'Admin'
+  }).eq('id',itemId);
+  if(error){alert('Erro: '+error.message);return;}
+  // Update local cache for this item
+  if(window._backlogItems){
+    const idx=window._backlogItems.findIndex(i=>i.id===itemId);
+    if(idx>=0) window._backlogItems[idx].sales_doc=val||null;
+  }
+  // Style the input that was edited
+  if(inputEl){
+    inputEl.style.borderColor=val?'#0A7A8C':'';
+    inputEl.style.color=val?'#0A7A8C':'';
+    inputEl.style.fontWeight=val?'600':'';
+  }
+  // Propagate to all other inputs with the same order_reference (without overwriting ones already manually set differently)
+  const siblings=document.querySelectorAll('input[data-order-ref="'+orderRef+'"]');
+  siblings.forEach(async inp=>{
+    if(inp===inputEl) return; // skip the one just edited
+    const currentVal=inp.value.trim();
+    // Only propagate if the sibling is empty OR has the same value (not manually overridden to something different)
+    if(!currentVal || currentVal===val){
+      inp.value=val;
+      inp.style.borderColor=val?'#0A7A8C':'';
+      inp.style.color=val?'#0A7A8C':'';
+      inp.style.fontWeight=val?'600':'';
+      // Find the item id for this input's row
+      const row=inp.closest('tr');
+      if(row){
+        const rowId=row.id?.replace('bl-row-','');
+        if(rowId&&rowId!==itemId){
+          await sb.from('backlog_items').update({
+            sales_doc:val||null,
+            updated_at:new Date().toISOString(),
+            updated_by:cProfile?.full_name||'Admin (propagado)'
+          }).eq('id',rowId);
+          if(window._backlogItems){
+            const i=window._backlogItems.findIndex(x=>x.id===rowId);
+            if(i>=0) window._backlogItems[i].sales_doc=val||null;
+          }
+        }
+      }
+    }
+  });
+}
+
 async function updateBacklogField(itemId, field, value){
   const{error}=await sb.from('backlog_items').update({
     [field]:value,
@@ -1778,7 +1870,7 @@ function exportBacklogCSV(){
     return true;
   });
   // PT-BR: semicolon separator, comma decimal
-  const headers=['Cliente','Destino','Pedido','PN','Descrição','Qtd Pedida','Qtd Embarcada','Qtd Aberta','Preço Unit.','Valor Aberto','Data Entrega','Disponibilidade','Embarca no Mês','Classificação','Último Comentário','Última Atualização','Atualizado por'];
+  const headers=['Cliente','Destino','Pedido','Sales Doc','PN','Descrição','RDD','Qtd Pedida','Qtd Embarcada','Qtd Aberta','Preço Unit.','Valor Aberto','Data Entrega','Disponibilidade','Embarca no Mês','Classificação','Último Comentário','Última Atualização','Atualizado por'];
   const rows=filtered.map(i=>{
     const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
     const lastComm=i.backlog_comments?.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
@@ -1786,8 +1878,10 @@ function exportBacklogCSV(){
       i.client_name,
       i.destination||'',
       i.order_reference,
+      i.sales_doc||'',
       i.pn,
       i.description||'',
+      i.rdd?new Date(i.rdd+'T12:00:00').toLocaleDateString('pt-BR'):'',
       i.qty_ordered,
       Number(i.qty_shipped||0),
       open,
@@ -1843,6 +1937,8 @@ async function importBacklogCSV(input){
     const iShipMonth  =col(['embarca','ship_month','will_ship','embarca no m']);
     const iComment    =col(['comentário','comment','último coment']);
     const iQtyShipped =col(['qtd embarcada','qty embarcada','shipped','embarcada']);
+    const iRdd        =col(['rdd','request delivery','data de entrega solicitada']);
+    const iSalesDoc   =col(['sales doc','sales_doc','referencia topcon','doc topcon']);
 
     if(iPN<0||iPedido<0){
       if(statusEl)statusEl.innerHTML='<span style="color:#C0392B">❌ Colunas obrigatórias não encontradas (PN, Pedido)</span>';
@@ -1909,6 +2005,16 @@ async function importBacklogCSV(input){
       if(iQtyShipped>=0){
         const v=parseFloat(getCol(iQtyShipped).replace(',','.'));
         if(!isNaN(v)&&v>=0)updates.qty_shipped=v;
+      }
+      // RDD
+      if(iRdd>=0){
+        const d=parseDate(getCol(iRdd));
+        if(d)updates.rdd=d;
+      }
+      // Sales Doc
+      if(iSalesDoc>=0){
+        const sd=getCol(iSalesDoc);
+        if(sd)updates.sales_doc=sd;
       }
 
       if(Object.keys(updates).length===0){skipped++;continue;}
