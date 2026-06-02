@@ -1558,160 +1558,143 @@ function renderBacklogGrid(el, items, isAdmin){
   const destinations=[...new Set(items.map(i=>i.destination).filter(Boolean))];
   const clients=[...new Set(items.map(i=>i.client_name).filter(Boolean))].sort();
 
+
+  // ── compute all metrics once ──────────────────────────────────────────────
+  const rm=backlogFilters.refMonth;
+  const rmLabel=rm?new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'';
+  const rmShort=rm?new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}):'';
+
+  const openItems   = filtered.filter(i=>i.classification!=='Shipped');
+  const forecastItems = filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped');
+  const perdidoItems  = filtered.filter(i=>i.will_ship_month===false&&i.classification!=='Shipped');
+
+  // Shipped: if rm set use ship_date in rm, else all Shipped
+  const shippedItems = rm
+    ? filtered.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
+    : filtered.filter(i=>i.classification==='Shipped');
+
+  const openVal = openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+  const shippedVal = rm
+    ? shippedItems.reduce((s,i)=>{
+        const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);
+        return s+q*Number(i.unit_price||0);
+      },0)
+    : shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
+  const forecastVal = forecastItems.reduce((s,i)=>{
+    const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
+    const qty=i.partial_qty>0?Math.min(Number(i.partial_qty),open):open;
+    return s+qty*Number(i.unit_price||0);
+  },0);
+  const perdidoVal = perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+  const potencial  = shippedVal+forecastVal;
+
+  // breakdown by classification for the ref month panel
+  const clsBreakdown={};
+  filtered.filter(i=>i.classification!=='Shipped').forEach(i=>{
+    const cls=i.classification||'__unclassified__';
+    if(!clsBreakdown[cls]) clsBreakdown[cls]={count:0,val:0};
+    clsBreakdown[cls].count++;
+    clsBreakdown[cls].val+=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
+  });
+
   el.innerHTML=
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">'
-    +'<h1 class="page-title">Backlog Operacional</h1>'
-    +'<span style="font-size:12px;color:var(--tm)">'+filtered.length+' linha(s) · Atualizado agora</span>'
+    // ── sticky wrapper start ──
+    '<div id="bl-sticky" style="position:sticky;top:0;z-index:90;background:var(--g50);padding-bottom:8px;margin-bottom:0">'
+
+    // title row
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;margin-bottom:10px;flex-wrap:wrap;gap:8px">'
+    +'<h1 class="page-title" style="margin-bottom:0">Backlog Operacional</h1>'
+    +'<span style="font-size:12px;color:var(--tm)">'+filtered.length+' linha(s) · Atualizado agora'+(rm?' · 📆 '+rmLabel:'')+'</span>'
     +'</div>'
-    // KPI row
-    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px">'
-    +(()=>{
-      const rm=backlogFilters.refMonth;
-      const rmLabel=rm?new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}):'';
-      const openItems=filtered.filter(i=>i.classification!=='Shipped');
-      // Shipped: if rm set, count only shipments with ship_date in rm; else all Shipped items
-      const shippedItems=rm
-        ? filtered.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
-        : filtered.filter(i=>i.classification==='Shipped');
-      // Forecast = will_ship_month=true OR partial_qty>0, not Shipped
-      // Criterion: Sales Ops signaled it — regardless of availability_date or rdd
-      const forecastItems=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped');
-      const openVal=openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-      const shippedVal=rm
-        ? shippedItems.reduce((s,i)=>{
-            const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);
-            return s+q*Number(i.unit_price||0);
-          },0)
-        : shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
-      const forecastVal=forecastItems.reduce((s,i)=>{
-        const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
-        const qty=i.partial_qty>0?Math.min(Number(i.partial_qty),open):open;
-        return s+qty*Number(i.unit_price||0);
-      },0);
-      return [
-        {icon:'📋',label:'Em aberto',count:openItems.length,val:fmt(openVal),color:'var(--blue)',kpi:'open',kpiv:'value'},
-        {icon:'🎯',label:'Previsto embarcar'+(rm?' '+rmLabel:''),count:forecastItems.length,val:fmt(forecastVal),color:'#D97706',kpi:'ship',kpiv:'forecast'},
-        {icon:'✅',label:'Embarcado'+(rm?' '+rmLabel:''),count:shippedItems.length,val:fmt(shippedVal),color:'#166534',kpi:'shipped',kpiv:'shippedval'},
-        ...(unclassified.length>0?[{icon:'⚠️',label:'Sem classificação',count:unclassified.length,val:fmt(unclassifiedVal),color:'#C0392B',kpi:'uncls',kpiv:'unclsval'}]:[]),
-      ].map(k=>'<div class="dash-card" style="padding:14px;margin-bottom:0;border-left:3px solid '+k.color+'">'
-        +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-        +'<div style="font-size:18px">'+k.icon+'</div>'
-        +'<span data-kpi="'+k.kpi+'" style="font-size:24px;font-weight:800;color:'+k.color+'">'+k.count+'</span>'
-        +'</div>'
-        +'<p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin:6px 0 3px">'+k.label+'</p>'
-        +'<p data-kpi="'+k.kpiv+'" style="font-size:14px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
-        +'</div>');
-    })().join('')
+
+    // ── KPI cards (4 always + potencial when rm set) ──────────────────────
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:8px;margin-bottom:10px">'
+    +[
+      {icon:'📋', label:'Em aberto',                           count:openItems.length,    val:fmt(openVal),     color:'var(--blue)', kpi:'open',    kpiv:'value'},
+      {icon:'🎯', label:'Previsto embarcar'+(rm?' '+rmShort:''), count:forecastItems.length, val:fmt(forecastVal), color:'#D97706',     kpi:'ship',    kpiv:'forecast'},
+      {icon:'✅', label:'Embarcado'+(rm?' '+rmShort:''),         count:shippedItems.length,  val:fmt(shippedVal),  color:'#166534',     kpi:'shipped', kpiv:'shippedval'},
+      {icon:'❌', label:'Não embarca'+(rm?' '+rmShort:''),       count:perdidoItems.length,  val:fmt(perdidoVal),  color:'#991B1B',     kpi:'lost',    kpiv:'lostval'},
+      ...(unclassified.length>0?[{icon:'⚠️',label:'Sem classificação',count:unclassified.length,val:fmt(unclassifiedVal),color:'#C0392B',kpi:'uncls',kpiv:'unclsval'}]:[]),
+      ...(rm?[{icon:'💰',label:'Potencial fechamento',count:'',val:fmt(potencial),color:'#5B2D99',kpi:'',kpiv:'potencial',highlight:true}]:[]),
+    ].map(k=>'<div class="dash-card" style="padding:12px 14px;margin-bottom:0;border-left:3px solid '+k.color+';'+(k.highlight?'background:linear-gradient(135deg,#F3E8FF,#EDE9FE);':'')+'">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+      +'<div style="font-size:16px">'+k.icon+'</div>'
+      +(k.count!==''?'<span data-kpi="'+k.kpi+'" style="font-size:22px;font-weight:800;color:'+k.color+'">'+k.count+'</span>':'')
+      +'</div>'
+      +'<p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.04em;margin:5px 0 2px">'+k.label+'</p>'
+      +'<p data-kpi="'+k.kpiv+'" style="font-size:13px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
+      +'</div>'
+    ).join('')
     +'</div>'
-    // Filters
-    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:var(--r-md)">'
+
+    // ── breakdown by classification (only when rm set) ────────────────────
+    +(rm
+      ?'<div style="margin-bottom:10px;padding:10px 12px;background:#fff;border:1px solid var(--border);border-radius:var(--r-md)">'
+       +'<p style="font-size:10px;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Breakdown por classificação — '+rmLabel+'</p>'
+       +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
+       +Object.entries(clsBreakdown)
+          .sort((a,b)=>b[1].val-a[1].val)
+          .map(([cls,d])=>{
+            const [bg,tc]=CLS_COLORS[cls]||['#F0F0F0','#555'];
+            const label=cls==='__unclassified__'?'⚠️ Sem class.':cls;
+            return '<div onclick="backlogFilters.classification=\''+(cls==='__unclassified__'?'__unclassified__':cls)+'\';document.getElementById(\'bl-filter-cls\').value=\''+(cls==='__unclassified__'?'__unclassified__':cls)+'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" '
+              +'style="cursor:pointer;background:'+bg+';border:1px solid '+tc+'33;border-radius:6px;padding:6px 10px;min-width:120px">'
+              +'<p style="font-size:10px;font-weight:600;color:'+tc+';margin-bottom:2px">'+label+'</p>'
+              +'<p style="font-size:13px;font-weight:800;color:'+tc+'">'+fmt(d.val)+'</p>'
+              +'<p style="font-size:10px;color:'+tc+';opacity:.75">'+d.count+' linha(s)</p>'
+              +'</div>';
+          }).join('')
+       +'</div></div>'
+      :'')
+
+    // ── filter bar ────────────────────────────────────────────────────────
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;padding:10px 12px;background:#fff;border:1px solid var(--border);border-radius:var(--r-md);margin-bottom:8px">'
     +'<input id="bl-filter-pn" placeholder="PN ou descrição…" value="'+backlogFilters.pn+'"'
     +' oninput="backlogFilters.pn=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')"'
-    +' style="flex:2;min-width:150px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"/>'
-    +'<select id="bl-filter-client" oninput="backlogFilters.client=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:130px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
+    +' style="flex:2;min-width:130px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"/>'
+    +'<select id="bl-filter-client" oninput="backlogFilters.client=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
     +'<option value="">Todos os clientes</option>'
     +clients.map(cl=>'<option value="'+cl+'"'+(backlogFilters.client===cl?' selected':'')+'>'+cl+'</option>').join('')
     +'</select>'
-    +'<select id="bl-filter-cls" oninput="backlogFilters.classification=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
+    +'<select id="bl-filter-cls" oninput="backlogFilters.classification=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:140px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
     +'<option value="">Todas classificações</option>'
     +'<option value="__unclassified__"'+(backlogFilters.classification==='__unclassified__'?' selected':'')+'>⚠️ Sem classificação</option>'
     +CLASSIFICATIONS.map(cl=>'<option value="'+cl+'"'+(backlogFilters.classification===cl?' selected':'')+'>'+cl+'</option>').join('')
     +'</select>'
-    +'<select id="bl-filter-dest" oninput="backlogFilters.destination=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:130px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
+    +'<select id="bl-filter-dest" oninput="backlogFilters.destination=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:110px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
     +'<option value="">Todos destinos</option>'
     +destinations.map(d=>'<option value="'+d+'"'+(backlogFilters.destination===d?' selected':'')+'>'+d+'</option>').join('')
     +'</select>'
-    +(isAdmin?'<select id="bl-filter-ship" oninput="backlogFilters.shipMonth=this.value;renderBacklogGrid(document.getElementById(\'admin-content\')||document.querySelector(\'[id*=content]\'),window._backlogItems,true)" style="flex:1;min-width:130px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"><option value="">Embarca no mês?</option><option value="yes"'+(backlogFilters.shipMonth==='yes'?' selected':'')+'>✅ Sim</option><option value="no"'+(backlogFilters.shipMonth==='no'?' selected':'')+'>❌ Não</option></select>':'')
-    +(isAdmin===true||isAdmin==='salesops'
-      ?'<div style="display:flex;align-items:center;gap:6px">'
-       +'<label style="font-size:11px;font-weight:600;color:var(--t2);white-space:nowrap">Emb. no mês:</label>'
-       +'<input type="month" id="bl-filter-shipped" value="'+(backlogFilters.shippedMonth||'')+'"'
-       +' onchange="backlogFilters.shippedMonth=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
-       +' style="padding:5px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
-       +'<button onclick="backlogFilters.shippedMonth=\'\';document.getElementById(\'bl-filter-shipped\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer;background:#fff">✕</button>'
-       +'</div>'
-      :'')
-    +'<div style="display:flex;align-items:center;gap:5px;padding:5px 8px;background:#EEF6FF;border:1px solid #93C5FD;border-radius:var(--r-md)">'
+    +(isAdmin?'<select id="bl-filter-ship" oninput="backlogFilters.shipMonth=this.value;renderBacklogGrid(document.getElementById(\'admin-content\')||document.querySelector(\'[id*=content]\'),window._backlogItems,true)" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"><option value="">Embarca no mês?</option><option value="yes"'+(backlogFilters.shipMonth==='yes'?' selected':'')+'>✅ Sim</option><option value="no"'+(backlogFilters.shipMonth==='no'?' selected':'')+'>❌ Não</option></select>':'')
+    // Mês ref — principal filtro temporal, substitui RDD de/até na barra
+    +'<div style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#EEF6FF;border:1px solid #93C5FD;border-radius:var(--r-md)">'
     +'<label style="font-size:11px;font-weight:700;color:#1D4ED8;white-space:nowrap">📆 Mês ref.:</label>'
     +'<input type="month" id="bl-filter-refmonth" value="'+(backlogFilters.refMonth||'')+'"'
     +' onchange="backlogFilters.refMonth=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
-    +' style="padding:4px 8px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff">'
-    +'<button onclick="backlogFilters.refMonth=\'\';document.getElementById(\'bl-filter-refmonth\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:3px 7px;border:1px solid #93C5FD;border-radius:var(--r-md);cursor:pointer;background:#fff;color:#1D4ED8">✕</button>'
-    +'</div>'
-    +'<div style="display:flex;align-items:center;gap:5px">'
-    +'<label style="font-size:11px;font-weight:600;color:#0A7A8C;white-space:nowrap">📅 RDD de:</label>'
-    +'<input type="date" id="bl-filter-rdd-from" value="'+(backlogFilters.rddFrom||'')+'"'
-    +' onchange="backlogFilters.rddFrom=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
-    +' style="padding:5px 8px;border:1px solid #A0D4DC;border-radius:var(--r-md);font-size:12px">'
-    +'<span style="font-size:11px;color:var(--t2)">até</span>'
-    +'<input type="date" id="bl-filter-rdd-to" value="'+(backlogFilters.rddTo||'')+'"'
-    +' onchange="backlogFilters.rddTo=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
-    +' style="padding:5px 8px;border:1px solid #A0D4DC;border-radius:var(--r-md);font-size:12px">'
-    +'<button onclick="backlogFilters.rddFrom=\'\';backlogFilters.rddTo=\'\';document.getElementById(\'bl-filter-rdd-from\').value=\'\';document.getElementById(\'bl-filter-rdd-to\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer;background:#fff">✕</button>'
+    +' style="padding:4px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff">'
+    +'<button onclick="backlogFilters.refMonth=\'\';document.getElementById(\'bl-filter-refmonth\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:2px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);cursor:pointer;background:#fff;color:#1D4ED8;line-height:1">✕</button>'
     +'</div>'
     +'</div>'
-    // Export / Import toolbar
-    +'<div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">'
-    +'<button onclick="exportBacklogCSV()" style="display:flex;align-items:center;gap:6px;padding:7px 14px;background:#fff;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-weight:600;color:var(--t2);cursor:pointer">⬇ Exportar CSV</button>'
+
+    // ── export/import toolbar ─────────────────────────────────────────────
+    +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">'
+    +'<button onclick="exportBacklogCSV()" style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:#fff;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-weight:600;color:var(--t2);cursor:pointer">⬇ Exportar CSV</button>'
     +(isAdmin===true
-      ?'<label style="display:flex;align-items:center;gap:6px;padding:7px 14px;background:#fff;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-weight:600;color:var(--t2);cursor:pointer">⬆ Importar CSV<input type="file" accept=".csv" style="display:none" onchange="importBacklogCSV(this)"></label>'
-      +'<span id="bl-import-status" style="font-size:12px"></span>'
+      ?'<label style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:#fff;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-weight:600;color:var(--t2);cursor:pointer">⬆ Importar CSV<input type="file" accept=".csv" style="display:none" onchange="importBacklogCSV(this)"></label>'
+       +'<span id="bl-import-status" style="font-size:12px"></span>'
       :'')
     +'</div>'
-    // Monthly subtotal panel — only shown when refMonth is set
-    +(backlogFilters.refMonth?(()=>{
-      const rm=backlogFilters.refMonth;
-      const rmLabel=new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
-      // Embarcado: shipments with ship_date in rm
-      const embarcadoMap={};
-      filtered.forEach(i=>{
-        (i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).forEach(s=>{
-          embarcadoMap[i.id]=(embarcadoMap[i.id]||0)+Number(s.qty_shipped||0);
-        });
-      });
-      const embarcadoVal=filtered.reduce((s,i)=>s+(embarcadoMap[i.id]||0)*Number(i.unit_price||0),0);
-      const embarcadoCount=Object.keys(embarcadoMap).length;
-      // Previsto embarcar: will_ship_month=true, not Shipped
-      // KEY FIX: only will_ship_month=true matters — no date constraint
-      // Covers: items from past months not yet shipped, items with future RDD being anticipated
-      const prevItems=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped');
-      const prevVal=prevItems.reduce((s,i)=>{
-        const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
-        const qty=i.partial_qty>0?Math.min(Number(i.partial_qty),open):open;
-        return s+qty*Number(i.unit_price||0);
-      },0);
-      // Em aberto: not Shipped, no will_ship signal (null/undefined)
-      const abertoItems=filtered.filter(i=>i.classification!=='Shipped'&&(i.will_ship_month===null||i.will_ship_month===undefined));
-      const abertoVal=abertoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-      // Perdido: will_ship_month=false, not Shipped
-      const perdidoItems=filtered.filter(i=>i.will_ship_month===false&&i.classification!=='Shipped');
-      const perdidoVal=perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-      const potencial=embarcadoVal+prevVal;
-      return '<div style="margin-bottom:12px;padding:14px 16px;background:linear-gradient(135deg,#EEF6FF,#F0FFF4);border:1px solid #93C5FD;border-radius:var(--r-md)">'
-        +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">'
-        +'<p style="font-size:12px;font-weight:700;color:#1D4ED8">📊 Subtotal — '+rmLabel+'</p>'
-        +'<p style="font-size:11px;color:#1D4ED8;font-weight:600">Potencial de fechamento: <span style="font-size:15px;font-weight:800">'+fmt(potencial)+'</span></p>'
-        +'</div>'
-        +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px">'
-        +[
-          {icon:'✅',label:'Embarcado no mês',val:embarcadoVal,count:embarcadoCount,bg:'#DCFCE7',bc:'#4ADE80',tc:'#166534'},
-          {icon:'🎯',label:'Previsto embarcar',val:prevVal,count:prevItems.length,bg:'#FEF9C3',bc:'#FDE047',tc:'#92400E'},
-          {icon:'📋',label:'Em aberto (sem sinal)',val:abertoVal,count:abertoItems.length,bg:'#EFF6FF',bc:'#93C5FD',tc:'#1D4ED8'},
-          {icon:'❌',label:'Não embarca no mês',val:perdidoVal,count:perdidoItems.length,bg:'#FEE2E2',bc:'#FCA5A5',tc:'#991B1B'},
-        ].map(c=>'<div style="background:'+c.bg+';border:1px solid '+c.bc+';border-radius:8px;padding:10px 12px">'
-          +'<p style="font-size:10px;font-weight:600;color:'+c.tc+';margin-bottom:3px">'+c.icon+' '+c.label+'</p>'
-          +'<p style="font-size:15px;font-weight:800;color:'+c.tc+'">'+fmt(c.val)+'</p>'
-          +'<p style="font-size:10px;color:'+c.tc+';opacity:.8">'+c.count+' linha(s)</p>'
-          +'</div>').join('')
-        +'</div></div>';
-    })():'')
-    // Table
+
+    // ── sticky wrapper end + table ─────────────────────────────────────────
+    +'</div>'
+    // Table — thead also sticky
     +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
     +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
     +'<thead><tr style="background:var(--g100)">'
     +['Cliente','Pedido','PN','Descrição','RDD','Sales Doc','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'',(isAdmin||isAdmin==='salesops')?'Total linha':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Coment.','Ações'].filter(Boolean)
-      .map(h=>'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600">'+h+'</th>').join('')
+      .map(h=>'<th style="position:sticky;top:var(--bl-thead-top,0);background:var(--g100);padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600;z-index:10">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
+
     +filtered.map((item,idx)=>{
       const qtyOpen=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
       const valueOpen=qtyOpen*Number(item.unit_price||0);
@@ -1798,6 +1781,14 @@ function renderBacklogGrid(el, items, isAdmin){
     }).join('')
     +'</tbody></table></div>'
         ;
+  // After render: compute sticky header height and set thead top offset
+  requestAnimationFrame(()=>{
+    const sticky=document.getElementById('bl-sticky');
+    if(sticky){
+      const h=sticky.offsetHeight;
+      document.documentElement.style.setProperty('--bl-thead-top', h+'px');
+    }
+  });
 }
 
 async function handleClassificationChange(selectEl, itemId, prevClass){
@@ -2166,33 +2157,10 @@ async function importBacklogCSV(input){
 }
 
 function refreshBacklogKPIs(){
-  const items=window._backlogItems||[];
-  const f=backlogFilters;
-  const filtered=items.filter(item=>{
-    if(f.client&&!item.client_name.toLowerCase().includes(f.client.toLowerCase()))return false;
-    if(f.pn&&!item.pn.toLowerCase().includes(f.pn.toLowerCase())&&!item.description?.toLowerCase().includes(f.pn.toLowerCase()))return false;
-    if(f.classification==='__unclassified__'&&(item.classification&&item.classification!==''))return false;
-    else if(f.classification&&f.classification!=='__unclassified__'&&item.classification!==f.classification)return false;
-    if(f.destination&&item.destination!==f.destination)return false;
-    if(f.shipMonth==='yes'&&item.will_ship_month!==true)return false;
-    if(f.shipMonth==='no'&&item.will_ship_month!==false)return false;
-    return true;
-  });
-  const openItems=filtered.filter(i=>i.classification!=='Shipped');
-  const shippedItems=filtered.filter(i=>i.classification==='Shipped');
-  const forecastItems=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped');
-  const openVal=openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const shippedVal=shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
-  const forecastVal=forecastItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  document.querySelectorAll('[data-kpi]').forEach(el=>{
-    const k=el.dataset.kpi;
-    if(k==='open') el.textContent=openItems.length;
-    if(k==='value') el.textContent=fmt(openVal);
-    if(k==='ship') el.textContent=forecastItems.length;
-    if(k==='forecast') el.textContent=fmt(forecastVal);
-    if(k==='shipped') el.textContent=shippedItems.length;
-    if(k==='shippedval') el.textContent=fmt(shippedVal);
-  });
+  // Full re-render is the safest approach since we now have breakdown panel + sticky header
+  const isAdm=cProfile?.is_admin?true:cProfile?.role==='salesops'?'salesops':false;
+  const el=document.getElementById(cProfile?.is_admin?'admin-content':'salesops-content');
+  if(el&&window._backlogItems) renderBacklogGrid(el,window._backlogItems,isAdm);
 }
 
 function openBacklogComments(itemId){
