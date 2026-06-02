@@ -1561,8 +1561,10 @@ function renderBacklogGrid(el, items, isAdmin){
 
   // ── compute all metrics once ──────────────────────────────────────────────
   const rm=backlogFilters.refMonth;
-  const rmLabel=rm?new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'';
-  const rmShort=rm?new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}):'';
+  // Parse rm as LOCAL date to avoid UTC-3 shift (e.g. "2026-06" → June, not May)
+  const rmLocalDate=rm?(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})():null;
+  const rmLabel=rmLocalDate?rmLocalDate.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'';
+  const rmShort=rmLocalDate?rmLocalDate.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}):'';
 
   const openItems   = filtered.filter(i=>i.classification!=='Shipped');
   const forecastItems = filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped');
@@ -1599,7 +1601,7 @@ function renderBacklogGrid(el, items, isAdmin){
 
   el.innerHTML=
     // ── sticky wrapper start ──
-    '<div id="bl-sticky" style="position:sticky;top:0;z-index:90;background:var(--g50);padding-bottom:8px;margin-bottom:0">'
+    '<div id="bl-sticky" style="position:sticky;top:0;z-index:90;background:var(--g50);padding-bottom:6px;margin-bottom:0;box-shadow:0 2px 8px rgba(0,0,0,.06)">'
 
     // title row
     +'<div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;margin-bottom:10px;flex-wrap:wrap;gap:8px">'
@@ -1687,12 +1689,12 @@ function renderBacklogGrid(el, items, isAdmin){
 
     // ── sticky wrapper end + table ─────────────────────────────────────────
     +'</div>'
-    // Table — thead also sticky
-    +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
-    +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
+    // Table wrapper — overflow-x on outer, table fills it; thead sticky works because no overflow-y on wrapper
+    +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border);position:relative">'
+    +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto;min-width:1100px">'
     +'<thead><tr style="background:var(--g100)">'
     +['Cliente','Pedido','PN','Descrição','RDD','Sales Doc','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'',(isAdmin||isAdmin==='salesops')?'Total linha':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Coment.','Ações'].filter(Boolean)
-      .map(h=>'<th style="position:sticky;top:var(--bl-thead-top,0);background:var(--g100);padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600;z-index:10">'+h+'</th>').join('')
+      .map(h=>'<th style="position:sticky;top:var(--bl-thead-top,0px);background:var(--g100);padding:6px 8px;text-align:left;border-bottom:2px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600;z-index:20;box-shadow:0 1px 0 var(--border)">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
 
     +(()=>{
@@ -1801,9 +1803,8 @@ function renderBacklogGrid(el, items, isAdmin){
       }
 
       // ── WITH ref month: split into 3 groups ──────────────────────────
-      const rmStart=new Date(rm+'-01T00:00:00');
-      // end of ref month
-      const rmEnd=new Date(rmStart.getFullYear(), rmStart.getMonth()+1, 0, 23,59,59);
+      const rmStart=(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})();
+      const rmEnd=new Date(rmStart.getFullYear(),rmStart.getMonth()+1,0,23,59,59);
       const isPast=rmEnd<today;
 
       // Group 1: Shipped in rm (ship_date in rm)
@@ -1842,7 +1843,7 @@ function renderBacklogGrid(el, items, isAdmin){
           +'</button></td></tr>';
 
         if(shippedInRm.length>0){
-          rows+=divRow('✅','Shipped em '+new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),shippedInRm.length+' linha(s)','#F0FFF4','#166534');
+          rows+=divRow('✅','Shipped em '+rmStart.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),shippedInRm.length+' linha(s)','#F0FFF4','#166534');
           shippedInRm.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
         } else {
           rows+='<tr><td colspan="'+colCount+'" style="padding:12px;text-align:center;color:var(--tm);font-size:12px">Nenhum embarque registrado neste mês.</td></tr>';
@@ -1850,7 +1851,7 @@ function renderBacklogGrid(el, items, isAdmin){
 
         if(showRetro){
           if(nativeOpen.length>0){
-            rows+=divRow('📦','RDD '+new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'})+' — não embarcados',nativeOpen.length+' linha(s) · motivos abaixo','#FEF3C7','#92400E');
+            rows+=divRow('📦','RDD '+rmStart.toLocaleDateString('pt-BR',{month:'long',year:'numeric'})+' — não embarcados',nativeOpen.length+' linha(s) · motivos abaixo','#FEF3C7','#92400E');
             nativeOpen.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
           }
           if(overdue.length>0){
@@ -1880,7 +1881,7 @@ function renderBacklogGrid(el, items, isAdmin){
 
         if(nativeOpen.length>0){
           const totalNativeVal=nativeOpen.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-          rows+=divRow('📦','Ordens do mês — '+new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),nativeOpen.length+' linha(s) · '+fmt(totalNativeVal),'#EFF6FF','#185FA5');
+          rows+=divRow('📦','Ordens do mês — '+rmStart.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),nativeOpen.length+' linha(s) · '+fmt(totalNativeVal),'#EFF6FF','#185FA5');
           nativeOpen.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
         }
 
@@ -1889,7 +1890,7 @@ function renderBacklogGrid(el, items, isAdmin){
             const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);
             return s+q*Number(i.unit_price||0);
           },0);
-          rows+=divRow('✅','Shipped em '+new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),shippedInRm.length+' linha(s) · '+fmt(totalShippedVal),'#F0FFF4','#166534');
+          rows+=divRow('✅','Shipped em '+rmStart.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),shippedInRm.length+' linha(s) · '+fmt(totalShippedVal),'#F0FFF4','#166534');
           shippedInRm.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
         }
 
