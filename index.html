@@ -1695,90 +1695,215 @@ function renderBacklogGrid(el, items, isAdmin){
       .map(h=>'<th style="position:sticky;top:var(--bl-thead-top,0);background:var(--g100);padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600;z-index:10">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
 
-    +filtered.map((item,idx)=>{
-      const qtyOpen=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
-      const valueOpen=qtyOpen*Number(item.unit_price||0);
-      const [clsBg,clsTxt]=(CLS_COLORS[item.classification]||((!item.classification||item.classification==='')?['#FDECEA','#C0392B']:['#F0F0F0','#333']));
-      const lastComment=item.backlog_comments?.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
-      const commCount=item.backlog_comments?.length||0;
-      const rowBg=idx%2===0?'#fff':'#FAFBFC';
-      const isShipped=item.classification==='Shipped';
-      // RDD pill + edit input
-      const rddCell=(()=>{
-        const rdd=item.rdd;
-        const today=new Date(); today.setHours(0,0,0,0);
-        let pillHtml='';
-        if(rdd){
-          const rddDate=new Date(rdd+'T12:00:00');
-          const diffDays=Math.round((rddDate-today)/(1000*60*60*24));
-          const label=rddDate.toLocaleDateString('pt-BR');
-          let bg,tc;
-          if(diffDays<0){bg='#FDECEA';tc='#C0392B';}
-          else if(diffDays<=31){bg='#E6F1FB';tc='#185FA5';}
-          else if(diffDays<=62){bg='#FEF3C7';tc='#92400E';}
-          else{bg='#F1F1F1';tc='#737373';}
-          pillHtml='<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap;background:'+bg+';color:'+tc+'">📅 '+label+'</span><br>';
-        }
-        return '<td style="padding:4px 6px;white-space:nowrap">'
-          +pillHtml
-          +'<input type="date" value="'+(rdd||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'rdd\',this.value)"'
-          +' style="padding:2px 4px;border:1px solid var(--border-md);border-radius:4px;font-size:10px;font-family:inherit;width:112px;'+(rdd?'border-color:#0A7A8C;':'')+'"/>'
-          +'</td>';
-      })();
-      // Sales Doc input
-      const salesDocCell=(()=>{
+    +(()=>{
+      const rm=backlogFilters.refMonth; // e.g. "2026-06"
+      const today=new Date(); today.setHours(0,0,0,0);
+      const colCount=['Cliente','Pedido','PN','Descrição','RDD','Sales Doc','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'',(isAdmin||isAdmin==='salesops')?'Total linha':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Coment.','Ações'].filter(Boolean).length;
+
+      // helper: build a section divider row
+      const divRow=(icon,label,sublabel,bg,tc)=>
+        '<tr><td colspan="'+colCount+'" style="padding:6px 12px;background:'+bg+';border-top:2px solid '+tc+';border-bottom:1px solid '+tc+'33">'
+        +'<span style="font-size:11px;font-weight:700;color:'+tc+'">'+icon+' '+label+'</span>'
+        +(sublabel?'<span style="font-size:10px;color:'+tc+';opacity:.75;margin-left:8px">'+sublabel+'</span>':'')
+        +'</td></tr>';
+
+      // helper: build one data row
+      const buildRow=(item,idx,delayDays)=>{
+        const qtyOpen=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
+        const valueOpen=qtyOpen*Number(item.unit_price||0);
+        const [clsBg,clsTxt]=(CLS_COLORS[item.classification]||((!item.classification||item.classification==='')?['#FDECEA','#C0392B']:['#F0F0F0','#333']));
+        const lastComment=item.backlog_comments?.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
+        const commCount=item.backlog_comments?.length||0;
+        const rowBg=idx%2===0?'#fff':'#FAFBFC';
+        const isShipped=item.classification==='Shipped';
+
+        // RDD cell — show delay badge if delayDays provided
+        const rddCell=(()=>{
+          const rdd=item.rdd;
+          let pillHtml='';
+          if(rdd){
+            const rddDate=new Date(rdd+'T12:00:00');
+            const diff=Math.round((rddDate-today)/(1000*60*60*24));
+            const label=rddDate.toLocaleDateString('pt-BR');
+            let bg2,tc2;
+            if(diff<0){bg2='#FDECEA';tc2='#C0392B';}
+            else if(diff<=31){bg2='#E6F1FB';tc2='#185FA5';}
+            else if(diff<=62){bg2='#FEF3C7';tc2='#92400E';}
+            else{bg2='#F1F1F1';tc2='#737373';}
+            pillHtml='<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap;background:'+bg2+';color:'+tc2+'">📅 '+label+'</span>';
+            if(delayDays>0){
+              pillHtml+='<br><span style="font-size:9px;font-weight:700;color:#C0392B;white-space:nowrap">⏰ '+delayDays+'d atraso</span>';
+            }
+            pillHtml+='<br>';
+          }
+          return '<td style="padding:4px 6px;white-space:nowrap">'
+            +pillHtml
+            +'<input type="date" value="'+(rdd||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'rdd\',this.value)"'
+            +' style="padding:2px 4px;border:1px solid var(--border-md);border-radius:4px;font-size:10px;font-family:inherit;width:112px;'+(rdd?'border-color:#0A7A8C;':'')+'"/>'
+            +'</td>';
+        })();
+
         const sdVal=item.sales_doc||'';
-        return '<td style="padding:4px 6px;white-space:nowrap">'
+        const salesDocCell='<td style="padding:4px 6px;white-space:nowrap">'
           +'<input type="text" maxlength="10" placeholder="000000" value="'+sdVal+'"'
           +' data-order-ref="'+item.order_reference+'"'
           +' onchange="saveBacklogSalesDoc(\''+item.id+'\',\''+item.order_reference+'\',this.value,this)"'
           +' style="width:76px;padding:3px 5px;border:1px solid var(--border-md);border-radius:4px;font-size:10px;font-family:\'JetBrains Mono\',monospace;'+(sdVal?'border-color:#0A7A8C;color:#0A7A8C;font-weight:600;':'')+'">'
           +'</td>';
-      })();
-      return '<tr id="bl-row-'+item.id+'" style="background:'+rowBg+';opacity:'+(isShipped?'0.6':'1')+'">'
-        +'<td style="padding:5px 8px;font-weight:500;white-space:nowrap;font-size:11px">'+item.client_name+'</td>'
-        +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--blue);white-space:nowrap">'+item.order_reference+'</td>'
-        +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
-        +'<td style="padding:5px 8px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px" title="'+item.description+'">'+item.description+'</td>'
-        +rddCell
-        +salesDocCell
-        +'<td style="padding:5px 8px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
-        +'<td style="padding:5px 8px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
-        +'<td style="padding:5px 8px;text-align:center;font-weight:700;color:'+(qtyOpen>0?'var(--blue)':'#166534')+'">'+qtyOpen+'</td>'
-        +(isAdmin?'<td style="padding:7px 10px;text-align:right;color:var(--tm)">'+fmt(item.unit_price)+'</td>'
-                 +'<td style="padding:7px 10px;text-align:right;font-weight:600">'+fmt(valueOpen)+'</td>'
-                 +'<td style="padding:7px 10px;text-align:right;font-weight:700;color:#185FA5">'+fmt(Number(item.qty_ordered||0)*Number(item.unit_price||0))+'</td>':'')
-        
-        +'<td style="padding:7px 8px;white-space:nowrap;color:var(--tm);font-size:10px">'+((item.backlog_shipments&&item.backlog_shipments.length>0)?item.backlog_shipments.slice().sort((a,b)=>new Date(b.ship_date)-new Date(a.ship_date)).map(s=>'<span style="display:block">'+new Date(s.ship_date+'T12:00:00').toLocaleDateString('pt-BR')+(s.qty_shipped?' ('+s.qty_shipped+' un)':'')+'</span>').join(''):'—')+'</td>'
-        +'<td style="padding:7px 10px;text-align:center">'
-        +(isAdmin
-          ?'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:10px;font-family:inherit;width:115px"/>'
-          :'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:10px;font-family:inherit;width:115px"/>'
-        )+'</td>'
-        +(isAdmin?'<td style="padding:7px 10px;text-align:center">'
-        +'<select onchange="onWillShipChange(\''+item.id+'\',this.value,this)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:11px;font-family:inherit;width:76px">'
-        +'<option value=""'+(item.will_ship_month===null||item.will_ship_month===undefined?' selected':'')+'>—</option>'
-        +'<option value="true"'+(item.will_ship_month===true&&!(item.partial_qty>0)?' selected':'')+'>✅ Sim</option>'
-        +'<option value="partial"'+(item.partial_qty>0?' selected':'')+'>🔀 Parcial</option>'
-        +'<option value="false"'+(item.will_ship_month===false?' selected':'')+'>❌ Não</option>'
-        +'</select>'
-        +(item.partial_qty>0?'<p style="font-size:9px;color:#92400E;margin-top:2px;font-weight:600">'+item.partial_qty+' un</p>':'')
-        +'</td>':'')
-        +'<td style="padding:7px 10px">'
-        +'<select data-prev-cls="'+(item.classification||'')+'" onchange="onClassificationChange(\''+item.id+'\',this.value,this.dataset.prevCls,this)" style="padding:3px 5px;border:1px solid '+clsBg+';background:'+clsBg+';color:'+clsTxt+';border-radius:5px;font-size:10px;font-family:inherit;font-weight:600;max-width:130px">'
-        +'<option value=""'+((!item.classification||item.classification==='')?' selected':'')+' style="background:#FDECEA;color:#C0392B">⚠️ Classificar…</option>'
-        +CLASSIFICATIONS.map(cl=>'<option value="'+cl+'"'+(item.classification===cl?' selected':'')+' style="background:#fff;color:#000">'+cl+'</option>').join('')
-        +'</select></td>'
-        +'<td style="padding:5px 8px;max-width:150px">'
-        +(lastComment?'<p style="font-size:10px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+lastComment.comment+'">'+lastComment.comment+'</p>'
-                     +'<p style="font-size:9px;color:var(--g600)">'+lastComment.author_name+' · '+new Date(lastComment.created_at).toLocaleDateString('pt-BR')+'</p>':'')
-        +'<button onclick="openBacklogComments(\''+item.id+'\')" style="margin-top:2px;background:var(--g100);border:none;border-radius:4px;padding:2px 6px;font-size:9px;cursor:pointer;color:var(--t2)">💬'+(commCount||'+')+'</button>'
-        +'</td>'
-        +'<td style="padding:5px 8px;white-space:nowrap">'
-        +'<button onclick="openShipModal(\''+item.id+'\','+item.qty_ordered+','+Number(item.qty_shipped||0)+')" style="background:#E6F1FB;color:#185FA5;border:none;border-radius:4px;padding:3px 7px;font-size:10px;cursor:pointer;font-weight:600">📦</button>'
-        +'</td>'
-        +'</tr>';
-    }).join('')
+
+        return '<tr id="bl-row-'+item.id+'" style="background:'+rowBg+';opacity:'+(isShipped?'0.65':'1')+'">'
+          +'<td style="padding:5px 8px;font-weight:500;white-space:nowrap;font-size:11px">'+item.client_name+'</td>'
+          +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--blue);white-space:nowrap">'+item.order_reference+'</td>'
+          +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
+          +'<td style="padding:5px 8px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px" title="'+item.description+'">'+item.description+'</td>'
+          +rddCell
+          +salesDocCell
+          +'<td style="padding:5px 8px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
+          +'<td style="padding:5px 8px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
+          +'<td style="padding:5px 8px;text-align:center;font-weight:700;color:'+(qtyOpen>0?'var(--blue)':'#166534')+'">'+qtyOpen+'</td>'
+          +(isAdmin?'<td style="padding:7px 10px;text-align:right;color:var(--tm)">'+fmt(item.unit_price)+'</td>'
+                   +'<td style="padding:7px 10px;text-align:right;font-weight:600">'+fmt(valueOpen)+'</td>'
+                   +'<td style="padding:7px 10px;text-align:right;font-weight:700;color:#185FA5">'+fmt(Number(item.qty_ordered||0)*Number(item.unit_price||0))+'</td>':'')
+          +'<td style="padding:7px 8px;white-space:nowrap;color:var(--tm);font-size:10px">'+((item.backlog_shipments&&item.backlog_shipments.length>0)?item.backlog_shipments.slice().sort((a,b)=>new Date(b.ship_date)-new Date(a.ship_date)).map(s=>'<span style="display:block">'+new Date(s.ship_date+'T12:00:00').toLocaleDateString('pt-BR')+(s.qty_shipped?' ('+s.qty_shipped+' un)':'')+'</span>').join(''):'—')+'</td>'
+          +'<td style="padding:7px 10px;text-align:center">'
+          +(isAdmin
+            ?'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:10px;font-family:inherit;width:115px"/>'
+            :'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:10px;font-family:inherit;width:115px"/>'
+          )+'</td>'
+          +(isAdmin?'<td style="padding:7px 10px;text-align:center">'
+          +'<select onchange="onWillShipChange(\''+item.id+'\',this.value,this)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:11px;font-family:inherit;width:76px">'
+          +'<option value=""'+(item.will_ship_month===null||item.will_ship_month===undefined?' selected':'')+'>—</option>'
+          +'<option value="true"'+(item.will_ship_month===true&&!(item.partial_qty>0)?' selected':'')+'>✅ Sim</option>'
+          +'<option value="partial"'+(item.partial_qty>0?' selected':'')+'>🔀 Parcial</option>'
+          +'<option value="false"'+(item.will_ship_month===false?' selected':'')+'>❌ Não</option>'
+          +'</select>'
+          +(item.partial_qty>0?'<p style="font-size:9px;color:#92400E;margin-top:2px;font-weight:600">'+item.partial_qty+' un</p>':'')
+          +'</td>':'')
+          +'<td style="padding:7px 10px">'
+          +'<select data-prev-cls="'+(item.classification||'')+'" onchange="onClassificationChange(\''+item.id+'\',this.value,this.dataset.prevCls,this)" style="padding:3px 5px;border:1px solid '+clsBg+';background:'+clsBg+';color:'+clsTxt+';border-radius:5px;font-size:10px;font-family:inherit;font-weight:600;max-width:130px">'
+          +'<option value=""'+((!item.classification||item.classification==='')?' selected':'')+' style="background:#FDECEA;color:#C0392B">⚠️ Classificar…</option>'
+          +CLASSIFICATIONS.map(cl=>'<option value="'+cl+'"'+(item.classification===cl?' selected':'')+' style="background:#fff;color:#000">'+cl+'</option>').join('')
+          +'</select></td>'
+          +'<td style="padding:5px 8px;max-width:150px">'
+          +(lastComment?'<p style="font-size:10px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+lastComment.comment+'">'+lastComment.comment+'</p>'
+                       +'<p style="font-size:9px;color:var(--g600)">'+lastComment.author_name+' · '+new Date(lastComment.created_at).toLocaleDateString('pt-BR')+'</p>':'')
+          +'<button onclick="openBacklogComments(\''+item.id+'\')" style="margin-top:2px;background:var(--g100);border:none;border-radius:4px;padding:2px 6px;font-size:9px;cursor:pointer;color:var(--t2)">💬'+(commCount||'+')+'</button>'
+          +'</td>'
+          +'<td style="padding:5px 8px;white-space:nowrap">'
+          +'<button onclick="openShipModal(\''+item.id+'\','+item.qty_ordered+','+Number(item.qty_shipped||0)+')" style="background:#E6F1FB;color:#185FA5;border:none;border-radius:4px;padding:3px 7px;font-size:10px;cursor:pointer;font-weight:600">📦</button>'
+          +'</td>'
+          +'</tr>';
+      };
+
+      // ── NO ref month: flat render ─────────────────────────────────────
+      if(!rm){
+        return filtered.map((item,idx)=>buildRow(item,idx,0)).join('');
+      }
+
+      // ── WITH ref month: split into 3 groups ──────────────────────────
+      const rmStart=new Date(rm+'-01T00:00:00');
+      // end of ref month
+      const rmEnd=new Date(rmStart.getFullYear(), rmStart.getMonth()+1, 0, 23,59,59);
+      const isPast=rmEnd<today;
+
+      // Group 1: Shipped in rm (ship_date in rm)
+      const shippedInRm=filtered.filter(i=>
+        (i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm)
+      );
+
+      // Group 2: RDD in rm, not shipped in rm (native month, still open or shipped other month)
+      const nativeOpen=filtered.filter(i=>{
+        const rddMk=(i.rdd||'').slice(0,7);
+        const shippedThisMonth=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
+        return rddMk===rm && !shippedThisMonth && i.classification!=='Shipped';
+      });
+
+      // Group 3: Overdue — RDD before rm, not shipped at all (classification !== Shipped)
+      // Only shown for current/future months (for past months hidden by default, toggle shows)
+      const overdue=filtered.filter(i=>{
+        const rddMk=(i.rdd||'').slice(0,7);
+        return rddMk && rddMk<rm && i.classification!=='Shipped'
+          && !(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
+      });
+
+      // For past months: toggle "como poderia ter sido"
+      // Store toggle state on window
+      const showRetro=window._blRetroMode===true;
+      let rows='';
+
+      if(isPast){
+        // Past month view
+        // Toggle button
+        rows+='<tr><td colspan="'+colCount+'" style="padding:8px 12px;background:#F8F9FA;border-bottom:1px solid var(--border)">'
+          +'<span style="font-size:11px;color:var(--tm)">Mês passado — mostrando o que foi realizado.</span>'
+          +'<button onclick="window._blRetroMode=!'+(showRetro)+';refreshBacklogKPIs()" '
+          +'style="margin-left:10px;font-size:11px;padding:3px 10px;border:1px solid var(--border-md);border-radius:6px;cursor:pointer;background:'+(showRetro?'#001423':'#fff')+';color:'+(showRetro?'#fff':'var(--t2)')+';">'
+          +(showRetro?'👁 Ocultar "como poderia ter sido"':'👁 Ver "como poderia ter sido"')
+          +'</button></td></tr>';
+
+        if(shippedInRm.length>0){
+          rows+=divRow('✅','Shipped em '+new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),shippedInRm.length+' linha(s)','#F0FFF4','#166534');
+          shippedInRm.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
+        } else {
+          rows+='<tr><td colspan="'+colCount+'" style="padding:12px;text-align:center;color:var(--tm);font-size:12px">Nenhum embarque registrado neste mês.</td></tr>';
+        }
+
+        if(showRetro){
+          if(nativeOpen.length>0){
+            rows+=divRow('📦','RDD '+new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'})+' — não embarcados',nativeOpen.length+' linha(s) · motivos abaixo','#FEF3C7','#92400E');
+            nativeOpen.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
+          }
+          if(overdue.length>0){
+            rows+=divRow('🔴','Atrasadas (RDD anterior) — não embarcadas',overdue.length+' linha(s)','#FFF1F0','#C0392B');
+            overdue.forEach((item,i)=>{
+              const rddDate=item.rdd?new Date(item.rdd+'T12:00:00'):null;
+              const delay=rddDate?Math.max(0,Math.round((rmEnd-rddDate)/(1000*60*60*24))):0;
+              rows+=buildRow(item,i,delay);
+            });
+          }
+        }
+      } else {
+        // Current / future month view
+        if(overdue.length>0){
+          const totalOverdueVal=overdue.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+          rows+=divRow('🔴','Atrasadas — RDD vencido, ainda em aberto',overdue.length+' linha(s) · '+fmt(totalOverdueVal),'#FFF1F0','#C0392B');
+          overdue.sort((a,b)=>{
+            const da=a.rdd?new Date(a.rdd+'T12:00:00'):new Date(0);
+            const db=b.rdd?new Date(b.rdd+'T12:00:00'):new Date(0);
+            return da-db; // oldest RDD first
+          }).forEach((item,i)=>{
+            const rddDate=item.rdd?new Date(item.rdd+'T12:00:00'):null;
+            const delay=rddDate?Math.max(0,Math.round((today-rddDate)/(1000*60*60*24))):0;
+            rows+=buildRow(item,i,delay);
+          });
+        }
+
+        if(nativeOpen.length>0){
+          const totalNativeVal=nativeOpen.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+          rows+=divRow('📦','Ordens do mês — '+new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),nativeOpen.length+' linha(s) · '+fmt(totalNativeVal),'#EFF6FF','#185FA5');
+          nativeOpen.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
+        }
+
+        if(shippedInRm.length>0){
+          const totalShippedVal=shippedInRm.reduce((s,i)=>{
+            const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);
+            return s+q*Number(i.unit_price||0);
+          },0);
+          rows+=divRow('✅','Shipped em '+new Date(rm+'-01').toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),shippedInRm.length+' linha(s) · '+fmt(totalShippedVal),'#F0FFF4','#166534');
+          shippedInRm.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
+        }
+
+        // Items with no RDD set but not shipped — show at bottom
+        const noRdd=filtered.filter(i=>!i.rdd&&i.classification!=='Shipped'
+          &&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
+        if(noRdd.length>0){
+          rows+=divRow('❓','Sem RDD definido',noRdd.length+' linha(s)','#F8F9FA','#888');
+          noRdd.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
+        }
+      }
+
+      return rows;
+    })()
     +'</tbody></table></div>'
         ;
   // After render: compute sticky header height and set thead top offset
