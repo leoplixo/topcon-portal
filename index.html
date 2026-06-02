@@ -1518,7 +1518,8 @@ function renderBacklogGrid(el, items, isAdmin){
     const f=backlogFilters;
     if(f.client && !item.client_name.toLowerCase().includes(f.client.toLowerCase())) return false;
     if(f.pn && !item.pn.toLowerCase().includes(f.pn.toLowerCase()) && !item.description?.toLowerCase().includes(f.pn.toLowerCase())) return false;
-    if(f.classification && item.classification!==f.classification) return false;
+    if(f.classification==='__unclassified__' && (item.classification&&item.classification!=='')) return false;
+    else if(f.classification && f.classification!=='__unclassified__' && item.classification!==f.classification) return false;
     if(f.destination && item.destination!==f.destination) return false;
     if(f.shipMonth==='yes' && item.will_ship_month!==true) return false;
     if(f.shipMonth==='no' && item.will_ship_month!==false) return false;
@@ -1529,6 +1530,8 @@ function renderBacklogGrid(el, items, isAdmin){
 
   // Summary stats
   const notShipped=filtered.filter(i=>i.classification!=='Shipped');
+  const unclassified=filtered.filter(i=>!i.classification||i.classification==='');
+  const unclassifiedVal=unclassified.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const totalOpen=notShipped.length;
   const totalValue=notShipped.reduce((s,i)=>{
     const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
@@ -1573,6 +1576,7 @@ function renderBacklogGrid(el, items, isAdmin){
         {icon:'📋',label:'Em aberto',count:openItems.length,val:fmt(openVal),color:'var(--blue)',kpi:'open',kpiv:'value'},
         {icon:'🎯',label:'Previsto embarcar',count:forecastItems.length,val:fmt(forecastVal),color:'#D97706',kpi:'ship',kpiv:'forecast'},
         {icon:'✅',label:'Já embarcado',count:shippedItems.length,val:fmt(shippedVal),color:'#166534',kpi:'shipped',kpiv:'shippedval'},
+        ...(unclassified.length>0?[{icon:'⚠️',label:'Sem classificação',count:unclassified.length,val:fmt(unclassifiedVal),color:'#C0392B',kpi:'uncls',kpiv:'unclsval'}]:[]),
       ].map(k=>'<div class="dash-card" style="padding:14px;margin-bottom:0;border-left:3px solid '+k.color+'">'
         +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
         +'<div style="font-size:18px">'+k.icon+'</div>'
@@ -1594,6 +1598,7 @@ function renderBacklogGrid(el, items, isAdmin){
     +'</select>'
     +'<select id="bl-filter-cls" oninput="backlogFilters.classification=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
     +'<option value="">Todas classificações</option>'
+    +'<option value="__unclassified__"'+(backlogFilters.classification==='__unclassified__'?' selected':'')+'>⚠️ Sem classificação</option>'
     +CLASSIFICATIONS.map(cl=>'<option value="'+cl+'"'+(backlogFilters.classification===cl?' selected':'')+'>'+cl+'</option>').join('')
     +'</select>'
     +'<select id="bl-filter-dest" oninput="backlogFilters.destination=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:130px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
@@ -1634,13 +1639,13 @@ function renderBacklogGrid(el, items, isAdmin){
     +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
     +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
     +'<thead><tr style="background:var(--g100)">'
-    +['Cliente','Pedido','PN','Descrição','RDD','Sales Doc','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
+    +['Cliente','Pedido','PN','Descrição','RDD','Sales Doc','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'',(isAdmin||isAdmin==='salesops')?'Total linha':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Coment.','Ações'].filter(Boolean)
       .map(h=>'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
     +filtered.map((item,idx)=>{
       const qtyOpen=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
       const valueOpen=qtyOpen*Number(item.unit_price||0);
-      const [clsBg,clsTxt]=(CLS_COLORS[item.classification]||['#F0F0F0','#333']);
+      const [clsBg,clsTxt]=(CLS_COLORS[item.classification]||((!item.classification||item.classification==='')?['#FDECEA','#C0392B']:['#F0F0F0','#333']));
       const lastComment=item.backlog_comments?.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
       const commCount=item.backlog_comments?.length||0;
       const rowBg=idx%2===0?'#fff':'#FAFBFC';
@@ -1688,7 +1693,8 @@ function renderBacklogGrid(el, items, isAdmin){
         +'<td style="padding:5px 8px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
         +'<td style="padding:5px 8px;text-align:center;font-weight:700;color:'+(qtyOpen>0?'var(--blue)':'#166534')+'">'+qtyOpen+'</td>'
         +(isAdmin?'<td style="padding:7px 10px;text-align:right;color:var(--tm)">'+fmt(item.unit_price)+'</td>'
-                 +'<td style="padding:7px 10px;text-align:right;font-weight:600">'+fmt(valueOpen)+'</td>':'')
+                 +'<td style="padding:7px 10px;text-align:right;font-weight:600">'+fmt(valueOpen)+'</td>'
+                 +'<td style="padding:7px 10px;text-align:right;font-weight:700;color:#185FA5">'+fmt(Number(item.qty_ordered||0)*Number(item.unit_price||0))+'</td>':'')
         
         +'<td style="padding:7px 8px;white-space:nowrap;color:var(--tm);font-size:10px">'+((item.backlog_shipments&&item.backlog_shipments.length>0)?item.backlog_shipments.slice().sort((a,b)=>new Date(b.ship_date)-new Date(a.ship_date)).map(s=>'<span style="display:block">'+new Date(s.ship_date+'T12:00:00').toLocaleDateString('pt-BR')+(s.qty_shipped?' ('+s.qty_shipped+' un)':'')+'</span>').join(''):'—')+'</td>'
         +'<td style="padding:7px 10px;text-align:center">'
@@ -1703,7 +1709,8 @@ function renderBacklogGrid(el, items, isAdmin){
         +'<option value="false"'+(item.will_ship_month===false?' selected':'')+'>❌ Não</option>'
         +'</select></td>':'')
         +'<td style="padding:7px 10px">'
-        +'<select data-prev-cls="'+item.classification+'" onchange="onClassificationChange(\''+item.id+'\',this.value,this.dataset.prevCls,this)" style="padding:3px 5px;border:1px solid '+clsBg+';background:'+clsBg+';color:'+clsTxt+';border-radius:5px;font-size:10px;font-family:inherit;font-weight:600;max-width:130px">'
+        +'<select data-prev-cls="'+(item.classification||'')+'" onchange="onClassificationChange(\''+item.id+'\',this.value,this.dataset.prevCls,this)" style="padding:3px 5px;border:1px solid '+clsBg+';background:'+clsBg+';color:'+clsTxt+';border-radius:5px;font-size:10px;font-family:inherit;font-weight:600;max-width:130px">'
+        +'<option value=""'+((!item.classification||item.classification==='')?' selected':'')+' style="background:#FDECEA;color:#C0392B">⚠️ Classificar…</option>'
         +CLASSIFICATIONS.map(cl=>'<option value="'+cl+'"'+(item.classification===cl?' selected':'')+' style="background:#fff;color:#000">'+cl+'</option>').join('')
         +'</select></td>'
         +'<td style="padding:5px 8px;max-width:150px">'
@@ -1885,7 +1892,8 @@ function exportBacklogCSV(){
     const f=backlogFilters;
     if(f.client&&!item.client_name.toLowerCase().includes(f.client.toLowerCase()))return false;
     if(f.pn&&!item.pn.toLowerCase().includes(f.pn.toLowerCase())&&!item.description?.toLowerCase().includes(f.pn.toLowerCase()))return false;
-    if(f.classification&&item.classification!==f.classification)return false;
+    if(f.classification==='__unclassified__'&&(item.classification&&item.classification!==''))return false;
+    else if(f.classification&&f.classification!=='__unclassified__'&&item.classification!==f.classification)return false;
     if(f.destination&&item.destination!==f.destination)return false;
     if(f.shipMonth==='yes'&&item.will_ship_month!==true)return false;
     if(f.shipMonth==='no'&&item.will_ship_month!==false)return false;
@@ -2090,7 +2098,8 @@ function refreshBacklogKPIs(){
   const filtered=items.filter(item=>{
     if(f.client&&!item.client_name.toLowerCase().includes(f.client.toLowerCase()))return false;
     if(f.pn&&!item.pn.toLowerCase().includes(f.pn.toLowerCase())&&!item.description?.toLowerCase().includes(f.pn.toLowerCase()))return false;
-    if(f.classification&&item.classification!==f.classification)return false;
+    if(f.classification==='__unclassified__'&&(item.classification&&item.classification!==''))return false;
+    else if(f.classification&&f.classification!=='__unclassified__'&&item.classification!==f.classification)return false;
     if(f.destination&&item.destination!==f.destination)return false;
     if(f.shipMonth==='yes'&&item.will_ship_month!==true)return false;
     if(f.shipMonth==='no'&&item.will_ship_month!==false)return false;
@@ -2181,7 +2190,7 @@ function openShipModal(itemId, qtyOrdered, qtyShipped){
     +'<label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Quantidade embarcada agora</label>'
     +'<input type="number" id="ship-qty" min="1" max="'+qtyOpen+'" value="'+qtyOpen+'" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:14px;margin-bottom:10px;box-sizing:border-box"/>'
     +'<label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Data de embarque</label>'
-    +'<input type="date" id="ship-date" value="'+new Date().toISOString().slice(0,10)+'" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;margin-bottom:10px;box-sizing:border-box"/>'
+    +'<input type="date" id="ship-date" value="'+new Date().toISOString().slice(0,10)+'" max="'+new Date().toISOString().slice(0,10)+'" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;margin-bottom:10px;box-sizing:border-box"/>'
     +'<label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Observações</label>'
     +'<input type="text" id="ship-notes" placeholder="Ex: BL #12345, partial shipment…" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;margin-bottom:14px;box-sizing:border-box"/>'
     +'<button onclick="confirmShipment(\''+itemId+'\','+qtyOrdered+')" style="width:100%;background:var(--blue);color:#fff;border:none;border-radius:var(--r-md);padding:11px;font-size:14px;font-weight:600;cursor:pointer">Confirmar embarque</button>'
@@ -2241,6 +2250,12 @@ async function confirmShipment(itemId, qtyOrdered){
   const date=document.getElementById('ship-date')?.value;
   const notes=document.getElementById('ship-notes')?.value||'';
   if(!qty||qty<=0){alert('Informe uma quantidade válida.');return;}
+  // Block future dates
+  const today=new Date().toISOString().slice(0,10);
+  if(date&&date>today){
+    alert('❌ Não é possível registrar embarque em data futura.\n\nSelecione hoje ('+new Date().toLocaleDateString('pt-BR')+') ou uma data anterior.');
+    return;
+  }
 
   // Save shipment record
   const{error:sErr}=await sb.from('backlog_shipments').insert({
@@ -2770,9 +2785,18 @@ async function renderAdminTab(tab){
     });
     const clientRevArr=Object.entries(revByClient).sort((a,b)=>b[1]-a[1]);
 
-    // Targets by client
+    // Build unified dealer list: merge targets + all dealers who placed orders
     const targetByUser={};
     targets.forEach(t=>targetByUser[t.user_id]={target:Number(t.target_usd),name:t.user_profiles?.full_name||'—'});
+    // Add dealers who have orders but no target entry
+    orders.forEach(o=>{
+      if(!o.user_profiles)return;
+      const alreadyInTarget=Object.values(targetByUser).some(t=>t.name===o.user_profiles.full_name);
+      if(!alreadyInTarget){
+        const fakeKey='order-'+o.user_profiles.full_name;
+        if(!targetByUser[fakeKey]) targetByUser[fakeKey]={target:0,name:o.user_profiles.full_name};
+      }
+    });
 
     // Revenue by user
     const revByUser={};
@@ -3729,7 +3753,7 @@ async function forwardOrder(orderId, destination){
       unit_price:         Number(item.unit_price)-Number(item.additional_discount||0),
       qty_ordered:        item.quantity,
       qty_shipped:        0,
-      classification:     'Incomplete Order',
+      classification:     null,
       rdd:                order.requested_delivery_date||null,
       updated_by:         cProfile?.full_name||'Admin',
     }));
