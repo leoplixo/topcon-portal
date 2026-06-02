@@ -1689,12 +1689,12 @@ function renderBacklogGrid(el, items, isAdmin){
 
     // ── sticky wrapper end + table ─────────────────────────────────────────
     +'</div>'
-    // Table wrapper — overflow-x on outer, table fills it; thead sticky works because no overflow-y on wrapper
-    +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border);position:relative">'
+    // Table — use a wrapper without overflow so sticky thead works against the page scroll
+    +'<div id="bl-table-wrap" style="border-radius:var(--r-md);border:1px solid var(--border);overflow:auto">'
     +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto;min-width:1100px">'
-    +'<thead><tr style="background:var(--g100)">'
+    +'<thead id="bl-thead"><tr style="background:var(--g100)">'
     +['Cliente','Pedido','PN','Descrição','RDD','Sales Doc','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'',(isAdmin||isAdmin==='salesops')?'Total linha':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Coment.','Ações'].filter(Boolean)
-      .map(h=>'<th style="position:sticky;top:var(--bl-thead-top,0px);background:var(--g100);padding:6px 8px;text-align:left;border-bottom:2px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600;z-index:20;box-shadow:0 1px 0 var(--border)">'+h+'</th>').join('')
+      .map(h=>'<th style="position:sticky;top:0;background:var(--g100);padding:6px 8px;text-align:left;border-bottom:2px solid var(--border-md);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600;z-index:5;box-shadow:inset 0 -1px 0 var(--border)">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
 
     +(()=>{
@@ -1907,12 +1907,17 @@ function renderBacklogGrid(el, items, isAdmin){
     })()
     +'</tbody></table></div>'
         ;
-  // After render: compute sticky header height and set thead top offset
+  // After render: set table wrapper height so thead sticky works inside the overflow:auto container
   requestAnimationFrame(()=>{
     const sticky=document.getElementById('bl-sticky');
-    if(sticky){
-      const h=sticky.offsetHeight;
-      document.documentElement.style.setProperty('--bl-thead-top', h+'px');
+    const wrap=document.getElementById('bl-table-wrap');
+    if(sticky&&wrap){
+      const stickyH=sticky.offsetHeight;
+      const viewH=window.innerHeight;
+      const wrapTop=wrap.getBoundingClientRect().top+window.scrollY;
+      // Give the table wrapper enough height to fill the viewport below the sticky header
+      wrap.style.maxHeight=(viewH - stickyH - 32)+'px';
+      document.documentElement.style.setProperty('--bl-thead-top','0px');
     }
   });
 }
@@ -4528,6 +4533,15 @@ async function downloadCatalogCSV(){
 const fmt=v=>v==null?'—':'USD '+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById('screen-'+id).classList.add('active');}
 function showLoader(id,msg){const el=document.getElementById(id);if(el)el.innerHTML=`<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>${msg}</div></div>`;}
+
+// Recalculate backlog table height on resize
+window.addEventListener('resize',()=>{
+  const sticky=document.getElementById('bl-sticky');
+  const wrap=document.getElementById('bl-table-wrap');
+  if(sticky&&wrap){
+    wrap.style.maxHeight=(window.innerHeight-sticky.offsetHeight-32)+'px';
+  }
+});
 // login handled by form submit
 </script>
 
