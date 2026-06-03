@@ -336,7 +336,6 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
       <button class="atab" onclick="setTab(this,'admindash')">📊 Dashboard</button>
       <button class="atab active" onclick="setTab(this,'upload')">Upload CSV</button>
       <button class="atab" onclick="setTab(this,'backlog')">📋 Backlog</button>
-      <button class="atab" onclick="setTab(this,'painel')">📈 Painel Mensal</button>
       <button class="atab" onclick="setTab(this,'cutoffs')">📅 Cutoffs</button>
       <button class="atab" onclick="setTab(this,'catalog')">Catálogo completo</button>
       <button class="atab" onclick="setTab(this,'orders')">Pedidos</button>
@@ -967,18 +966,6 @@ async function afterLogin(){
     return;
   }
   cProfile=profile; cGroup=profile.client_groups;
-
-  // Pre-load managers list and client→manager map once at login
-  const[mgrsRes,profilesRes]=await Promise.all([
-    sb.from('managers').select('*').order('name'),
-    sb.from('user_profiles').select('id,manager_name')
-  ]);
-  window._managers=(mgrsRes.data&&mgrsRes.data.length>0)?mgrsRes.data:[
-    {id:'1',name:'Leonardo Plixo'},{id:'2',name:'Dener Jaime'},
-    {id:'3',name:'Mauricio Rosa'},{id:'4',name:'Renato Dias'}
-  ];
-  window._clientManagerMap={};
-  (profilesRes.data||[]).forEach(p=>{if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;});
   // Robust role detection
   let detectedRole = profile.role;
   if(!detectedRole || detectedRole === 'client'){
@@ -1485,7 +1472,7 @@ const CLS_COLORS={
   'Shipped':         ['#E8F5EC','#166534'],
 };
 
-let backlogFilters={client:'',pn:'',classification:'',destination:'',shipMonth:'',rddFrom:'',rddTo:'',refMonth:'',manager:''};
+let backlogFilters={client:'',pn:'',classification:'',destination:'',shipMonth:'',rddFrom:'',rddTo:''};
 
 async function renderAdminBacklog(el){
   // Expand admin page to full width for backlog
@@ -1503,17 +1490,6 @@ async function renderAdminBacklog(el){
     return;
   }
 
-  // Always reload clientManagerMap fresh so recently saved managers are picked up
-  const{data:profiles}=await sb.from('user_profiles').select('id,manager_name');
-  window._clientManagerMap={};
-  (profiles||[]).forEach(p=>{if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;});
-
-  // Patch items with manager_name from clientManagerMap if not set in DB
-  items.forEach(i=>{
-    if(!i.manager_name && i.client_user_id && window._clientManagerMap?.[i.client_user_id]){
-      i.manager_name=window._clientManagerMap[i.client_user_id];
-    }
-  });
   window._backlogItems=items;
   renderBacklogGrid(el, items, true);
 }
@@ -1532,17 +1508,6 @@ async function renderSalesOpsBacklog(){
     el.innerHTML='<div class="empty" style="margin-top:60px"><div class="empty-icon">📋</div><p style="font-size:14px;font-weight:500">Nenhum item no backlog ainda.</p></div>';
     return;
   }
-
-  // Always reload clientManagerMap fresh
-  const{data:profiles}=await sb.from('user_profiles').select('id,manager_name');
-  window._clientManagerMap={};
-  (profiles||[]).forEach(p=>{if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;});
-
-  items.forEach(i=>{
-    if(!i.manager_name && i.client_user_id && window._clientManagerMap?.[i.client_user_id]){
-      i.manager_name=window._clientManagerMap[i.client_user_id];
-    }
-  });
   window._backlogItems=items;
   renderBacklogGrid(el, items, 'salesops');
 }
@@ -1552,13 +1517,8 @@ function renderBacklogGrid(el, items, isAdmin){
   let filtered=items.filter(item=>{
     const f=backlogFilters;
     if(f.client && !item.client_name.toLowerCase().includes(f.client.toLowerCase())) return false;
-    if(f.manager){
-      const mgr=item.manager_name||(window._clientManagerMap?.[item.client_user_id]);
-      if(mgr!==f.manager) return false;
-    }
     if(f.pn && !item.pn.toLowerCase().includes(f.pn.toLowerCase()) && !item.description?.toLowerCase().includes(f.pn.toLowerCase())) return false;
-    if(f.classification==='__unclassified__' && (item.classification&&item.classification!=='')) return false;
-    else if(f.classification && f.classification!=='__unclassified__' && item.classification!==f.classification) return false;
+    if(f.classification && item.classification!==f.classification) return false;
     if(f.destination && item.destination!==f.destination) return false;
     if(f.shipMonth==='yes' && item.will_ship_month!==true) return false;
     if(f.shipMonth==='no' && item.will_ship_month!==false) return false;
@@ -1569,8 +1529,6 @@ function renderBacklogGrid(el, items, isAdmin){
 
   // Summary stats
   const notShipped=filtered.filter(i=>i.classification!=='Shipped');
-  const unclassified=filtered.filter(i=>!i.classification||i.classification==='');
-  const unclassifiedVal=unclassified.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const totalOpen=notShipped.length;
   const totalValue=notShipped.reduce((s,i)=>{
     const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
@@ -1597,417 +1555,169 @@ function renderBacklogGrid(el, items, isAdmin){
   const destinations=[...new Set(items.map(i=>i.destination).filter(Boolean))];
   const clients=[...new Set(items.map(i=>i.client_name).filter(Boolean))].sort();
 
-
-  // ── compute all metrics once ──────────────────────────────────────────────
-  const rm=backlogFilters.refMonth;
-  const rmLocalDate=rm?(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})():null;
-  const rmLabel=rmLocalDate?rmLocalDate.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'';
-  const rmShort=rmLocalDate?rmLocalDate.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}):'';
-  const today=new Date(); today.setHours(0,0,0,0);
-  // Is the ref month in the past?
-  const rmEnd=rmLocalDate?new Date(rmLocalDate.getFullYear(),rmLocalDate.getMonth()+1,0,23,59,59):null;
-  const isPastMonth=rmEnd?rmEnd<today:false;
-
-  // ── rmBase: items that "belong" to this ref month ─────────────────────────
-  // Rule: shipped in rm → always included
-  //       still open (not Shipped) → include if RDD ≤ rm OR no RDD
-  //       shipped in another month → excluded (closed in that month)
-  const rmBase = rm ? filtered.filter(i=>{
-    const shippedInRm=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
-    if(shippedInRm) return true;
-    if(i.classification==='Shipped') return false; // closed in another month
-    if(!i.rdd) return true; // no RDD: include (can't know its month)
-    return i.rdd.slice(0,7)<=rm;
-  }) : filtered;
-
-  // Shipped in rm
-  const shippedItems = rm
-    ? rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
-    : filtered.filter(i=>i.classification==='Shipped');
-  const shippedVal = rm
-    ? shippedItems.reduce((s,i)=>{
-        const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);
-        return s+q*Number(i.unit_price||0);
-      },0)
-    : shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
-
-  // For PAST months: "open" = items that HAD RDD in rm but didn't ship
-  const pastNativeOpen = isPastMonth
-    ? rmBase.filter(i=>i.classification!=='Shipped' && (i.rdd||'').slice(0,7)===rm && !(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
-    : [];
-
-  // For CURRENT/FUTURE months: open = everything in rmBase not shipped in rm
-  const openItems = isPastMonth
-    ? pastNativeOpen
-    : rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
-
-  // ── Mutually exclusive buckets — each item falls in exactly ONE ───────────
-  // Priority: unclassified → own bucket regardless of signal
-  //           classified + will_ship=true  → Previsto
-  //           classified + will_ship=false → Não embarca
-  //           classified + will_ship=null  → Sem sinalização
-  const unclassifiedRm  = openItems.filter(i=>!i.classification||i.classification==='');
-  const classifiedOpen  = openItems.filter(i=>i.classification&&i.classification!=='');
-  const forecastItems   = isPastMonth ? [] : classifiedOpen.filter(i=>i.will_ship_month===true);
-  const perdidoItems    = classifiedOpen.filter(i=>i.will_ship_month===false);
-  const semSinalItems   = classifiedOpen.filter(i=>i.will_ship_month===null||i.will_ship_month===undefined);
-
-  const openVal           = openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const forecastVal       = forecastItems.reduce((s,i)=>{
-    const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
-    const qty=i.partial_qty>0?Math.min(Number(i.partial_qty),open):open;
-    return s+qty*Number(i.unit_price||0);
-  },0);
-  const perdidoVal        = perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const semSinalVal       = semSinalItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const unclassifiedRmVal = unclassifiedRm.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const potencial         = shippedVal+forecastVal;
-
-  // Breakdown by classification
-  const clsBreakdown={};
-  openItems.forEach(i=>{
-    const cls=i.classification||'__unclassified__';
-    if(!clsBreakdown[cls]) clsBreakdown[cls]={count:0,val:0};
-    clsBreakdown[cls].count++;
-    clsBreakdown[cls].val+=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
-  });
-
-  // KPI cards with tooltips
-  const kpiCards = isPastMonth
-    ? [
-        {icon:'✅',label:'Shipped em '+rmShort,       count:shippedItems.length,   val:fmt(shippedVal),       color:'#166534',     tip:'Itens com ship_date registrado em '+rmLabel+'. O que realmente foi faturado e saiu.'},
-        ...(perdidoItems.length>0   ?[{icon:'❌',label:'Não embarcou '+rmShort,    count:perdidoItems.length,   val:fmt(perdidoVal),       color:'#991B1B', tip:'Tinham RDD em '+rmLabel+', classificados e marcados ❌ Não — perdidos neste mês.'}]:[]),
-        ...(semSinalItems.length>0  ?[{icon:'🔲',label:'Sem sinalização '+rmShort, count:semSinalItems.length,  val:fmt(semSinalVal),      color:'#6B7280', tip:'Tinham RDD em '+rmLabel+' e classificação, mas ninguém sinalizou Embarca?.'}]:[]),
-        ...(unclassifiedRm.length>0 ?[{icon:'⚠️',label:'Sem classificação',        count:unclassifiedRm.length, val:fmt(unclassifiedRmVal),color:'#C0392B', tip:'Itens sem classificação com RDD em '+rmLabel+'. Precisam ser classificados.'}]:[]),
-      ]
-    : [
-        {icon:'📋',label:'Em aberto '+(rm?rmShort:''),         count:openItems.length,     val:fmt(openVal),          color:'var(--blue)', tip:'Total de itens com RDD ≤ '+rmLabel+' ainda não shipped. É a soma de todos os outros cards (exceto Embarcado).'},
-        {icon:'🎯',label:'Previsto embarcar '+(rm?rmShort:''), count:forecastItems.length, val:fmt(forecastVal),      color:'#D97706',     tip:'Classificados e marcados ✅ Sim (ou 🔀 Parcial) no campo Embarca?. Serão faturados neste mês.'},
-        {icon:'✅',label:'Embarcado '+(rm?rmShort:''),          count:shippedItems.length,  val:fmt(shippedVal),       color:'#166534',     tip:'Já têm ship_date registrado em '+rmLabel+'. Foram faturados e saíram.'},
-        {icon:'❌',label:'Não embarca '+(rm?rmShort:''),        count:perdidoItems.length,  val:fmt(perdidoVal),       color:'#991B1B',     tip:'Classificados e marcados ❌ Não no campo Embarca?. Não serão faturados neste mês.'},
-        ...(semSinalItems.length>0  ?[{icon:'🔲',label:'Sem sinalização '+(rm?rmShort:''),count:semSinalItems.length, val:fmt(semSinalVal),      color:'#6B7280', tip:'Classificados mas sem sinalização no campo Embarca? (valor = —). Aguardam decisão do Sales Ops.'}]:[]),
-        ...(unclassifiedRm.length>0 ?[{icon:'⚠️',label:'Sem classificação',               count:unclassifiedRm.length,val:fmt(unclassifiedRmVal),color:'#C0392B', tip:'Sem classificação definida. Independente de sinalização, precisam ser classificados primeiro.'}]:[]),
-        ...(rm?[{icon:'💰',label:'Potencial fechamento',count:'',val:fmt(potencial),color:'#5B2D99',highlight:true,tip:'Embarcado + Previsto embarcar. Máximo realizável para '+rmLabel+' considerando o que já saiu e o que está sinalizado.'}]:[]),
-      ];
-
   el.innerHTML=
-    // ── sticky wrapper start ──
-    '<div id="bl-sticky" style="position:sticky;top:0;z-index:90;background:var(--g50);padding-bottom:6px;margin-bottom:0;box-shadow:0 2px 8px rgba(0,0,0,.06)">'
-
-    // title row
-    +'<div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;margin-bottom:10px;flex-wrap:wrap;gap:8px">'
-    +'<h1 class="page-title" style="margin-bottom:0">Backlog Operacional</h1>'
-    +'<span style="font-size:12px;color:var(--tm)">'+(rm?rmBase.length:filtered.length)+' linha(s) · Atualizado agora'+(rm?' · 📆 '+rmLabel:'')+'</span>'
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">'
+    +'<h1 class="page-title">Backlog Operacional</h1>'
+    +'<span style="font-size:12px;color:var(--tm)">'+filtered.length+' linha(s) · Atualizado agora</span>'
     +'</div>'
-
-    // ── KPI cards ─────────────────────────────────────────────────────────────
-    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:8px;margin-bottom:10px">'
-    +kpiCards.map(k=>'<div class="dash-card" title="'+(k.tip||'')+'" style="padding:12px 14px;margin-bottom:0;border-left:3px solid '+k.color+';cursor:default;position:relative;'+(k.highlight?'background:linear-gradient(135deg,#F3E8FF,#EDE9FE);':'')+'" onmouseenter="showKpiTip(this,\''+encodeURIComponent(k.tip||'')+'\',\''+k.color+'\')" onmouseleave="hideKpiTip()">'
-      +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
-      +'<div style="font-size:16px">'+k.icon+'</div>'
-      +(k.count!==''?'<span data-kpi="'+k.kpi+'" style="font-size:22px;font-weight:800;color:'+k.color+'">'+k.count+'</span>':'')
-      +'</div>'
-      +'<p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.04em;margin:5px 0 2px">'+k.label+'</p>'
-      +'<p data-kpi="'+k.kpiv+'" style="font-size:13px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
-      +'</div>'
-    ).join('')
+    // KPI row
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px">'
+    +(()=>{
+      const openItems=filtered.filter(i=>i.classification!=='Shipped');
+      const shippedItems=filtered.filter(i=>i.classification==='Shipped');
+      const forecastItems=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped');
+      const openVal=openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+      const shippedVal=shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
+      const forecastVal=forecastItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+      return [
+        {icon:'📋',label:'Em aberto',count:openItems.length,val:fmt(openVal),color:'var(--blue)',kpi:'open',kpiv:'value'},
+        {icon:'🎯',label:'Previsto embarcar',count:forecastItems.length,val:fmt(forecastVal),color:'#D97706',kpi:'ship',kpiv:'forecast'},
+        {icon:'✅',label:'Já embarcado',count:shippedItems.length,val:fmt(shippedVal),color:'#166534',kpi:'shipped',kpiv:'shippedval'},
+      ].map(k=>'<div class="dash-card" style="padding:14px;margin-bottom:0;border-left:3px solid '+k.color+'">'
+        +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+        +'<div style="font-size:18px">'+k.icon+'</div>'
+        +'<span data-kpi="'+k.kpi+'" style="font-size:24px;font-weight:800;color:'+k.color+'">'+k.count+'</span>'
+        +'</div>'
+        +'<p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin:6px 0 3px">'+k.label+'</p>'
+        +'<p data-kpi="'+k.kpiv+'" style="font-size:14px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
+        +'</div>');
+    })().join('')
     +'</div>'
-
-    // ── breakdown by classification (only when rm set) ────────────────────
-    +(rm
-      ?'<div style="margin-bottom:10px;padding:10px 12px;background:#fff;border:1px solid var(--border);border-radius:var(--r-md)">'
-       +'<p style="font-size:10px;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">'+(isPastMonth?'Não embarcado em '+rmLabel+' — por classificação':'Breakdown por classificação — '+rmLabel)+'</p>'
-       +'<div style="display:flex;flex-wrap:wrap;gap:6px">'
-       +Object.entries(clsBreakdown)
-          .sort((a,b)=>b[1].val-a[1].val)
-          .map(([cls,d])=>{
-            const [bg,tc]=CLS_COLORS[cls]||['#F0F0F0','#555'];
-            const label=cls==='__unclassified__'?'⚠️ Sem class.':cls;
-            return '<div onclick="backlogFilters.classification=\''+(cls==='__unclassified__'?'__unclassified__':cls)+'\';document.getElementById(\'bl-filter-cls\').value=\''+(cls==='__unclassified__'?'__unclassified__':cls)+'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" '
-              +'style="cursor:pointer;background:'+bg+';border:1px solid '+tc+'33;border-radius:6px;padding:6px 10px;min-width:120px">'
-              +'<p style="font-size:10px;font-weight:600;color:'+tc+';margin-bottom:2px">'+label+'</p>'
-              +'<p style="font-size:13px;font-weight:800;color:'+tc+'">'+fmt(d.val)+'</p>'
-              +'<p style="font-size:10px;color:'+tc+';opacity:.75">'+d.count+' linha(s)</p>'
-              +'</div>';
-          }).join('')
-       +'</div></div>'
-      :'')
-
-    // ── filter bar ────────────────────────────────────────────────────────
-    +'<div style="display:flex;gap:6px;flex-wrap:wrap;padding:10px 12px;background:#fff;border:1px solid var(--border);border-radius:var(--r-md);margin-bottom:8px">'
+    // Filters
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:var(--r-md)">'
     +'<input id="bl-filter-pn" placeholder="PN ou descrição…" value="'+backlogFilters.pn+'"'
     +' oninput="backlogFilters.pn=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')"'
-    +' style="flex:2;min-width:130px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"/>'
-    +'<select id="bl-filter-client" oninput="backlogFilters.client=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
+    +' style="flex:2;min-width:150px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"/>'
+    +'<select id="bl-filter-client" oninput="backlogFilters.client=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:130px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
     +'<option value="">Todos os clientes</option>'
     +clients.map(cl=>'<option value="'+cl+'"'+(backlogFilters.client===cl?' selected':'')+'>'+cl+'</option>').join('')
     +'</select>'
-    // Manager filter
-    +'<select id="bl-filter-mgr" oninput="backlogFilters.manager=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:130px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
-    +'<option value="">Todos os gerentes</option>'
-    +(window._managers||[]).map(m=>'<option value="'+m.name+'"'+(backlogFilters.manager===m.name?' selected':'')+'>'+m.name+'</option>').join('')
-    +'</select>'
-    +'<select id="bl-filter-cls" oninput="backlogFilters.classification=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:140px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
+    +'<select id="bl-filter-cls" oninput="backlogFilters.classification=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:150px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
     +'<option value="">Todas classificações</option>'
-    +'<option value="__unclassified__"'+(backlogFilters.classification==='__unclassified__'?' selected':'')+'>⚠️ Sem classificação</option>'
     +CLASSIFICATIONS.map(cl=>'<option value="'+cl+'"'+(backlogFilters.classification===cl?' selected':'')+'>'+cl+'</option>').join('')
     +'</select>'
-    +'<select id="bl-filter-dest" oninput="backlogFilters.destination=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:110px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
+    +'<select id="bl-filter-dest" oninput="backlogFilters.destination=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:130px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
     +'<option value="">Todos destinos</option>'
     +destinations.map(d=>'<option value="'+d+'"'+(backlogFilters.destination===d?' selected':'')+'>'+d+'</option>').join('')
     +'</select>'
-    +(isAdmin?'<select id="bl-filter-ship" oninput="backlogFilters.shipMonth=this.value;renderBacklogGrid(document.getElementById(\'admin-content\')||document.querySelector(\'[id*=content]\'),window._backlogItems,true)" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"><option value="">Embarca no mês?</option><option value="yes"'+(backlogFilters.shipMonth==='yes'?' selected':'')+'>✅ Sim</option><option value="no"'+(backlogFilters.shipMonth==='no'?' selected':'')+'>❌ Não</option></select>':'')
-    // Mês ref — principal filtro temporal, substitui RDD de/até na barra
-    +'<div style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#EEF6FF;border:1px solid #93C5FD;border-radius:var(--r-md)">'
-    +'<label style="font-size:11px;font-weight:700;color:#1D4ED8;white-space:nowrap">📆 Mês ref.:</label>'
-    +'<input type="month" id="bl-filter-refmonth" value="'+(backlogFilters.refMonth||'')+'"'
-    +' onchange="backlogFilters.refMonth=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
-    +' style="padding:4px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff">'
-    +'<button onclick="backlogFilters.refMonth=\'\';document.getElementById(\'bl-filter-refmonth\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:2px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);cursor:pointer;background:#fff;color:#1D4ED8;line-height:1">✕</button>'
+    +(isAdmin?'<select id="bl-filter-ship" oninput="backlogFilters.shipMonth=this.value;renderBacklogGrid(document.getElementById(\'admin-content\')||document.querySelector(\'[id*=content]\'),window._backlogItems,true)" style="flex:1;min-width:130px;padding:7px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"><option value="">Embarca no mês?</option><option value="yes"'+(backlogFilters.shipMonth==='yes'?' selected':'')+'>✅ Sim</option><option value="no"'+(backlogFilters.shipMonth==='no'?' selected':'')+'>❌ Não</option></select>':'')
+    +(isAdmin===true||isAdmin==='salesops'
+      ?'<div style="display:flex;align-items:center;gap:6px">'
+       +'<label style="font-size:11px;font-weight:600;color:var(--t2);white-space:nowrap">Emb. no mês:</label>'
+       +'<input type="month" id="bl-filter-shipped" value="'+(backlogFilters.shippedMonth||'')+'"'
+       +' onchange="backlogFilters.shippedMonth=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
+       +' style="padding:5px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
+       +'<button onclick="backlogFilters.shippedMonth=\'\';document.getElementById(\'bl-filter-shipped\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer;background:#fff">✕</button>'
+       +'</div>'
+      :'')
+    +'<div style="display:flex;align-items:center;gap:5px">'
+    +'<label style="font-size:11px;font-weight:600;color:#0A7A8C;white-space:nowrap">📅 RDD de:</label>'
+    +'<input type="date" id="bl-filter-rdd-from" value="'+(backlogFilters.rddFrom||'')+'"'
+    +' onchange="backlogFilters.rddFrom=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
+    +' style="padding:5px 8px;border:1px solid #A0D4DC;border-radius:var(--r-md);font-size:12px">'
+    +'<span style="font-size:11px;color:var(--t2)">até</span>'
+    +'<input type="date" id="bl-filter-rdd-to" value="'+(backlogFilters.rddTo||'')+'"'
+    +' onchange="backlogFilters.rddTo=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
+    +' style="padding:5px 8px;border:1px solid #A0D4DC;border-radius:var(--r-md);font-size:12px">'
+    +'<button onclick="backlogFilters.rddFrom=\'\';backlogFilters.rddTo=\'\';document.getElementById(\'bl-filter-rdd-from\').value=\'\';document.getElementById(\'bl-filter-rdd-to\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:4px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer;background:#fff">✕</button>'
     +'</div>'
     +'</div>'
-
-    // ── export/import toolbar ─────────────────────────────────────────────
-    +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">'
-    +'<button onclick="exportBacklogCSV()" style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:#fff;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-weight:600;color:var(--t2);cursor:pointer">⬇ Exportar CSV</button>'
+    // Export / Import toolbar
+    +'<div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">'
+    +'<button onclick="exportBacklogCSV()" style="display:flex;align-items:center;gap:6px;padding:7px 14px;background:#fff;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-weight:600;color:var(--t2);cursor:pointer">⬇ Exportar CSV</button>'
     +(isAdmin===true
-      ?'<label style="display:flex;align-items:center;gap:6px;padding:6px 12px;background:#fff;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-weight:600;color:var(--t2);cursor:pointer">⬆ Importar CSV<input type="file" accept=".csv" style="display:none" onchange="importBacklogCSV(this)"></label>'
-       +'<span id="bl-import-status" style="font-size:12px"></span>'
+      ?'<label style="display:flex;align-items:center;gap:6px;padding:7px 14px;background:#fff;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;font-weight:600;color:var(--t2);cursor:pointer">⬆ Importar CSV<input type="file" accept=".csv" style="display:none" onchange="importBacklogCSV(this)"></label>'
+      +'<span id="bl-import-status" style="font-size:12px"></span>'
       :'')
     +'</div>'
-
-    // ── sticky wrapper end + table ─────────────────────────────────────────
-    +'</div>'
-    // Table — use a wrapper without overflow so sticky thead works against the page scroll
-    +'<div id="bl-table-wrap" style="border-radius:var(--r-md);border:1px solid var(--border);overflow:auto">'
-    +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto;min-width:1100px">'
-    +'<thead id="bl-thead"><tr style="background:var(--g100)">'
-    +['Cliente','Pedido','PN','Descrição','RDD','Sales Doc','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'',(isAdmin||isAdmin==='salesops')?'Total linha':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Coment.','Ações'].filter(Boolean)
-      .map(h=>'<th style="position:sticky;top:0;background:var(--g100);padding:6px 8px;text-align:left;border-bottom:2px solid var(--border-md);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600;z-index:5;box-shadow:inset 0 -1px 0 var(--border)">'+h+'</th>').join('')
+    // Table
+    +'<div style="overflow-x:auto;border-radius:var(--r-md);border:1px solid var(--border)">'
+    +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:auto">'
+    +'<thead><tr style="background:var(--g100)">'
+    +['Cliente','Pedido','PN','Descrição','RDD','Sales Doc','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Comentários','Ações'].filter(Boolean)
+      .map(h=>'<th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;font-size:10px;color:var(--t2);font-weight:600">'+h+'</th>').join('')
     +'</tr></thead><tbody>'
-
-    +(()=>{
-      const rm=backlogFilters.refMonth; // e.g. "2026-06"
-      const colCount=['Cliente','Pedido','PN','Descrição','RDD','Sales Doc','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'',(isAdmin||isAdmin==='salesops')?'Total linha':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Coment.','Ações'].filter(Boolean).length;
-
-      // helper: build a section divider row
-      const divRow=(icon,label,sublabel,bg,tc)=>
-        '<tr><td colspan="'+colCount+'" style="padding:6px 12px;background:'+bg+';border-top:2px solid '+tc+';border-bottom:1px solid '+tc+'33">'
-        +'<span style="font-size:11px;font-weight:700;color:'+tc+'">'+icon+' '+label+'</span>'
-        +(sublabel?'<span style="font-size:10px;color:'+tc+';opacity:.75;margin-left:8px">'+sublabel+'</span>':'')
-        +'</td></tr>';
-
-      // helper: build one data row
-      const buildRow=(item,idx,delayDays)=>{
-        const qtyOpen=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
-        const valueOpen=qtyOpen*Number(item.unit_price||0);
-        const [clsBg,clsTxt]=(CLS_COLORS[item.classification]||((!item.classification||item.classification==='')?['#FDECEA','#C0392B']:['#F0F0F0','#333']));
-        const lastComment=item.backlog_comments?.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
-        const commCount=item.backlog_comments?.length||0;
-        const rowBg=idx%2===0?'#fff':'#FAFBFC';
-        const isShipped=item.classification==='Shipped';
-
-        // RDD cell — show delay badge if delayDays provided
-        const rddCell=(()=>{
-          const rdd=item.rdd;
-          let pillHtml='';
-          if(rdd){
-            const rddDate=new Date(rdd+'T12:00:00');
-            const diff=Math.round((rddDate-today)/(1000*60*60*24));
-            const label=rddDate.toLocaleDateString('pt-BR');
-            let bg2,tc2;
-            if(diff<0){bg2='#FDECEA';tc2='#C0392B';}
-            else if(diff<=31){bg2='#E6F1FB';tc2='#185FA5';}
-            else if(diff<=62){bg2='#FEF3C7';tc2='#92400E';}
-            else{bg2='#F1F1F1';tc2='#737373';}
-            pillHtml='<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap;background:'+bg2+';color:'+tc2+'">📅 '+label+'</span>';
-            if(delayDays>0){
-              pillHtml+='<br><span style="font-size:9px;font-weight:700;color:#C0392B;white-space:nowrap">⏰ '+delayDays+'d atraso</span>';
-            }
-            pillHtml+='<br>';
-          }
-          return '<td style="padding:4px 6px;white-space:nowrap">'
-            +pillHtml
-            +'<input type="date" value="'+(rdd||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'rdd\',this.value)"'
-            +' style="padding:2px 4px;border:1px solid var(--border-md);border-radius:4px;font-size:10px;font-family:inherit;width:112px;'+(rdd?'border-color:#0A7A8C;':'')+'"/>'
-            +'</td>';
-        })();
-
+    +filtered.map((item,idx)=>{
+      const qtyOpen=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
+      const valueOpen=qtyOpen*Number(item.unit_price||0);
+      const [clsBg,clsTxt]=(CLS_COLORS[item.classification]||['#F0F0F0','#333']);
+      const lastComment=item.backlog_comments?.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0];
+      const commCount=item.backlog_comments?.length||0;
+      const rowBg=idx%2===0?'#fff':'#FAFBFC';
+      const isShipped=item.classification==='Shipped';
+      // RDD pill + edit input
+      const rddCell=(()=>{
+        const rdd=item.rdd;
+        const today=new Date(); today.setHours(0,0,0,0);
+        let pillHtml='';
+        if(rdd){
+          const rddDate=new Date(rdd+'T12:00:00');
+          const diffDays=Math.round((rddDate-today)/(1000*60*60*24));
+          const label=rddDate.toLocaleDateString('pt-BR');
+          let bg,tc;
+          if(diffDays<0){bg='#FDECEA';tc='#C0392B';}
+          else if(diffDays<=31){bg='#E6F1FB';tc='#185FA5';}
+          else if(diffDays<=62){bg='#FEF3C7';tc='#92400E';}
+          else{bg='#F1F1F1';tc='#737373';}
+          pillHtml='<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap;background:'+bg+';color:'+tc+'">📅 '+label+'</span><br>';
+        }
+        return '<td style="padding:4px 6px;white-space:nowrap">'
+          +pillHtml
+          +'<input type="date" value="'+(rdd||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'rdd\',this.value)"'
+          +' style="padding:2px 4px;border:1px solid var(--border-md);border-radius:4px;font-size:10px;font-family:inherit;width:112px;'+(rdd?'border-color:#0A7A8C;':'')+'"/>'
+          +'</td>';
+      })();
+      // Sales Doc input
+      const salesDocCell=(()=>{
         const sdVal=item.sales_doc||'';
-        const salesDocCell='<td style="padding:4px 6px;white-space:nowrap">'
+        return '<td style="padding:4px 6px;white-space:nowrap">'
           +'<input type="text" maxlength="10" placeholder="000000" value="'+sdVal+'"'
           +' data-order-ref="'+item.order_reference+'"'
           +' onchange="saveBacklogSalesDoc(\''+item.id+'\',\''+item.order_reference+'\',this.value,this)"'
           +' style="width:76px;padding:3px 5px;border:1px solid var(--border-md);border-radius:4px;font-size:10px;font-family:\'JetBrains Mono\',monospace;'+(sdVal?'border-color:#0A7A8C;color:#0A7A8C;font-weight:600;':'')+'">'
           +'</td>';
-
-        return '<tr id="bl-row-'+item.id+'" style="background:'+rowBg+';opacity:'+(isShipped?'0.65':'1')+'">'
-          +'<td style="padding:5px 8px;font-weight:500;white-space:nowrap;font-size:11px">'+item.client_name+'</td>'
-          +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--blue);white-space:nowrap">'+item.order_reference+'</td>'
-          +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
-          +'<td style="padding:5px 8px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px" title="'+item.description+'">'+item.description+'</td>'
-          +rddCell
-          +salesDocCell
-          +'<td style="padding:5px 8px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
-          +'<td style="padding:5px 8px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
-          +'<td style="padding:5px 8px;text-align:center;font-weight:700;color:'+(qtyOpen>0?'var(--blue)':'#166534')+'">'+qtyOpen+'</td>'
-          +(isAdmin?'<td style="padding:7px 10px;text-align:right;color:var(--tm)">'+fmt(item.unit_price)+'</td>'
-                   +'<td style="padding:7px 10px;text-align:right;font-weight:600">'+fmt(valueOpen)+'</td>'
-                   +'<td style="padding:7px 10px;text-align:right;font-weight:700;color:#185FA5">'+fmt(Number(item.qty_ordered||0)*Number(item.unit_price||0))+'</td>':'')
-          +'<td style="padding:7px 8px;white-space:nowrap;color:var(--tm);font-size:10px">'+((item.backlog_shipments&&item.backlog_shipments.length>0)?item.backlog_shipments.slice().sort((a,b)=>new Date(b.ship_date)-new Date(a.ship_date)).map(s=>'<span style="display:block">'+new Date(s.ship_date+'T12:00:00').toLocaleDateString('pt-BR')+(s.qty_shipped?' ('+s.qty_shipped+' un)':'')+'</span>').join(''):'—')+'</td>'
-          +'<td style="padding:7px 10px;text-align:center">'
-          +(isAdmin
-            ?'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:10px;font-family:inherit;width:115px"/>'
-            :'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:10px;font-family:inherit;width:115px"/>'
-          )+'</td>'
-          +(isAdmin?'<td style="padding:7px 10px;text-align:center">'
-          +'<select onchange="onWillShipChange(\''+item.id+'\',this.value,this)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:11px;font-family:inherit;width:76px">'
-          +'<option value=""'+(item.will_ship_month===null||item.will_ship_month===undefined?' selected':'')+'>—</option>'
-          +'<option value="true"'+(item.will_ship_month===true&&!(item.partial_qty>0)?' selected':'')+'>✅ Sim</option>'
-          +'<option value="partial"'+(item.partial_qty>0?' selected':'')+'>🔀 Parcial</option>'
-          +'<option value="false"'+(item.will_ship_month===false?' selected':'')+'>❌ Não</option>'
-          +'</select>'
-          +(item.partial_qty>0?'<p style="font-size:9px;color:#92400E;margin-top:2px;font-weight:600">'+item.partial_qty+' un</p>':'')
-          +'</td>':'')
-          +'<td style="padding:7px 10px">'
-          +'<select data-prev-cls="'+(item.classification||'')+'" onchange="onClassificationChange(\''+item.id+'\',this.value,this.dataset.prevCls,this)" style="padding:3px 5px;border:1px solid '+clsBg+';background:'+clsBg+';color:'+clsTxt+';border-radius:5px;font-size:10px;font-family:inherit;font-weight:600;max-width:130px">'
-          +'<option value=""'+((!item.classification||item.classification==='')?' selected':'')+' style="background:#FDECEA;color:#C0392B">⚠️ Classificar…</option>'
-          +CLASSIFICATIONS.map(cl=>'<option value="'+cl+'"'+(item.classification===cl?' selected':'')+' style="background:#fff;color:#000">'+cl+'</option>').join('')
-          +'</select></td>'
-          +'<td style="padding:5px 8px;max-width:150px">'
-          +(lastComment?'<p style="font-size:10px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+lastComment.comment+'">'+lastComment.comment+'</p>'
-                       +'<p style="font-size:9px;color:var(--g600)">'+lastComment.author_name+' · '+new Date(lastComment.created_at).toLocaleDateString('pt-BR')+'</p>':'')
-          +'<button onclick="openBacklogComments(\''+item.id+'\')" style="margin-top:2px;background:var(--g100);border:none;border-radius:4px;padding:2px 6px;font-size:9px;cursor:pointer;color:var(--t2)">💬'+(commCount||'+')+'</button>'
-          +'</td>'
-          +'<td style="padding:5px 8px;white-space:nowrap">'
-          +'<button onclick="openShipModal(\''+item.id+'\','+item.qty_ordered+','+Number(item.qty_shipped||0)+')" style="background:#E6F1FB;color:#185FA5;border:none;border-radius:4px;padding:3px 7px;font-size:10px;cursor:pointer;font-weight:600">📦</button>'
-          +'</td>'
-          +'</tr>';
-      };
-
-      // ── NO ref month: flat render ─────────────────────────────────────
-      if(!rm){
-        return filtered.map((item,idx)=>buildRow(item,idx,0)).join('');
-      }
-
-      // ── WITH ref month: split into 3 groups ──────────────────────────
-      const rmStart=(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})();
-      const rmEnd=new Date(rmStart.getFullYear(),rmStart.getMonth()+1,0,23,59,59);
-      const isPast=rmEnd<today;
-
-      // Group 1: Shipped in rm (ship_date in rm)
-      const shippedInRm=filtered.filter(i=>
-        (i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm)
-      );
-
-      // Group 2: RDD in rm, not shipped in rm (native month, still open or shipped other month)
-      const nativeOpen=filtered.filter(i=>{
-        const rddMk=(i.rdd||'').slice(0,7);
-        const shippedThisMonth=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
-        return rddMk===rm && !shippedThisMonth && i.classification!=='Shipped';
-      });
-
-      // Group 3: Overdue — RDD before rm, not shipped at all (classification !== Shipped)
-      // Only shown for current/future months (for past months hidden by default, toggle shows)
-      const overdue=filtered.filter(i=>{
-        const rddMk=(i.rdd||'').slice(0,7);
-        return rddMk && rddMk<rm && i.classification!=='Shipped'
-          && !(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
-      });
-
-      // For past months: toggle "como poderia ter sido"
-      // Store toggle state on window
-      const showRetro=window._blRetroMode===true;
-      let rows='';
-
-      if(isPast){
-        // Past month view
-        // Toggle button
-        rows+='<tr><td colspan="'+colCount+'" style="padding:8px 12px;background:#F8F9FA;border-bottom:1px solid var(--border)">'
-          +'<span style="font-size:11px;color:var(--tm)">Mês passado — mostrando o que foi realizado.</span>'
-          +'<button onclick="window._blRetroMode=!'+(showRetro)+';refreshBacklogKPIs()" '
-          +'style="margin-left:10px;font-size:11px;padding:3px 10px;border:1px solid var(--border-md);border-radius:6px;cursor:pointer;background:'+(showRetro?'#001423':'#fff')+';color:'+(showRetro?'#fff':'var(--t2)')+';">'
-          +(showRetro?'👁 Ocultar "como poderia ter sido"':'👁 Ver "como poderia ter sido"')
-          +'</button></td></tr>';
-
-        if(shippedInRm.length>0){
-          rows+=divRow('✅','Shipped em '+rmStart.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),shippedInRm.length+' linha(s)','#F0FFF4','#166534');
-          shippedInRm.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
-        } else {
-          rows+='<tr><td colspan="'+colCount+'" style="padding:12px;text-align:center;color:var(--tm);font-size:12px">Nenhum embarque registrado neste mês.</td></tr>';
-        }
-
-        if(showRetro){
-          if(nativeOpen.length>0){
-            rows+=divRow('📦','RDD '+rmStart.toLocaleDateString('pt-BR',{month:'long',year:'numeric'})+' — não embarcados',nativeOpen.length+' linha(s) · motivos abaixo','#FEF3C7','#92400E');
-            nativeOpen.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
-          }
-          if(overdue.length>0){
-            rows+=divRow('🔴','Atrasadas (RDD anterior) — não embarcadas',overdue.length+' linha(s)','#FFF1F0','#C0392B');
-            overdue.forEach((item,i)=>{
-              const rddDate=item.rdd?new Date(item.rdd+'T12:00:00'):null;
-              const delay=rddDate?Math.max(0,Math.round((rmEnd-rddDate)/(1000*60*60*24))):0;
-              rows+=buildRow(item,i,delay);
-            });
-          }
-        }
-      } else {
-        // Current / future month view
-        if(overdue.length>0){
-          const totalOverdueVal=overdue.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-          rows+=divRow('🔴','Atrasadas — RDD vencido, ainda em aberto',overdue.length+' linha(s) · '+fmt(totalOverdueVal),'#FFF1F0','#C0392B');
-          overdue.sort((a,b)=>{
-            const da=a.rdd?new Date(a.rdd+'T12:00:00'):new Date(0);
-            const db=b.rdd?new Date(b.rdd+'T12:00:00'):new Date(0);
-            return da-db; // oldest RDD first
-          }).forEach((item,i)=>{
-            const rddDate=item.rdd?new Date(item.rdd+'T12:00:00'):null;
-            const delay=rddDate?Math.max(0,Math.round((today-rddDate)/(1000*60*60*24))):0;
-            rows+=buildRow(item,i,delay);
-          });
-        }
-
-        if(nativeOpen.length>0){
-          const totalNativeVal=nativeOpen.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-          rows+=divRow('📦','Ordens do mês — '+rmStart.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),nativeOpen.length+' linha(s) · '+fmt(totalNativeVal),'#EFF6FF','#185FA5');
-          nativeOpen.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
-        }
-
-        if(shippedInRm.length>0){
-          const totalShippedVal=shippedInRm.reduce((s,i)=>{
-            const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);
-            return s+q*Number(i.unit_price||0);
-          },0);
-          rows+=divRow('✅','Shipped em '+rmStart.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}),shippedInRm.length+' linha(s) · '+fmt(totalShippedVal),'#F0FFF4','#166534');
-          shippedInRm.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
-        }
-
-        // Items with no RDD set but not shipped — show at bottom
-        const noRdd=filtered.filter(i=>!i.rdd&&i.classification!=='Shipped'
-          &&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
-        if(noRdd.length>0){
-          rows+=divRow('❓','Sem RDD definido',noRdd.length+' linha(s)','#F8F9FA','#888');
-          noRdd.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
-        }
-      }
-
-      return rows;
-    })()
+      })();
+      return '<tr id="bl-row-'+item.id+'" style="background:'+rowBg+';opacity:'+(isShipped?'0.6':'1')+'">'
+        +'<td style="padding:5px 8px;font-weight:500;white-space:nowrap;font-size:11px">'+item.client_name+'</td>'
+        +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--blue);white-space:nowrap">'+item.order_reference+'</td>'
+        +'<td style="padding:5px 8px;font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
+        +'<td style="padding:5px 8px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px" title="'+item.description+'">'+item.description+'</td>'
+        +rddCell
+        +salesDocCell
+        +'<td style="padding:5px 8px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
+        +'<td style="padding:5px 8px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
+        +'<td style="padding:5px 8px;text-align:center;font-weight:700;color:'+(qtyOpen>0?'var(--blue)':'#166534')+'">'+qtyOpen+'</td>'
+        +(isAdmin?'<td style="padding:7px 10px;text-align:right;color:var(--tm)">'+fmt(item.unit_price)+'</td>'
+                 +'<td style="padding:7px 10px;text-align:right;font-weight:600">'+fmt(valueOpen)+'</td>':'')
+        
+        +'<td style="padding:7px 8px;white-space:nowrap;color:var(--tm);font-size:10px">'+((item.backlog_shipments&&item.backlog_shipments.length>0)?item.backlog_shipments.slice().sort((a,b)=>new Date(b.ship_date)-new Date(a.ship_date)).map(s=>'<span style="display:block">'+new Date(s.ship_date+'T12:00:00').toLocaleDateString('pt-BR')+(s.qty_shipped?' ('+s.qty_shipped+' un)':'')+'</span>').join(''):'—')+'</td>'
+        +'<td style="padding:7px 10px;text-align:center">'
+        +(isAdmin
+          ?'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:10px;font-family:inherit;width:115px"/>'
+          :'<input type="date" value="'+(item.availability_date||'')+'" onchange="updateBacklogField(\''+item.id+'\',\'availability_date\',this.value)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:10px;font-family:inherit;width:115px"/>'
+        )+'</td>'
+        +(isAdmin?'<td style="padding:7px 10px;text-align:center">'
+        +'<select onchange="updateBacklogField(\''+item.id+'\',\'will_ship_month\',this.value===\'true\'?true:this.value===\'false\'?false:null)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:11px;font-family:inherit;width:68px">'
+        +'<option value=""'+(item.will_ship_month===null||item.will_ship_month===undefined?' selected':'')+'>—</option>'
+        +'<option value="true"'+(item.will_ship_month===true?' selected':'')+'>✅ Sim</option>'
+        +'<option value="false"'+(item.will_ship_month===false?' selected':'')+'>❌ Não</option>'
+        +'</select></td>':'')
+        +'<td style="padding:7px 10px">'
+        +'<select data-prev-cls="'+item.classification+'" onchange="onClassificationChange(\''+item.id+'\',this.value,this.dataset.prevCls,this)" style="padding:3px 5px;border:1px solid '+clsBg+';background:'+clsBg+';color:'+clsTxt+';border-radius:5px;font-size:10px;font-family:inherit;font-weight:600;max-width:130px">'
+        +CLASSIFICATIONS.map(cl=>'<option value="'+cl+'"'+(item.classification===cl?' selected':'')+' style="background:#fff;color:#000">'+cl+'</option>').join('')
+        +'</select></td>'
+        +'<td style="padding:5px 8px;max-width:150px">'
+        +(lastComment?'<p style="font-size:10px;color:var(--tm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+lastComment.comment+'">'+lastComment.comment+'</p>'
+                     +'<p style="font-size:9px;color:var(--g600)">'+lastComment.author_name+' · '+new Date(lastComment.created_at).toLocaleDateString('pt-BR')+'</p>':'')
+        +'<button onclick="openBacklogComments(\''+item.id+'\')" style="margin-top:2px;background:var(--g100);border:none;border-radius:4px;padding:2px 6px;font-size:9px;cursor:pointer;color:var(--t2)">💬'+(commCount||'+')+'</button>'
+        +'</td>'
+        +'<td style="padding:5px 8px;white-space:nowrap">'
+        +'<button onclick="openShipModal(\''+item.id+'\','+item.qty_ordered+','+Number(item.qty_shipped||0)+')" style="background:#E6F1FB;color:#185FA5;border:none;border-radius:4px;padding:3px 7px;font-size:10px;cursor:pointer;font-weight:600">📦</button>'
+        +'</td>'
+        +'</tr>';
+    }).join('')
     +'</tbody></table></div>'
         ;
-  // After render: set table wrapper height so thead sticky works inside the overflow:auto container
-  requestAnimationFrame(()=>{
-    const sticky=document.getElementById('bl-sticky');
-    const wrap=document.getElementById('bl-table-wrap');
-    if(sticky&&wrap){
-      const stickyH=sticky.offsetHeight;
-      const viewH=window.innerHeight;
-      const wrapTop=wrap.getBoundingClientRect().top+window.scrollY;
-      // Give the table wrapper enough height to fill the viewport below the sticky header
-      wrap.style.maxHeight=(viewH - stickyH - 32)+'px';
-      document.documentElement.style.setProperty('--bl-thead-top','0px');
-    }
-  });
 }
 
 async function handleClassificationChange(selectEl, itemId, prevClass){
@@ -2175,8 +1885,7 @@ function exportBacklogCSV(){
     const f=backlogFilters;
     if(f.client&&!item.client_name.toLowerCase().includes(f.client.toLowerCase()))return false;
     if(f.pn&&!item.pn.toLowerCase().includes(f.pn.toLowerCase())&&!item.description?.toLowerCase().includes(f.pn.toLowerCase()))return false;
-    if(f.classification==='__unclassified__'&&(item.classification&&item.classification!==''))return false;
-    else if(f.classification&&f.classification!=='__unclassified__'&&item.classification!==f.classification)return false;
+    if(f.classification&&item.classification!==f.classification)return false;
     if(f.destination&&item.destination!==f.destination)return false;
     if(f.shipMonth==='yes'&&item.will_ship_month!==true)return false;
     if(f.shipMonth==='no'&&item.will_ship_month!==false)return false;
@@ -2378,73 +2087,29 @@ async function importBacklogCSV(input){
 function refreshBacklogKPIs(){
   const items=window._backlogItems||[];
   const f=backlogFilters;
-  const rm=f.refMonth;
-  const rmLocalDate=rm?(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})():null;
-  const rmEnd=rmLocalDate?new Date(rmLocalDate.getFullYear(),rmLocalDate.getMonth()+1,0,23,59,59):null;
-  const today=new Date();today.setHours(0,0,0,0);
-  const isPastMonth=rmEnd?rmEnd<today:false;
-
-  let filtered=items.filter(item=>{
+  const filtered=items.filter(item=>{
     if(f.client&&!item.client_name.toLowerCase().includes(f.client.toLowerCase()))return false;
-    if(f.manager&&(item.manager_name||(window._clientManagerMap?.[item.client_user_id]))!==f.manager)return false;
     if(f.pn&&!item.pn.toLowerCase().includes(f.pn.toLowerCase())&&!item.description?.toLowerCase().includes(f.pn.toLowerCase()))return false;
-    if(f.classification==='__unclassified__'&&(item.classification&&item.classification!==''))return false;
-    else if(f.classification&&f.classification!=='__unclassified__'&&item.classification!==f.classification)return false;
+    if(f.classification&&item.classification!==f.classification)return false;
     if(f.destination&&item.destination!==f.destination)return false;
     if(f.shipMonth==='yes'&&item.will_ship_month!==true)return false;
     if(f.shipMonth==='no'&&item.will_ship_month!==false)return false;
     return true;
   });
-
-  const rmBase=rm?filtered.filter(i=>{
-    const shippedInRm=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
-    if(shippedInRm)return true;
-    if(i.classification==='Shipped')return false;
-    if(!i.rdd)return true;
-    return i.rdd.slice(0,7)<=rm;
-  }):filtered;
-
-  const shippedItems=rm
-    ?rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
-    :filtered.filter(i=>i.classification==='Shipped');
-
-  const openItems=isPastMonth
-    ?rmBase.filter(i=>i.classification!=='Shipped'&&(i.rdd||'').slice(0,7)===rm&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
-    :rm?rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
-    :filtered.filter(i=>i.classification!=='Shipped');
-
-  const classifiedOpen=openItems.filter(i=>i.classification&&i.classification!=='');
-  const forecastItems=isPastMonth?[]:classifiedOpen.filter(i=>i.will_ship_month===true);
-  const perdidoItems=classifiedOpen.filter(i=>i.will_ship_month===false);
-  const semSinalItems=classifiedOpen.filter(i=>i.will_ship_month===null||i.will_ship_month===undefined);
-  const unclsItems=openItems.filter(i=>!i.classification||i.classification==='');
-
+  const openItems=filtered.filter(i=>i.classification!=='Shipped');
+  const shippedItems=filtered.filter(i=>i.classification==='Shipped');
+  const forecastItems=filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped');
   const openVal=openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const shippedVal=rm
-    ?shippedItems.reduce((s,i)=>{const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);return s+q*Number(i.unit_price||0);},0)
-    :shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
-  const forecastVal=forecastItems.reduce((s,i)=>{const o=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));const q=i.partial_qty>0?Math.min(Number(i.partial_qty),o):o;return s+q*Number(i.unit_price||0);},0);
-  const perdidoVal=perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const semSinalVal=semSinalItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const unclsVal=unclsItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const potencial=shippedVal+forecastVal;
-
-  // Update only the KPI card values — do NOT re-render the table
+  const shippedVal=shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
+  const forecastVal=forecastItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   document.querySelectorAll('[data-kpi]').forEach(el=>{
     const k=el.dataset.kpi;
-    if(k==='open')      el.textContent=openItems.length;
-    if(k==='value')     el.textContent=fmt(openVal);
-    if(k==='ship')      el.textContent=forecastItems.length;
-    if(k==='forecast')  el.textContent=fmt(forecastVal);
-    if(k==='shipped')   el.textContent=shippedItems.length;
-    if(k==='shippedval')el.textContent=fmt(shippedVal);
-    if(k==='lost')      el.textContent=perdidoItems.length;
-    if(k==='lostval')   el.textContent=fmt(perdidoVal);
-    if(k==='nosignal')  el.textContent=semSinalItems.length;
-    if(k==='nosignalval')el.textContent=fmt(semSinalVal);
-    if(k==='uncls')     el.textContent=unclsItems.length;
-    if(k==='unclsval')  el.textContent=fmt(unclsVal);
-    if(k==='potencial') el.textContent=fmt(potencial);
+    if(k==='open') el.textContent=openItems.length;
+    if(k==='value') el.textContent=fmt(openVal);
+    if(k==='ship') el.textContent=forecastItems.length;
+    if(k==='forecast') el.textContent=fmt(forecastVal);
+    if(k==='shipped') el.textContent=shippedItems.length;
+    if(k==='shippedval') el.textContent=fmt(shippedVal);
   });
 }
 
@@ -2502,75 +2167,6 @@ async function saveBacklogComment(itemId){
   if(contentEl&&window._backlogItems) renderBacklogGrid(contentEl,window._backlogItems,isAdmin);
 }
 
-function onWillShipChange(itemId, value, selectEl){
-  if(value==='partial'){
-    openPartialModal(itemId, selectEl);
-  } else {
-    const boolVal=value==='true'?true:value==='false'?false:null;
-    const item=window._backlogItems?.find(i=>i.id===itemId);
-    if(item){item.will_ship_month=boolVal;item.partial_qty=null;}
-    sb.from('backlog_items').update({
-      will_ship_month:boolVal,
-      partial_qty:null,
-      updated_at:new Date().toISOString(),
-      updated_by:cProfile?.full_name||'Admin'
-    }).eq('id',itemId);
-    refreshBacklogKPIs();
-  }
-}
-
-function openPartialModal(itemId, selectEl){
-  const item=window._backlogItems?.find(i=>i.id===itemId);
-  if(!item)return;
-  const qtyOpen=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
-  const modal=document.getElementById('bl-ship-modal');
-  if(!modal)return;
-  modal.style.display='flex';
-  modal.innerHTML='<div style="background:#fff;border-radius:16px;width:90%;max-width:380px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
-    +'<h3 style="font-size:16px;font-weight:700">🔀 Embarque parcial</h3>'
-    +'<button onclick="document.getElementById(\'bl-ship-modal\').style.display=\'none\';if(window._pendingPartialSelect){const i=window._backlogItems?.find(x=>x.id===\''+itemId+'\');window._pendingPartialSelect.value=i?.partial_qty>0?\'partial\':i?.will_ship_month===true?\'true\':i?.will_ship_month===false?\'false\':\'\';}window._pendingPartialSelect=null;" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--tm)">×</button>'
-    +'</div>'
-    +'<p style="font-size:13px;color:var(--tm);margin-bottom:6px">PN: <strong>'+item.pn+'</strong></p>'
-    +'<p style="font-size:13px;color:var(--tm);margin-bottom:14px">Em aberto: <strong>'+qtyOpen+' un</strong> · RDD: <strong>'+(item.rdd?new Date(item.rdd+'T12:00:00').toLocaleDateString('pt-BR'):'—')+'</strong></p>'
-    +'<label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Quantidade que embarcará neste mês de referência</label>'
-    +'<input type="number" id="partial-qty-input" min="1" max="'+(qtyOpen-1)+'" value="'+(item.partial_qty||Math.ceil(qtyOpen/2))+'" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:14px;margin-bottom:6px;box-sizing:border-box"/>'
-    +'<p style="font-size:11px;color:var(--tm);margin-bottom:14px">O restante ficará em aberto para o próximo mês de referência.</p>'
-    +'<button onclick="confirmPartial(\''+itemId+'\')" style="width:100%;background:#D97706;color:#fff;border:none;border-radius:var(--r-md);padding:11px;font-size:14px;font-weight:600;cursor:pointer">Confirmar parcial</button>'
-    +'</div>';
-  window._pendingPartialSelect=selectEl;
-  modal.addEventListener('click',e=>{
-    if(e.target===modal){
-      modal.style.display='none';
-      const i=window._backlogItems?.find(x=>x.id===itemId);
-      if(selectEl) selectEl.value=i?.partial_qty>0?'partial':i?.will_ship_month===true?'true':i?.will_ship_month===false?'false':'';
-    }
-  },{once:true});
-}
-
-async function confirmPartial(itemId){
-  const qty=parseFloat(document.getElementById('partial-qty-input')?.value||0);
-  const item=window._backlogItems?.find(i=>i.id===itemId);
-  if(!item||!qty||qty<=0){alert('Informe uma quantidade válida.');return;}
-  const qtyOpen=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
-  if(qty>=qtyOpen){alert('Quantidade parcial deve ser menor que o total em aberto ('+qtyOpen+').');return;}
-  const{error}=await sb.from('backlog_items').update({
-    will_ship_month:true,
-    partial_qty:qty,
-    updated_at:new Date().toISOString(),
-    updated_by:cProfile?.full_name||'Admin'
-  }).eq('id',itemId);
-  if(error){alert('Erro: '+error.message);return;}
-  item.will_ship_month=true;
-  item.partial_qty=qty;
-  document.getElementById('bl-ship-modal').style.display='none';
-  window._pendingPartialSelect=null;
-  refreshBacklogKPIs();
-  const isAdm=cProfile?.is_admin?true:cProfile?.role==='salesops'?'salesops':false;
-  const el=document.getElementById(cProfile?.is_admin?'admin-content':'salesops-content');
-  if(el&&window._backlogItems) renderBacklogGrid(el,window._backlogItems,isAdm);
-}
-
 function openShipModal(itemId, qtyOrdered, qtyShipped){
   const modal=document.getElementById('bl-ship-modal');
   if(!modal)return;
@@ -2585,7 +2181,7 @@ function openShipModal(itemId, qtyOrdered, qtyShipped){
     +'<label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Quantidade embarcada agora</label>'
     +'<input type="number" id="ship-qty" min="1" max="'+qtyOpen+'" value="'+qtyOpen+'" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:14px;margin-bottom:10px;box-sizing:border-box"/>'
     +'<label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Data de embarque</label>'
-    +'<input type="date" id="ship-date" value="'+new Date().toISOString().slice(0,10)+'" max="'+new Date().toISOString().slice(0,10)+'" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;margin-bottom:10px;box-sizing:border-box"/>'
+    +'<input type="date" id="ship-date" value="'+new Date().toISOString().slice(0,10)+'" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;margin-bottom:10px;box-sizing:border-box"/>'
     +'<label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Observações</label>'
     +'<input type="text" id="ship-notes" placeholder="Ex: BL #12345, partial shipment…" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;margin-bottom:14px;box-sizing:border-box"/>'
     +'<button onclick="confirmShipment(\''+itemId+'\','+qtyOrdered+')" style="width:100%;background:var(--blue);color:#fff;border:none;border-radius:var(--r-md);padding:11px;font-size:14px;font-weight:600;cursor:pointer">Confirmar embarque</button>'
@@ -2645,12 +2241,6 @@ async function confirmShipment(itemId, qtyOrdered){
   const date=document.getElementById('ship-date')?.value;
   const notes=document.getElementById('ship-notes')?.value||'';
   if(!qty||qty<=0){alert('Informe uma quantidade válida.');return;}
-  // Block future dates
-  const today=new Date().toISOString().slice(0,10);
-  if(date&&date>today){
-    alert('❌ Não é possível registrar embarque em data futura.\n\nSelecione hoje ('+new Date().toLocaleDateString('pt-BR')+') ou uma data anterior.');
-    return;
-  }
 
   // Save shipment record
   const{error:sErr}=await sb.from('backlog_shipments').insert({
@@ -3180,18 +2770,9 @@ async function renderAdminTab(tab){
     });
     const clientRevArr=Object.entries(revByClient).sort((a,b)=>b[1]-a[1]);
 
-    // Build unified dealer list: merge targets + all dealers who placed orders
+    // Targets by client
     const targetByUser={};
     targets.forEach(t=>targetByUser[t.user_id]={target:Number(t.target_usd),name:t.user_profiles?.full_name||'—'});
-    // Add dealers who have orders but no target entry
-    orders.forEach(o=>{
-      if(!o.user_profiles)return;
-      const alreadyInTarget=Object.values(targetByUser).some(t=>t.name===o.user_profiles.full_name);
-      if(!alreadyInTarget){
-        const fakeKey='order-'+o.user_profiles.full_name;
-        if(!targetByUser[fakeKey]) targetByUser[fakeKey]={target:0,name:o.user_profiles.full_name};
-      }
-    });
 
     // Revenue by user
     const revByUser={};
@@ -3748,11 +3329,6 @@ requestAnimationFrame(()=>{
     return;
   }
 
-  if(tab==='painel'){
-    await renderPainelMensal(el);
-    return;
-  }
-
   if(tab==='cutoffs'){
     await renderCutoffsTab(el);
     return;
@@ -3761,39 +3337,21 @@ requestAnimationFrame(()=>{
   if(tab==='clients'){
     el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Clientes</h1><div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>`;
     const year=new Date().getFullYear();
-    const[clientsRes,targetsRes,managersRes]=await Promise.all([
+    const[clientsRes,targetsRes]=await Promise.all([
       sb.from('user_profiles').select('*,client_groups(label,segment)').eq('is_admin',false).neq('role','salesops').order('full_name'),
-      sb.from('targets').select('user_id,target_usd,target_swoaf_usd').eq('year',year),
-      sb.from('managers').select('*').order('name')
+      sb.from('targets').select('user_id,target_usd,target_swoaf_usd').eq('year',year)
     ]);
     const clients=clientsRes.data||[];
     const tMap={};(targetsRes.data||[]).forEach(t=>tMap[t.user_id]={parts:t.target_usd,swoaf:t.target_swoaf_usd||0});
-    // Fallback: if managers table doesn't exist yet, use defaults
-    const managers=(managersRes.data&&managersRes.data.length>0)
-      ? managersRes.data
-      : [{id:'1',name:'Leonardo Plixo'},{id:'2',name:'Dener Jaime'},{id:'3',name:'Mauricio Rosa'},{id:'4',name:'Renato Dias'}];
-    window._managers=managers;
     if(!clients.length){
       el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Clientes</h1>
         <div class="empty"><div class="empty-icon">👥</div>
         <p style="font-size:14px;font-weight:500">Nenhum cliente ainda.</p>
         <p style="font-size:13px;color:var(--tm);margin-top:4px">Adicione clientes no Supabase → Authentication → Add user, depois crie o perfil com o SQL do guia.</p></div>`;return;
     }
-    // Manager filter state
-    const mgrFilter=window._clientMgrFilter||'';
-    const filteredClients=mgrFilter?clients.filter(c=>c.manager_name===mgrFilter):clients;
     el.innerHTML=`
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-        <h1 class="page-title">Clientes (${filteredClients.length}${mgrFilter?' — '+mgrFilter:''})</h1>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <label style="font-size:12px;font-weight:600;color:var(--t2)">Filtrar por gerente:</label>
-          <select onchange="window._clientMgrFilter=this.value;renderAdminTab('clients')"
-            style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;min-width:160px">
-            <option value="">Todos os gerentes</option>
-            ${managers.map(m=>`<option value="${m.name}"${mgrFilter===m.name?' selected':''}>${m.name}</option>`).join('')}
-          </select>
-          <button onclick="openManagersModal()" style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;background:#fff;cursor:pointer;color:var(--t2)">⚙️ Gerenciar gerentes</button>
-        </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h1 class="page-title">Clientes (${clients.length})</h1>
       </div>
       <div style="border-radius:var(--r-md);border:1px solid var(--border);overflow:hidden">
       <table class="dtbl" style="font-size:13px">
@@ -3805,10 +3363,10 @@ requestAnimationFrame(()=>{
           <th></th>
           <th style="text-align:right">Meta SW-OAF FY${year}</th>
           <th></th>
-          <th>Gerente responsável</th>
+          <th>E-mail gerente</th>
           <th>Status</th>
         </tr></thead>
-        <tbody>${filteredClients.map(cl=>`<tr>
+        <tbody>${clients.map(cl=>`<tr>
           <td>
             <p style="font-weight:600">${cl.full_name}</p>
             <p style="font-size:11px;color:var(--tm);font-family:'JetBrains Mono',monospace">${cl.id.slice(0,8)}…</p>
@@ -3836,15 +3394,9 @@ requestAnimationFrame(()=>{
             <button class="btn btn-sm" style="background:#5B2D99;color:#fff;border:none;border-radius:var(--r-md);padding:6px 10px;font-size:12px;cursor:pointer" onclick="saveClientSWOAFTarget('${cl.id}',${year})">Salvar</button>
           </td>
           <td>
-            <div style="display:flex;align-items:center;gap:6px">
-              <select id="mgr-name-${cl.id}"
-                onchange="saveMgrName('${cl.id}',this.value)"
-                style="padding:5px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;min-width:150px;background:#fff">
-                <option value="">— Sem gerente —</option>
-                ${managers.map(m=>`<option value="${m.name}"${cl.manager_name===m.name?' selected':''}>${m.name}</option>`).join('')}
-              </select>
-              <span id="mgr-saved-${cl.id}" style="font-size:11px;color:#166534;display:none">✓</span>
-            </div>
+            <input type="email" id="mgr-email-${cl.id}" value="${cl.manager_email||''}" placeholder="email@gerente.com"
+              style="width:170px;padding:5px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:11px;font-family:inherit"/>
+            <button class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:4px;background:var(--g100);color:var(--t2);border-color:var(--border-md)" onclick="saveMgrEmail('${cl.id}')">✓</button>
           </td>
           <td><span style="font-size:11px;color:#166534;font-weight:600">● ${cl.active?'Ativo':'Inativo'}</span></td>
         </tr>`).join('')}
@@ -4177,8 +3729,7 @@ async function forwardOrder(orderId, destination){
       unit_price:         Number(item.unit_price)-Number(item.additional_discount||0),
       qty_ordered:        item.quantity,
       qty_shipped:        0,
-      classification:     null,
-      manager_name:       order.user_profiles?.manager_name||null,
+      classification:     'Incomplete Order',
       rdd:                order.requested_delivery_date||null,
       updated_by:         cProfile?.full_name||'Admin',
     }));
@@ -4425,78 +3976,6 @@ async function forwardOrder(orderId, destination){
 function toggleOrderEdit(orderId){
   const el=document.getElementById('order-edit-'+orderId);
   if(el)el.style.display=el.style.display==='none'?'block':'none';
-}
-
-async function saveMgrName(clientId, name){
-  const{error}=await sb.from('user_profiles').update({manager_name:name||null}).eq('id',clientId);
-  if(error){
-    console.error('saveMgrName error:',error);
-    alert('Erro ao salvar gerente: '+error.message);
-    return;
-  }
-  // Update clientManagerMap cache
-  if(!window._clientManagerMap) window._clientManagerMap={};
-  if(name) window._clientManagerMap[clientId]=name;
-  else delete window._clientManagerMap[clientId];
-  // Update cached backlog items
-  if(window._backlogItems){
-    window._backlogItems.forEach(i=>{if(i.client_user_id===clientId) i.manager_name=name||null;});
-  }
-  const ind=document.getElementById('mgr-saved-'+clientId);
-  if(ind){ind.style.display='inline';setTimeout(()=>{ind.style.display='none';},1500);}
-}
-
-function openManagersModal(){
-  const managers=window._managers||[];
-  const modal=document.createElement('div');
-  modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;display:flex;align-items:center;justify-content:center';
-  const renderList=()=>managers.map((m,i)=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
-      <span style="flex:1;font-size:13px;font-weight:500">${m.name}</span>
-      <button onclick="removeMgrFromModal(${i})" style="background:#FEE2E2;color:#991B1B;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Remover</button>
-    </div>`).join('');
-  modal.innerHTML=`<div style="background:#fff;border-radius:14px;width:90%;max-width:420px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h3 style="font-size:16px;font-weight:700">⚙️ Gerentes responsáveis</h3>
-      <button onclick="this.closest('[style*=fixed]').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--tm)">×</button>
-    </div>
-    <div id="mgr-list">${renderList()}</div>
-    <div style="margin-top:16px;display:flex;gap:8px">
-      <input id="mgr-new-input" placeholder="Nome do novo gerente" style="flex:1;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px"/>
-      <button onclick="addMgrFromModal()" style="padding:8px 14px;background:#001423;color:#fff;border:none;border-radius:var(--r-md);font-size:13px;cursor:pointer;font-weight:600">+ Adicionar</button>
-    </div>
-    <p style="font-size:11px;color:var(--tm);margin-top:10px">As alterações são salvas automaticamente na tabela <code>managers</code>.</p>
-  </div>`;
-  document.body.appendChild(modal);
-  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
-
-  window._mgrModal=modal;
-  window._mgrModalManagers=[...managers];
-
-  window.removeMgrFromModal=async(idx)=>{
-    const m=window._mgrModalManagers[idx];
-    if(!m)return;
-    if(!confirm(`Remover "${m.name}"?`))return;
-    if(m.id&&!String(m.id).startsWith('tmp')){
-      await sb.from('managers').delete().eq('id',m.id);
-    }
-    window._mgrModalManagers.splice(idx,1);
-    window._managers=window._mgrModalManagers;
-    modal.querySelector('#mgr-list').innerHTML=renderList();
-  };
-
-  window.addMgrFromModal=async()=>{
-    const inp=modal.querySelector('#mgr-new-input');
-    const name=(inp?.value||'').trim();
-    if(!name){inp.focus();return;}
-    const{data,error}=await sb.from('managers').insert({name}).select().single();
-    if(error){alert('Erro: '+error.message);return;}
-    const newMgr=data||{id:'tmp'+Date.now(),name};
-    window._mgrModalManagers.push(newMgr);
-    window._managers=window._mgrModalManagers;
-    inp.value='';
-    modal.querySelector('#mgr-list').innerHTML=renderList();
-  };
 }
 
 async function saveMgrEmail(clientId){
@@ -4786,367 +4265,9 @@ async function downloadCatalogCSV(){
   btn.textContent='⬇ Baixar CSV';btn.disabled=false;
 }
 
-// ═══════════════════════════════════════════════════════════
-// PAINEL MENSAL
-// ═══════════════════════════════════════════════════════════
-let painelFilters={month:'', manager:'', destination:''};
-
-async function renderPainelMensal(el){
-  const pw=document.getElementById('admin-page-wrap');
-  if(pw) pw.style.maxWidth='100%';
-  el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando painel…</div></div>';
-
-  // Fetch backlog items with shipments
-  const{data:items,error}=await sb.from('backlog_items')
-    .select('*,backlog_shipments(id,qty_shipped,ship_date)')
-    .order('created_at',{ascending:false});
-  if(error){el.innerHTML='<div class="alert alert-err">Erro: '+error.message+'</div>';return;}
-
-  // Patch manager_name
-  if(window._clientManagerMap){
-    (items||[]).forEach(i=>{
-      if(!i.manager_name&&i.client_user_id&&window._clientManagerMap[i.client_user_id])
-        i.manager_name=window._clientManagerMap[i.client_user_id];
-    });
-  }
-
-  // Auto-set month to current if empty
-  if(!painelFilters.month){
-    const now=new Date();
-    painelFilters.month=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  }
-
-  buildPainelHTML(el, items||[]);
-}
-
-function buildPainelHTML(el, allItems){
-  const rm=painelFilters.month;
-  const rmDate=rm?(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})():null;
-  const rmLabel=rmDate?rmDate.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'—';
-  const rmEnd=rmDate?new Date(rmDate.getFullYear(),rmDate.getMonth()+1,0,23,59,59):null;
-  const today=new Date();today.setHours(0,0,0,0);
-  const isPast=rmEnd&&rmEnd<today;
-
-  // Get filter options
-  const managers=[...new Set(allItems.map(i=>i.manager_name).filter(Boolean))].sort();
-  const destinations=[...new Set(allItems.map(i=>i.destination).filter(Boolean))].sort();
-
-  // Apply filters
-  let items=allItems.filter(i=>{
-    if(painelFilters.manager&&i.manager_name!==painelFilters.manager)return false;
-    if(painelFilters.destination&&i.destination!==painelFilters.destination)return false;
-    return true;
-  });
-
-  // Base for month: shipped in rm OR (open with RDD <= rm)
-  const rmBase=rm?items.filter(i=>{
-    const shippedInRm=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
-    if(shippedInRm)return true;
-    if(i.classification==='Shipped')return false;
-    if(!i.rdd)return true;
-    return i.rdd.slice(0,7)<=rm;
-  }):items;
-
-  // Shipped in rm
-  const shippedItems=rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
-  const shippedVal=shippedItems.reduce((s,i)=>{
-    const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);
-    return s+q*Number(i.unit_price||0);
-  },0);
-
-  // Open items
-  const openItems=isPast
-    ? rmBase.filter(i=>i.classification!=='Shipped'&&(i.rdd||'').slice(0,7)===rm&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
-    : rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
-
-  const classifiedOpen=openItems.filter(i=>i.classification&&i.classification!=='');
-  const forecastItems=isPast?[]:classifiedOpen.filter(i=>i.will_ship_month===true);
-  const perdidoItems=classifiedOpen.filter(i=>i.will_ship_month===false);
-  const semSinalItems=classifiedOpen.filter(i=>i.will_ship_month===null||i.will_ship_month===undefined);
-  const unclsItems=openItems.filter(i=>!i.classification||i.classification==='');
-
-  const forecastVal=forecastItems.reduce((s,i)=>{const o=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));const q=i.partial_qty>0?Math.min(Number(i.partial_qty),o):o;return s+q*Number(i.unit_price||0);},0);
-  const perdidoVal=perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const semSinalVal=semSinalItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const openVal=openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const potencial=shippedVal+forecastVal;
-
-  // By classification
-  const clsMap={};
-  openItems.forEach(i=>{
-    const cls=i.classification||'Sem classificação';
-    if(!clsMap[cls])clsMap[cls]={val:0,count:0};
-    clsMap[cls].val+=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
-    clsMap[cls].count++;
-  });
-  const clsData=Object.entries(clsMap).sort((a,b)=>b[1].val-a[1].val);
-
-  // By dealer
-  const dealerMap={};
-  rmBase.forEach(i=>{
-    const d=i.client_name||'—';
-    if(!dealerMap[d])dealerMap[d]={shipped:0,forecast:0,lost:0,open:0};
-    const shVal=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0)*Number(i.unit_price||0);
-    const oVal=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
-    dealerMap[d].shipped+=shVal;
-    if(i.will_ship_month===true&&i.classification!=='Shipped')dealerMap[d].forecast+=oVal;
-    else if(i.will_ship_month===false)dealerMap[d].lost+=oVal;
-    else if(i.classification!=='Shipped')dealerMap[d].open+=oVal;
-  });
-  const dealerData=Object.entries(dealerMap).sort((a,b)=>(b[1].shipped+b[1].forecast)-(a[1].shipped+a[1].forecast)).slice(0,12);
-
-  // By manager
-  const mgrMap={};
-  rmBase.forEach(i=>{
-    const m=i.manager_name||'Sem gerente';
-    if(!mgrMap[m])mgrMap[m]={shipped:0,open:0,lost:0};
-    const shVal=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0)*Number(i.unit_price||0);
-    const oVal=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
-    mgrMap[m].shipped+=shVal;
-    if(i.will_ship_month===false)mgrMap[m].lost+=oVal;
-    else if(i.classification!=='Shipped')mgrMap[m].open+=oVal;
-  });
-  const mgrData=Object.entries(mgrMap).sort((a,b)=>b[1].shipped-a[1].shipped);
-
-  // Top PNs not shipping (perdido + sem sinal)
-  const pnMap={};
-  [...perdidoItems,...semSinalItems].forEach(i=>{
-    const pn=i.pn||'—';
-    if(!pnMap[pn])pnMap[pn]={val:0,count:0,desc:i.description||''};
-    pnMap[pn].val+=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
-    pnMap[pn].count++;
-  });
-  const pnData=Object.entries(pnMap).sort((a,b)=>b[1].val-a[1].val).slice(0,10);
-
-  const fmtV=v=>'USD '+Number(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
-  const COLORS=['#185FA5','#3A8C4C','#D97706','#991B1B','#5B2D99','#0A7A8C','#854F0B','#166534','#C0392B','#1D4ED8','#92400E','#6B7280'];
-
-  // Chart helpers
-  const maxCls=clsData.length?Math.max(...clsData.map(d=>d[1].val)):1;
-  const maxDealer=dealerData.length?Math.max(...dealerData.map(d=>d[1].shipped+d[1].forecast+d[1].lost+d[1].open)):1;
-  const maxPN=pnData.length?Math.max(...pnData.map(d=>d[1].val)):1;
-  const totalMgr=mgrData.reduce((s,m)=>s+m[1].shipped+m[1].open+m[1].lost,0)||1;
-
-  el.innerHTML=`
-  <div style="padding:0 0 40px">
-    <!-- Header + Filters -->
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
-      <div>
-        <h1 class="page-title" style="margin-bottom:2px">📈 Painel Mensal</h1>
-        <p style="font-size:12px;color:var(--tm)">${rmLabel} · ${rmBase.length} linhas no mês</p>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <div style="display:flex;align-items:center;gap:5px;padding:5px 10px;background:#EEF6FF;border:1px solid #93C5FD;border-radius:var(--r-md)">
-          <label style="font-size:11px;font-weight:700;color:#1D4ED8;white-space:nowrap">📆 Mês:</label>
-          <input type="month" value="${painelFilters.month}"
-            onchange="painelFilters.month=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
-            style="padding:4px 8px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff"/>
-        </div>
-        <select onchange="painelFilters.manager=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
-          style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
-          <option value="">Todos os gerentes</option>
-          ${managers.map(m=>`<option value="${m}"${painelFilters.manager===m?' selected':''}>${m}</option>`).join('')}
-        </select>
-        <select onchange="painelFilters.destination=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
-          style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
-          <option value="">Todos os destinos</option>
-          ${destinations.map(d=>`<option value="${d}"${painelFilters.destination===d?' selected':''}>${d}</option>`).join('')}
-        </select>
-        <button onclick="painelFilters.manager='';painelFilters.destination='';buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
-          style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;background:#fff;cursor:pointer;color:var(--tm)">✕ Limpar</button>
-      </div>
-    </div>
-
-    <!-- KPI Cards -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:20px">
-      ${[
-        {icon:'✅',label:'Embarcado',val:shippedVal,color:'#166534',bg:'#F0FFF4',tip:'Valor efetivamente faturado e enviado no mês'},
-        {icon:'🎯',label:'Previsto embarcar',val:forecastVal,color:'#D97706',bg:'#FFFBEB',tip:'Marcado Sim — será embarcado neste mês'},
-        {icon:'💰',label:'Potencial',val:potencial,color:'#5B2D99',bg:'#F5F3FF',tip:'Embarcado + Previsto'},
-        {icon:'❌',label:'Perdido no mês',val:perdidoVal,color:'#991B1B',bg:'#FFF1F0',tip:'Marcado Não — não embarcará este mês'},
-        {icon:'🔲',label:'Sem sinalização',val:semSinalVal,color:'#6B7280',bg:'#F9FAFB',tip:'Classificado mas sem decisão de embarque'},
-        {icon:'📋',label:'Em aberto total',val:openVal,color:'var(--blue)',bg:'#EFF6FF',tip:'Total em aberto no mês (soma dos subconjuntos)'},
-      ].map(k=>`
-        <div style="background:${k.bg};border:1px solid ${k.color}22;border-left:3px solid ${k.color};border-radius:var(--r-md);padding:12px 14px;cursor:default"
-          title="${k.tip}">
-          <div style="font-size:18px;margin-bottom:4px">${k.icon}</div>
-          <p style="font-size:9px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${k.label}</p>
-          <p style="font-size:14px;font-weight:800;color:${k.color}">${fmtV(k.val)}</p>
-        </div>`).join('')}
-    </div>
-
-    <!-- Row 2: Classification + Top PNs -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-
-      <!-- By Classification -->
-      <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px">
-        <p style="font-size:12px;font-weight:700;margin-bottom:12px;color:var(--t1)">🔍 Em aberto por classificação</p>
-        ${clsData.length===0?'<p style="font-size:12px;color:var(--tm);text-align:center;padding:20px">Sem dados</p>':
-          clsData.map(([cls,d],i)=>{
-            const[bg,tc]=CLS_COLORS[cls]||['#F0F0F0','#555'];
-            const pct=Math.round(d.val/maxCls*100);
-            return `<div style="margin-bottom:10px">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-                <span style="font-size:11px;font-weight:600;color:${tc};background:${bg};padding:1px 7px;border-radius:10px">${cls}</span>
-                <span style="font-size:11px;font-weight:700;color:var(--t1)">${fmtV(d.val)}</span>
-              </div>
-              <div style="background:#F3F4F6;border-radius:4px;height:8px;overflow:hidden">
-                <div style="background:${tc};height:100%;width:${pct}%;border-radius:4px;transition:width .3s"></div>
-              </div>
-              <p style="font-size:10px;color:var(--tm);margin-top:2px">${d.count} linha(s)</p>
-            </div>`;
-          }).join('')
-        }
-      </div>
-
-      <!-- Top PNs not shipping -->
-      <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px">
-        <p style="font-size:12px;font-weight:700;margin-bottom:4px;color:var(--t1)">⚠️ Top PNs com embarque bloqueado</p>
-        <p style="font-size:10px;color:var(--tm);margin-bottom:12px">Marcados Não ou sem sinalização</p>
-        ${pnData.length===0?'<p style="font-size:12px;color:var(--tm);text-align:center;padding:20px">Nenhum PN bloqueado</p>':
-          pnData.map(([pn,d],i)=>{
-            const pct=Math.round(d.val/maxPN*100);
-            const color=COLORS[i%COLORS.length];
-            return `<div style="margin-bottom:10px">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-                <div>
-                  <span style="font-size:11px;font-weight:700;color:var(--t1);font-family:'JetBrains Mono',monospace">${pn}</span>
-                  <span style="font-size:10px;color:var(--tm);margin-left:5px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle">${d.desc.slice(0,30)}</span>
-                </div>
-                <span style="font-size:11px;font-weight:700;color:#991B1B">${fmtV(d.val)}</span>
-              </div>
-              <div style="background:#F3F4F6;border-radius:4px;height:7px;overflow:hidden">
-                <div style="background:${color};height:100%;width:${pct}%;border-radius:4px"></div>
-              </div>
-              <p style="font-size:10px;color:var(--tm);margin-top:2px">${d.count} linha(s)</p>
-            </div>`;
-          }).join('')
-        }
-      </div>
-    </div>
-
-    <!-- Row 3: By Dealer -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:16px">
-      <p style="font-size:12px;font-weight:700;margin-bottom:4px;color:var(--t1)">🏢 Performance por dealer</p>
-      <p style="font-size:10px;color:var(--tm);margin-bottom:14px">Top 12 · Verde = embarcado · Amarelo = previsto · Vermelho = perdido · Cinza = sem sinal</p>
-      <div style="overflow-x:auto">
-        <div style="min-width:600px">
-          ${dealerData.map(([dealer,d])=>{
-            const total=d.shipped+d.forecast+d.lost+d.open||1;
-            const pShip=Math.round(d.shipped/maxDealer*100);
-            const pFore=Math.round(d.forecast/maxDealer*100);
-            const pLost=Math.round(d.lost/maxDealer*100);
-            const pOpen=Math.round(d.open/maxDealer*100);
-            return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-              <div style="width:160px;font-size:11px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0">${dealer}</div>
-              <div style="flex:1;display:flex;height:20px;border-radius:4px;overflow:hidden;gap:1px">
-                ${d.shipped>0?`<div style="width:${pShip}%;background:#3A8C4C;min-width:2px" title="Embarcado: ${fmtV(d.shipped)}"></div>`:''}
-                ${d.forecast>0?`<div style="width:${pFore}%;background:#D97706;min-width:2px" title="Previsto: ${fmtV(d.forecast)}"></div>`:''}
-                ${d.lost>0?`<div style="width:${pLost}%;background:#C0392B;min-width:2px" title="Perdido: ${fmtV(d.lost)}"></div>`:''}
-                ${d.open>0?`<div style="width:${pOpen}%;background:#D1D5DB;min-width:2px" title="Sem sinal: ${fmtV(d.open)}"></div>`:''}
-              </div>
-              <div style="width:110px;font-size:10px;color:var(--tm);text-align:right;flex-shrink:0">${fmtV(d.shipped+d.forecast)}<span style="color:#D1D5DB"> / ${fmtV(d.shipped+d.forecast+d.lost+d.open)}</span></div>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
-    </div>
-
-    <!-- Row 4: By Manager (donut-style) -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:16px">
-      <p style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--t1)">👤 Carteira por gerente</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
-        ${mgrData.map(([mgr,d],i)=>{
-          const total=d.shipped+d.open+d.lost||1;
-          const pShip=Math.round(d.shipped/total*100);
-          const pOpen=Math.round(d.open/total*100);
-          const pLost=Math.round(d.lost/total*100);
-          const color=COLORS[i%COLORS.length];
-          return `<div style="border:1px solid ${color}33;border-left:3px solid ${color};border-radius:var(--r-md);padding:12px">
-            <p style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:8px">${mgr}</p>
-            <div style="display:flex;height:10px;border-radius:4px;overflow:hidden;margin-bottom:8px;gap:1px">
-              ${d.shipped>0?`<div style="width:${pShip}%;background:#3A8C4C" title="Embarcado"></div>`:''}
-              ${d.open>0?`<div style="width:${pOpen}%;background:#93C5FD" title="Em aberto"></div>`:''}
-              ${d.lost>0?`<div style="width:${pLost}%;background:#C0392B" title="Perdido"></div>`:''}
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
-              <div><p style="font-size:9px;color:#166534;text-transform:uppercase;font-weight:600">Embarcado</p><p style="font-size:12px;font-weight:700;color:#166534">${fmtV(d.shipped)}</p></div>
-              <div><p style="font-size:9px;color:#185FA5;text-transform:uppercase;font-weight:600">Em aberto</p><p style="font-size:12px;font-weight:700;color:#185FA5">${fmtV(d.open)}</p></div>
-              <div><p style="font-size:9px;color:#991B1B;text-transform:uppercase;font-weight:600">Perdido</p><p style="font-size:12px;font-weight:700;color:#991B1B">${fmtV(d.lost)}</p></div>
-              <div><p style="font-size:9px;color:var(--tm);text-transform:uppercase;font-weight:600">Total carteira</p><p style="font-size:12px;font-weight:700;color:var(--t1)">${fmtV(total)}</p></div>
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>
-
-    <!-- Row 5: Shipment rate -->
-    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px">
-      <p style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--t1)">📊 Taxa de embarque — visão consolidada</p>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
-        <div style="text-align:center">
-          <div style="font-size:32px;font-weight:800;color:#3A8C4C">${potencial>0?Math.round(shippedVal/potencial*100):0}%</div>
-          <p style="font-size:11px;color:var(--tm)">Realizado vs Potencial</p>
-          <p style="font-size:10px;color:var(--tm);margin-top:2px">${fmtV(shippedVal)} / ${fmtV(potencial)}</p>
-        </div>
-        <div style="text-align:center">
-          <div style="font-size:32px;font-weight:800;color:#D97706">${(openVal+shippedVal)>0?Math.round(forecastVal/(openVal+shippedVal)*100):0}%</div>
-          <p style="font-size:11px;color:var(--tm)">Previsto vs Total em aberto</p>
-          <p style="font-size:10px;color:var(--tm);margin-top:2px">${fmtV(forecastVal)} sinalizado</p>
-        </div>
-        <div style="text-align:center">
-          <div style="font-size:32px;font-weight:800;color:#991B1B">${(openVal+shippedVal)>0?Math.round(perdidoVal/(openVal+shippedVal)*100):0}%</div>
-          <p style="font-size:11px;color:var(--tm)">Perda no mês</p>
-          <p style="font-size:10px;color:var(--tm);margin-top:2px">${fmtV(perdidoVal)} perdido</p>
-        </div>
-      </div>
-    </div>
-  </div>`;
-
-  // Store items for filter re-renders
-  window._painelItems=allItems;
-}
-
 const fmt=v=>v==null?'—':'USD '+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById('screen-'+id).classList.add('active');}
 function showLoader(id,msg){const el=document.getElementById(id);if(el)el.innerHTML=`<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>${msg}</div></div>`;}
-
-// ── KPI card tooltip ──────────────────────────────────────────────────────
-function showKpiTip(card, encodedMsg, color){
-  const msg=decodeURIComponent(encodedMsg);
-  if(!msg) return;
-  let tip=document.getElementById('kpi-tip');
-  if(!tip){
-    tip=document.createElement('div');
-    tip.id='kpi-tip';
-    tip.style.cssText='position:fixed;z-index:9999;max-width:280px;padding:10px 13px;background:#1E2A3A;color:#fff;font-size:12px;line-height:1.5;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.3);pointer-events:none;transition:opacity .15s';
-    document.body.appendChild(tip);
-  }
-  tip.innerHTML='<span style="display:block;font-size:10px;font-weight:700;color:'+color+';text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">ℹ O que é este card?</span>'+msg;
-  const r=card.getBoundingClientRect();
-  tip.style.opacity='0';
-  tip.style.display='block';
-  const tipW=tip.offsetWidth;
-  let left=r.left+r.width/2-tipW/2;
-  if(left<8) left=8;
-  if(left+tipW>window.innerWidth-8) left=window.innerWidth-tipW-8;
-  tip.style.left=left+'px';
-  tip.style.top=(r.bottom+8)+'px';
-  tip.style.opacity='1';
-}
-function hideKpiTip(){
-  const tip=document.getElementById('kpi-tip');
-  if(tip) tip.style.display='none';
-}
-
-// Recalculate backlog table height on resize
-window.addEventListener('resize',()=>{
-  const sticky=document.getElementById('bl-sticky');
-  const wrap=document.getElementById('bl-table-wrap');
-  if(sticky&&wrap){
-    wrap.style.maxHeight=(window.innerHeight-sticky.offsetHeight-32)+'px';
-  }
-});
 // login handled by form submit
 </script>
 
