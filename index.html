@@ -4345,14 +4345,25 @@ function toggleOrderEdit(orderId){
 }
 
 async function saveMgrName(clientId, name){
-  const{error}=await sb.from('user_profiles').update({manager_name:name||null}).eq('id',clientId);
-  if(error){alert('Erro: '+error.message);return;}
-  const ind=document.getElementById('mgr-saved-'+clientId);
-  if(ind){ind.style.display='inline';setTimeout(()=>{ind.style.display='none';},1500);}
-  // Update cached backlog items if loaded
+  const{error,data}=await sb.from('user_profiles').update({manager_name:name||null}).eq('id',clientId).select('id,manager_name').single();
+  if(error){
+    console.error('saveMgrName error:',error);
+    alert('Erro ao salvar gerente: '+error.message+'\n\nVerifique as permissões RLS no Supabase para a tabela user_profiles.');
+    // Revert select visually
+    const sel=document.getElementById('mgr-name-'+clientId);
+    if(sel) renderAdminTab('clients');
+    return;
+  }
+  // Update clientManagerMap cache
+  if(!window._clientManagerMap) window._clientManagerMap={};
+  if(name) window._clientManagerMap[clientId]=name;
+  else delete window._clientManagerMap[clientId];
+  // Update cached backlog items
   if(window._backlogItems){
     window._backlogItems.forEach(i=>{if(i.client_user_id===clientId) i.manager_name=name||null;});
   }
+  const ind=document.getElementById('mgr-saved-'+clientId);
+  if(ind){ind.style.display='inline';setTimeout(()=>{ind.style.display='none';},1500);}
 }
 
 function openManagersModal(){
