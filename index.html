@@ -1472,7 +1472,7 @@ const CLS_COLORS={
   'Shipped':         ['#E8F5EC','#166534'],
 };
 
-let backlogFilters={client:'',pn:'',classification:'',destination:'',shipMonth:'',rddFrom:'',rddTo:'',refMonth:''};
+let backlogFilters={client:'',pn:'',classification:'',destination:'',shipMonth:'',rddFrom:'',rddTo:'',refMonth:'',manager:''};
 
 async function renderAdminBacklog(el){
   // Expand admin page to full width for backlog
@@ -1517,6 +1517,7 @@ function renderBacklogGrid(el, items, isAdmin){
   let filtered=items.filter(item=>{
     const f=backlogFilters;
     if(f.client && !item.client_name.toLowerCase().includes(f.client.toLowerCase())) return false;
+    if(f.manager && item.manager_name!==f.manager) return false;
     if(f.pn && !item.pn.toLowerCase().includes(f.pn.toLowerCase()) && !item.description?.toLowerCase().includes(f.pn.toLowerCase())) return false;
     if(f.classification==='__unclassified__' && (item.classification&&item.classification!=='')) return false;
     else if(f.classification && f.classification!=='__unclassified__' && item.classification!==f.classification) return false;
@@ -1702,6 +1703,11 @@ function renderBacklogGrid(el, items, isAdmin){
     +'<select id="bl-filter-client" oninput="backlogFilters.client=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
     +'<option value="">Todos os clientes</option>'
     +clients.map(cl=>'<option value="'+cl+'"'+(backlogFilters.client===cl?' selected':'')+'>'+cl+'</option>').join('')
+    +'</select>'
+    // Manager filter
+    +'<select id="bl-filter-mgr" oninput="backlogFilters.manager=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:130px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
+    +'<option value="">Todos os gerentes</option>'
+    +(window._managers||[]).map(m=>'<option value="'+m.name+'"'+(backlogFilters.manager===m.name?' selected':'')+'>'+m.name+'</option>').join('')
     +'</select>'
     +'<select id="bl-filter-cls" oninput="backlogFilters.classification=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:140px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
     +'<option value="">Todas classificações</option>'
@@ -3646,21 +3652,39 @@ requestAnimationFrame(()=>{
   if(tab==='clients'){
     el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Clientes</h1><div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>`;
     const year=new Date().getFullYear();
-    const[clientsRes,targetsRes]=await Promise.all([
+    const[clientsRes,targetsRes,managersRes]=await Promise.all([
       sb.from('user_profiles').select('*,client_groups(label,segment)').eq('is_admin',false).neq('role','salesops').order('full_name'),
-      sb.from('targets').select('user_id,target_usd,target_swoaf_usd').eq('year',year)
+      sb.from('targets').select('user_id,target_usd,target_swoaf_usd').eq('year',year),
+      sb.from('managers').select('*').order('name')
     ]);
     const clients=clientsRes.data||[];
     const tMap={};(targetsRes.data||[]).forEach(t=>tMap[t.user_id]={parts:t.target_usd,swoaf:t.target_swoaf_usd||0});
+    // Fallback: if managers table doesn't exist yet, use defaults
+    const managers=(managersRes.data&&managersRes.data.length>0)
+      ? managersRes.data
+      : [{id:'1',name:'Leonardo Plixo'},{id:'2',name:'Dener Jaime'},{id:'3',name:'Mauricio Rosa'},{id:'4',name:'Renato Dias'}];
+    window._managers=managers;
     if(!clients.length){
       el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Clientes</h1>
         <div class="empty"><div class="empty-icon">👥</div>
         <p style="font-size:14px;font-weight:500">Nenhum cliente ainda.</p>
         <p style="font-size:13px;color:var(--tm);margin-top:4px">Adicione clientes no Supabase → Authentication → Add user, depois crie o perfil com o SQL do guia.</p></div>`;return;
     }
+    // Manager filter state
+    const mgrFilter=window._clientMgrFilter||'';
+    const filteredClients=mgrFilter?clients.filter(c=>c.manager_name===mgrFilter):clients;
     el.innerHTML=`
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <h1 class="page-title">Clientes (${clients.length})</h1>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h1 class="page-title">Clientes (${filteredClients.length}${mgrFilter?' — '+mgrFilter:''})</h1>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:12px;font-weight:600;color:var(--t2)">Filtrar por gerente:</label>
+          <select onchange="window._clientMgrFilter=this.value;renderAdminTab('clients')"
+            style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;min-width:160px">
+            <option value="">Todos os gerentes</option>
+            ${managers.map(m=>`<option value="${m.name}"${mgrFilter===m.name?' selected':''}>${m.name}</option>`).join('')}
+          </select>
+          <button onclick="openManagersModal()" style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;background:#fff;cursor:pointer;color:var(--t2)">⚙️ Gerenciar gerentes</button>
+        </div>
       </div>
       <div style="border-radius:var(--r-md);border:1px solid var(--border);overflow:hidden">
       <table class="dtbl" style="font-size:13px">
@@ -3672,10 +3696,10 @@ requestAnimationFrame(()=>{
           <th></th>
           <th style="text-align:right">Meta SW-OAF FY${year}</th>
           <th></th>
-          <th>E-mail gerente</th>
+          <th>Gerente responsável</th>
           <th>Status</th>
         </tr></thead>
-        <tbody>${clients.map(cl=>`<tr>
+        <tbody>${filteredClients.map(cl=>`<tr>
           <td>
             <p style="font-weight:600">${cl.full_name}</p>
             <p style="font-size:11px;color:var(--tm);font-family:'JetBrains Mono',monospace">${cl.id.slice(0,8)}…</p>
@@ -3703,9 +3727,15 @@ requestAnimationFrame(()=>{
             <button class="btn btn-sm" style="background:#5B2D99;color:#fff;border:none;border-radius:var(--r-md);padding:6px 10px;font-size:12px;cursor:pointer" onclick="saveClientSWOAFTarget('${cl.id}',${year})">Salvar</button>
           </td>
           <td>
-            <input type="email" id="mgr-email-${cl.id}" value="${cl.manager_email||''}" placeholder="email@gerente.com"
-              style="width:170px;padding:5px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:11px;font-family:inherit"/>
-            <button class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:4px;background:var(--g100);color:var(--t2);border-color:var(--border-md)" onclick="saveMgrEmail('${cl.id}')">✓</button>
+            <div style="display:flex;align-items:center;gap:6px">
+              <select id="mgr-name-${cl.id}"
+                onchange="saveMgrName('${cl.id}',this.value)"
+                style="padding:5px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;min-width:150px;background:#fff">
+                <option value="">— Sem gerente —</option>
+                ${managers.map(m=>`<option value="${m.name}"${cl.manager_name===m.name?' selected':''}>${m.name}</option>`).join('')}
+              </select>
+              <span id="mgr-saved-${cl.id}" style="font-size:11px;color:#166534;display:none">✓</span>
+            </div>
           </td>
           <td><span style="font-size:11px;color:#166534;font-weight:600">● ${cl.active?'Ativo':'Inativo'}</span></td>
         </tr>`).join('')}
@@ -4039,6 +4069,7 @@ async function forwardOrder(orderId, destination){
       qty_ordered:        item.quantity,
       qty_shipped:        0,
       classification:     null,
+      manager_name:       order.user_profiles?.manager_name||null,
       rdd:                order.requested_delivery_date||null,
       updated_by:         cProfile?.full_name||'Admin',
     }));
@@ -4285,6 +4316,70 @@ async function forwardOrder(orderId, destination){
 function toggleOrderEdit(orderId){
   const el=document.getElementById('order-edit-'+orderId);
   if(el)el.style.display=el.style.display==='none'?'block':'none';
+}
+
+async function saveMgrName(clientId, name){
+  const{error}=await sb.from('user_profiles').update({manager_name:name||null}).eq('id',clientId);
+  if(error){alert('Erro: '+error.message);return;}
+  const ind=document.getElementById('mgr-saved-'+clientId);
+  if(ind){ind.style.display='inline';setTimeout(()=>{ind.style.display='none';},1500);}
+  // Update cached backlog items if loaded
+  if(window._backlogItems){
+    window._backlogItems.forEach(i=>{if(i.client_user_id===clientId) i.manager_name=name||null;});
+  }
+}
+
+function openManagersModal(){
+  const managers=window._managers||[];
+  const modal=document.createElement('div');
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;display:flex;align-items:center;justify-content:center';
+  const renderList=()=>managers.map((m,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span style="flex:1;font-size:13px;font-weight:500">${m.name}</span>
+      <button onclick="removeMgrFromModal(${i})" style="background:#FEE2E2;color:#991B1B;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">Remover</button>
+    </div>`).join('');
+  modal.innerHTML=`<div style="background:#fff;border-radius:14px;width:90%;max-width:420px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="font-size:16px;font-weight:700">⚙️ Gerentes responsáveis</h3>
+      <button onclick="this.closest('[style*=fixed]').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--tm)">×</button>
+    </div>
+    <div id="mgr-list">${renderList()}</div>
+    <div style="margin-top:16px;display:flex;gap:8px">
+      <input id="mgr-new-input" placeholder="Nome do novo gerente" style="flex:1;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px"/>
+      <button onclick="addMgrFromModal()" style="padding:8px 14px;background:#001423;color:#fff;border:none;border-radius:var(--r-md);font-size:13px;cursor:pointer;font-weight:600">+ Adicionar</button>
+    </div>
+    <p style="font-size:11px;color:var(--tm);margin-top:10px">As alterações são salvas automaticamente na tabela <code>managers</code>.</p>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+
+  window._mgrModal=modal;
+  window._mgrModalManagers=[...managers];
+
+  window.removeMgrFromModal=async(idx)=>{
+    const m=window._mgrModalManagers[idx];
+    if(!m)return;
+    if(!confirm(`Remover "${m.name}"?`))return;
+    if(m.id&&!String(m.id).startsWith('tmp')){
+      await sb.from('managers').delete().eq('id',m.id);
+    }
+    window._mgrModalManagers.splice(idx,1);
+    window._managers=window._mgrModalManagers;
+    modal.querySelector('#mgr-list').innerHTML=renderList();
+  };
+
+  window.addMgrFromModal=async()=>{
+    const inp=modal.querySelector('#mgr-new-input');
+    const name=(inp?.value||'').trim();
+    if(!name){inp.focus();return;}
+    const{data,error}=await sb.from('managers').insert({name}).select().single();
+    if(error){alert('Erro: '+error.message);return;}
+    const newMgr=data||{id:'tmp'+Date.now(),name};
+    window._mgrModalManagers.push(newMgr);
+    window._managers=window._mgrModalManagers;
+    inp.value='';
+    modal.querySelector('#mgr-list').innerHTML=renderList();
+  };
 }
 
 async function saveMgrEmail(clientId){
