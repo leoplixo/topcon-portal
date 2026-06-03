@@ -1705,10 +1705,10 @@ function renderBacklogGrid(el, items, isAdmin){
     +kpiCards.map(k=>'<div class="dash-card" title="'+(k.tip||'')+'" style="padding:12px 14px;margin-bottom:0;border-left:3px solid '+k.color+';cursor:default;position:relative;'+(k.highlight?'background:linear-gradient(135deg,#F3E8FF,#EDE9FE);':'')+'" onmouseenter="showKpiTip(this,\''+encodeURIComponent(k.tip||'')+'\',\''+k.color+'\')" onmouseleave="hideKpiTip()">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
       +'<div style="font-size:16px">'+k.icon+'</div>'
-      +(k.count!==''?'<span style="font-size:22px;font-weight:800;color:'+k.color+'">'+k.count+'</span>':'')
+      +(k.count!==''?'<span data-kpi="'+k.kpi+'" style="font-size:22px;font-weight:800;color:'+k.color+'">'+k.count+'</span>':'')
       +'</div>'
       +'<p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.04em;margin:5px 0 2px">'+k.label+'</p>'
-      +'<p style="font-size:13px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
+      +'<p data-kpi="'+k.kpiv+'" style="font-size:13px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
       +'</div>'
     ).join('')
     +'</div>'
@@ -2376,10 +2376,76 @@ async function importBacklogCSV(input){
 }
 
 function refreshBacklogKPIs(){
-  // Full re-render is the safest approach since we now have breakdown panel + sticky header
-  const isAdm=cProfile?.is_admin?true:cProfile?.role==='salesops'?'salesops':false;
-  const el=document.getElementById(cProfile?.is_admin?'admin-content':'salesops-content');
-  if(el&&window._backlogItems) renderBacklogGrid(el,window._backlogItems,isAdm);
+  const items=window._backlogItems||[];
+  const f=backlogFilters;
+  const rm=f.refMonth;
+  const rmLocalDate=rm?(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})():null;
+  const rmEnd=rmLocalDate?new Date(rmLocalDate.getFullYear(),rmLocalDate.getMonth()+1,0,23,59,59):null;
+  const today=new Date();today.setHours(0,0,0,0);
+  const isPastMonth=rmEnd?rmEnd<today:false;
+
+  let filtered=items.filter(item=>{
+    if(f.client&&!item.client_name.toLowerCase().includes(f.client.toLowerCase()))return false;
+    if(f.manager&&(item.manager_name||(window._clientManagerMap?.[item.client_user_id]))!==f.manager)return false;
+    if(f.pn&&!item.pn.toLowerCase().includes(f.pn.toLowerCase())&&!item.description?.toLowerCase().includes(f.pn.toLowerCase()))return false;
+    if(f.classification==='__unclassified__'&&(item.classification&&item.classification!==''))return false;
+    else if(f.classification&&f.classification!=='__unclassified__'&&item.classification!==f.classification)return false;
+    if(f.destination&&item.destination!==f.destination)return false;
+    if(f.shipMonth==='yes'&&item.will_ship_month!==true)return false;
+    if(f.shipMonth==='no'&&item.will_ship_month!==false)return false;
+    return true;
+  });
+
+  const rmBase=rm?filtered.filter(i=>{
+    const shippedInRm=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
+    if(shippedInRm)return true;
+    if(i.classification==='Shipped')return false;
+    if(!i.rdd)return true;
+    return i.rdd.slice(0,7)<=rm;
+  }):filtered;
+
+  const shippedItems=rm
+    ?rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
+    :filtered.filter(i=>i.classification==='Shipped');
+
+  const openItems=isPastMonth
+    ?rmBase.filter(i=>i.classification!=='Shipped'&&(i.rdd||'').slice(0,7)===rm&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
+    :rm?rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
+    :filtered.filter(i=>i.classification!=='Shipped');
+
+  const classifiedOpen=openItems.filter(i=>i.classification&&i.classification!=='');
+  const forecastItems=isPastMonth?[]:classifiedOpen.filter(i=>i.will_ship_month===true);
+  const perdidoItems=classifiedOpen.filter(i=>i.will_ship_month===false);
+  const semSinalItems=classifiedOpen.filter(i=>i.will_ship_month===null||i.will_ship_month===undefined);
+  const unclsItems=openItems.filter(i=>!i.classification||i.classification==='');
+
+  const openVal=openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+  const shippedVal=rm
+    ?shippedItems.reduce((s,i)=>{const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);return s+q*Number(i.unit_price||0);},0)
+    :shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
+  const forecastVal=forecastItems.reduce((s,i)=>{const o=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));const q=i.partial_qty>0?Math.min(Number(i.partial_qty),o):o;return s+q*Number(i.unit_price||0);},0);
+  const perdidoVal=perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+  const semSinalVal=semSinalItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+  const unclsVal=unclsItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+  const potencial=shippedVal+forecastVal;
+
+  // Update only the KPI card values — do NOT re-render the table
+  document.querySelectorAll('[data-kpi]').forEach(el=>{
+    const k=el.dataset.kpi;
+    if(k==='open')      el.textContent=openItems.length;
+    if(k==='value')     el.textContent=fmt(openVal);
+    if(k==='ship')      el.textContent=forecastItems.length;
+    if(k==='forecast')  el.textContent=fmt(forecastVal);
+    if(k==='shipped')   el.textContent=shippedItems.length;
+    if(k==='shippedval')el.textContent=fmt(shippedVal);
+    if(k==='lost')      el.textContent=perdidoItems.length;
+    if(k==='lostval')   el.textContent=fmt(perdidoVal);
+    if(k==='nosignal')  el.textContent=semSinalItems.length;
+    if(k==='nosignalval')el.textContent=fmt(semSinalVal);
+    if(k==='uncls')     el.textContent=unclsItems.length;
+    if(k==='unclsval')  el.textContent=fmt(unclsVal);
+    if(k==='potencial') el.textContent=fmt(potencial);
+  });
 }
 
 function openBacklogComments(itemId){
