@@ -336,6 +336,7 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
       <button class="atab" onclick="setTab(this,'admindash')">📊 Dashboard</button>
       <button class="atab active" onclick="setTab(this,'upload')">Upload CSV</button>
       <button class="atab" onclick="setTab(this,'backlog')">📋 Backlog</button>
+      <button class="atab" onclick="setTab(this,'painel')">📈 Painel Mensal</button>
       <button class="atab" onclick="setTab(this,'cutoffs')">📅 Cutoffs</button>
       <button class="atab" onclick="setTab(this,'catalog')">Catálogo completo</button>
       <button class="atab" onclick="setTab(this,'orders')">Pedidos</button>
@@ -2116,25 +2117,34 @@ async function saveBacklogSalesDoc(itemId, orderRef, value, inputEl){
 }
 
 async function updateBacklogField(itemId, field, value){
-  const{error}=await sb.from('backlog_items').update({
+  const{error,data}=await sb.from('backlog_items').update({
     [field]:value,
     updated_at:new Date().toISOString(),
     updated_by:cProfile?.full_name||'Admin'
-  }).eq('id',itemId);
-  if(error){console.error('Backlog update error:',error);alert('Erro: '+error.message);return;}
+  }).eq('id',itemId).select(field);
+  if(error){
+    console.error('Backlog update error:',error);
+    alert('Erro ao salvar: '+error.message);
+    return false;
+  }
+  if(!data||data.length===0){
+    console.warn('UPDATE retornou 0 linhas — RLS pode estar bloqueando. itemId:',itemId,'field:',field,'value:',value);
+    alert('⚠️ Atenção: a alteração não foi salva (0 linhas afetadas). Verifique as permissões no Supabase.\n\nCampo: '+field+'\nValor: '+value);
+    return false;
+  }
+  console.log('✅ Saved:',field,'=',data[0][field],'for item',itemId);
   // Update local cache
   if(window._backlogItems){
     const idx=window._backlogItems.findIndex(i=>i.id===itemId);
     if(idx>=0){
       window._backlogItems[idx][field]=value;
-      // Auto-suggest will_ship_month when availability_date changes
       if(field==='availability_date' && value){
         await autoCalcWillShip(itemId, value);
       }
     }
   }
-  // Refresh KPI cards without re-rendering full table
   refreshBacklogKPIs();
+  return true;
 }
 
 async function autoCalcWillShip(itemId, availDate){
@@ -3681,6 +3691,11 @@ requestAnimationFrame(()=>{
     return;
   }
 
+  if(tab==='painel'){
+    await renderPainelMensal(el);
+    return;
+  }
+
   if(tab==='cutoffs'){
     await renderCutoffsTab(el);
     return;
@@ -4712,6 +4727,327 @@ async function downloadCatalogCSV(){
   a.click();
   URL.revokeObjectURL(url);
   btn.textContent='⬇ Baixar CSV';btn.disabled=false;
+}
+
+// ═══════════════════════════════════════════════════════════
+// PAINEL MENSAL
+// ═══════════════════════════════════════════════════════════
+let painelFilters={month:'', manager:'', destination:''};
+
+async function renderPainelMensal(el){
+  const pw=document.getElementById('admin-page-wrap');
+  if(pw) pw.style.maxWidth='100%';
+  el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando painel…</div></div>';
+
+  // Fetch backlog items with shipments
+  const{data:items,error}=await sb.from('backlog_items')
+    .select('*,backlog_shipments(id,qty_shipped,ship_date)')
+    .order('created_at',{ascending:false});
+  if(error){el.innerHTML='<div class="alert alert-err">Erro: '+error.message+'</div>';return;}
+
+  // Patch manager_name
+  if(window._clientManagerMap){
+    (items||[]).forEach(i=>{
+      if(!i.manager_name&&i.client_user_id&&window._clientManagerMap[i.client_user_id])
+        i.manager_name=window._clientManagerMap[i.client_user_id];
+    });
+  }
+
+  // Auto-set month to current if empty
+  if(!painelFilters.month){
+    const now=new Date();
+    painelFilters.month=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  }
+
+  buildPainelHTML(el, items||[]);
+}
+
+function buildPainelHTML(el, allItems){
+  const rm=painelFilters.month;
+  const rmDate=rm?(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})():null;
+  const rmLabel=rmDate?rmDate.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'—';
+  const rmEnd=rmDate?new Date(rmDate.getFullYear(),rmDate.getMonth()+1,0,23,59,59):null;
+  const today=new Date();today.setHours(0,0,0,0);
+  const isPast=rmEnd&&rmEnd<today;
+
+  // Get filter options
+  const managers=[...new Set(allItems.map(i=>i.manager_name).filter(Boolean))].sort();
+  const destinations=[...new Set(allItems.map(i=>i.destination).filter(Boolean))].sort();
+
+  // Apply filters
+  let items=allItems.filter(i=>{
+    if(painelFilters.manager&&i.manager_name!==painelFilters.manager)return false;
+    if(painelFilters.destination&&i.destination!==painelFilters.destination)return false;
+    return true;
+  });
+
+  // Base for month: shipped in rm OR (open with RDD <= rm)
+  const rmBase=rm?items.filter(i=>{
+    const shippedInRm=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
+    if(shippedInRm)return true;
+    if(i.classification==='Shipped')return false;
+    if(!i.rdd)return true;
+    return i.rdd.slice(0,7)<=rm;
+  }):items;
+
+  // Shipped in rm
+  const shippedItems=rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
+  const shippedVal=shippedItems.reduce((s,i)=>{
+    const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);
+    return s+q*Number(i.unit_price||0);
+  },0);
+
+  // Open items
+  const openItems=isPast
+    ? rmBase.filter(i=>i.classification!=='Shipped'&&(i.rdd||'').slice(0,7)===rm&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
+    : rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
+
+  const classifiedOpen=openItems.filter(i=>i.classification&&i.classification!=='');
+  const forecastItems=isPast?[]:classifiedOpen.filter(i=>i.will_ship_month===true);
+  const perdidoItems=classifiedOpen.filter(i=>i.will_ship_month===false);
+  const semSinalItems=classifiedOpen.filter(i=>i.will_ship_month===null||i.will_ship_month===undefined);
+  const unclsItems=openItems.filter(i=>!i.classification||i.classification==='');
+
+  const forecastVal=forecastItems.reduce((s,i)=>{const o=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));const q=i.partial_qty>0?Math.min(Number(i.partial_qty),o):o;return s+q*Number(i.unit_price||0);},0);
+  const perdidoVal=perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+  const semSinalVal=semSinalItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+  const openVal=openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+  const potencial=shippedVal+forecastVal;
+
+  // By classification
+  const clsMap={};
+  openItems.forEach(i=>{
+    const cls=i.classification||'Sem classificação';
+    if(!clsMap[cls])clsMap[cls]={val:0,count:0};
+    clsMap[cls].val+=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
+    clsMap[cls].count++;
+  });
+  const clsData=Object.entries(clsMap).sort((a,b)=>b[1].val-a[1].val);
+
+  // By dealer
+  const dealerMap={};
+  rmBase.forEach(i=>{
+    const d=i.client_name||'—';
+    if(!dealerMap[d])dealerMap[d]={shipped:0,forecast:0,lost:0,open:0};
+    const shVal=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0)*Number(i.unit_price||0);
+    const oVal=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
+    dealerMap[d].shipped+=shVal;
+    if(i.will_ship_month===true&&i.classification!=='Shipped')dealerMap[d].forecast+=oVal;
+    else if(i.will_ship_month===false)dealerMap[d].lost+=oVal;
+    else if(i.classification!=='Shipped')dealerMap[d].open+=oVal;
+  });
+  const dealerData=Object.entries(dealerMap).sort((a,b)=>(b[1].shipped+b[1].forecast)-(a[1].shipped+a[1].forecast)).slice(0,12);
+
+  // By manager
+  const mgrMap={};
+  rmBase.forEach(i=>{
+    const m=i.manager_name||'Sem gerente';
+    if(!mgrMap[m])mgrMap[m]={shipped:0,open:0,lost:0};
+    const shVal=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0)*Number(i.unit_price||0);
+    const oVal=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
+    mgrMap[m].shipped+=shVal;
+    if(i.will_ship_month===false)mgrMap[m].lost+=oVal;
+    else if(i.classification!=='Shipped')mgrMap[m].open+=oVal;
+  });
+  const mgrData=Object.entries(mgrMap).sort((a,b)=>b[1].shipped-a[1].shipped);
+
+  // Top PNs not shipping (perdido + sem sinal)
+  const pnMap={};
+  [...perdidoItems,...semSinalItems].forEach(i=>{
+    const pn=i.pn||'—';
+    if(!pnMap[pn])pnMap[pn]={val:0,count:0,desc:i.description||''};
+    pnMap[pn].val+=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
+    pnMap[pn].count++;
+  });
+  const pnData=Object.entries(pnMap).sort((a,b)=>b[1].val-a[1].val).slice(0,10);
+
+  const fmtV=v=>'USD '+Number(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  const COLORS=['#185FA5','#3A8C4C','#D97706','#991B1B','#5B2D99','#0A7A8C','#854F0B','#166534','#C0392B','#1D4ED8','#92400E','#6B7280'];
+
+  // Chart helpers
+  const maxCls=clsData.length?Math.max(...clsData.map(d=>d[1].val)):1;
+  const maxDealer=dealerData.length?Math.max(...dealerData.map(d=>d[1].shipped+d[1].forecast+d[1].lost+d[1].open)):1;
+  const maxPN=pnData.length?Math.max(...pnData.map(d=>d[1].val)):1;
+  const totalMgr=mgrData.reduce((s,m)=>s+m[1].shipped+m[1].open+m[1].lost,0)||1;
+
+  el.innerHTML=`
+  <div style="padding:0 0 40px">
+    <!-- Header + Filters -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div>
+        <h1 class="page-title" style="margin-bottom:2px">📈 Painel Mensal</h1>
+        <p style="font-size:12px;color:var(--tm)">${rmLabel} · ${rmBase.length} linhas no mês</p>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <div style="display:flex;align-items:center;gap:5px;padding:5px 10px;background:#EEF6FF;border:1px solid #93C5FD;border-radius:var(--r-md)">
+          <label style="font-size:11px;font-weight:700;color:#1D4ED8;white-space:nowrap">📆 Mês:</label>
+          <input type="month" value="${painelFilters.month}"
+            onchange="painelFilters.month=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
+            style="padding:4px 8px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff"/>
+        </div>
+        <select onchange="painelFilters.manager=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
+          style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
+          <option value="">Todos os gerentes</option>
+          ${managers.map(m=>`<option value="${m}"${painelFilters.manager===m?' selected':''}>${m}</option>`).join('')}
+        </select>
+        <select onchange="painelFilters.destination=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
+          style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
+          <option value="">Todos os destinos</option>
+          ${destinations.map(d=>`<option value="${d}"${painelFilters.destination===d?' selected':''}>${d}</option>`).join('')}
+        </select>
+        <button onclick="painelFilters.manager='';painelFilters.destination='';buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
+          style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;background:#fff;cursor:pointer;color:var(--tm)">✕ Limpar</button>
+      </div>
+    </div>
+
+    <!-- KPI Cards -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:20px">
+      ${[
+        {icon:'✅',label:'Embarcado',val:shippedVal,color:'#166534',bg:'#F0FFF4',tip:'Valor efetivamente faturado e enviado no mês'},
+        {icon:'🎯',label:'Previsto embarcar',val:forecastVal,color:'#D97706',bg:'#FFFBEB',tip:'Marcado Sim — será embarcado neste mês'},
+        {icon:'💰',label:'Potencial',val:potencial,color:'#5B2D99',bg:'#F5F3FF',tip:'Embarcado + Previsto'},
+        {icon:'❌',label:'Perdido no mês',val:perdidoVal,color:'#991B1B',bg:'#FFF1F0',tip:'Marcado Não — não embarcará este mês'},
+        {icon:'🔲',label:'Sem sinalização',val:semSinalVal,color:'#6B7280',bg:'#F9FAFB',tip:'Classificado mas sem decisão de embarque'},
+        {icon:'📋',label:'Em aberto total',val:openVal,color:'var(--blue)',bg:'#EFF6FF',tip:'Total em aberto no mês (soma dos subconjuntos)'},
+      ].map(k=>`
+        <div style="background:${k.bg};border:1px solid ${k.color}22;border-left:3px solid ${k.color};border-radius:var(--r-md);padding:12px 14px;cursor:default"
+          title="${k.tip}">
+          <div style="font-size:18px;margin-bottom:4px">${k.icon}</div>
+          <p style="font-size:9px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${k.label}</p>
+          <p style="font-size:14px;font-weight:800;color:${k.color}">${fmtV(k.val)}</p>
+        </div>`).join('')}
+    </div>
+
+    <!-- Row 2: Classification + Top PNs -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+
+      <!-- By Classification -->
+      <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px">
+        <p style="font-size:12px;font-weight:700;margin-bottom:12px;color:var(--t1)">🔍 Em aberto por classificação</p>
+        ${clsData.length===0?'<p style="font-size:12px;color:var(--tm);text-align:center;padding:20px">Sem dados</p>':
+          clsData.map(([cls,d],i)=>{
+            const[bg,tc]=CLS_COLORS[cls]||['#F0F0F0','#555'];
+            const pct=Math.round(d.val/maxCls*100);
+            return `<div style="margin-bottom:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+                <span style="font-size:11px;font-weight:600;color:${tc};background:${bg};padding:1px 7px;border-radius:10px">${cls}</span>
+                <span style="font-size:11px;font-weight:700;color:var(--t1)">${fmtV(d.val)}</span>
+              </div>
+              <div style="background:#F3F4F6;border-radius:4px;height:8px;overflow:hidden">
+                <div style="background:${tc};height:100%;width:${pct}%;border-radius:4px;transition:width .3s"></div>
+              </div>
+              <p style="font-size:10px;color:var(--tm);margin-top:2px">${d.count} linha(s)</p>
+            </div>`;
+          }).join('')
+        }
+      </div>
+
+      <!-- Top PNs not shipping -->
+      <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px">
+        <p style="font-size:12px;font-weight:700;margin-bottom:4px;color:var(--t1)">⚠️ Top PNs com embarque bloqueado</p>
+        <p style="font-size:10px;color:var(--tm);margin-bottom:12px">Marcados Não ou sem sinalização</p>
+        ${pnData.length===0?'<p style="font-size:12px;color:var(--tm);text-align:center;padding:20px">Nenhum PN bloqueado</p>':
+          pnData.map(([pn,d],i)=>{
+            const pct=Math.round(d.val/maxPN*100);
+            const color=COLORS[i%COLORS.length];
+            return `<div style="margin-bottom:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+                <div>
+                  <span style="font-size:11px;font-weight:700;color:var(--t1);font-family:'JetBrains Mono',monospace">${pn}</span>
+                  <span style="font-size:10px;color:var(--tm);margin-left:5px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle">${d.desc.slice(0,30)}</span>
+                </div>
+                <span style="font-size:11px;font-weight:700;color:#991B1B">${fmtV(d.val)}</span>
+              </div>
+              <div style="background:#F3F4F6;border-radius:4px;height:7px;overflow:hidden">
+                <div style="background:${color};height:100%;width:${pct}%;border-radius:4px"></div>
+              </div>
+              <p style="font-size:10px;color:var(--tm);margin-top:2px">${d.count} linha(s)</p>
+            </div>`;
+          }).join('')
+        }
+      </div>
+    </div>
+
+    <!-- Row 3: By Dealer -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:16px">
+      <p style="font-size:12px;font-weight:700;margin-bottom:4px;color:var(--t1)">🏢 Performance por dealer</p>
+      <p style="font-size:10px;color:var(--tm);margin-bottom:14px">Top 12 · Verde = embarcado · Amarelo = previsto · Vermelho = perdido · Cinza = sem sinal</p>
+      <div style="overflow-x:auto">
+        <div style="min-width:600px">
+          ${dealerData.map(([dealer,d])=>{
+            const total=d.shipped+d.forecast+d.lost+d.open||1;
+            const pShip=Math.round(d.shipped/maxDealer*100);
+            const pFore=Math.round(d.forecast/maxDealer*100);
+            const pLost=Math.round(d.lost/maxDealer*100);
+            const pOpen=Math.round(d.open/maxDealer*100);
+            return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <div style="width:160px;font-size:11px;font-weight:500;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0">${dealer}</div>
+              <div style="flex:1;display:flex;height:20px;border-radius:4px;overflow:hidden;gap:1px">
+                ${d.shipped>0?`<div style="width:${pShip}%;background:#3A8C4C;min-width:2px" title="Embarcado: ${fmtV(d.shipped)}"></div>`:''}
+                ${d.forecast>0?`<div style="width:${pFore}%;background:#D97706;min-width:2px" title="Previsto: ${fmtV(d.forecast)}"></div>`:''}
+                ${d.lost>0?`<div style="width:${pLost}%;background:#C0392B;min-width:2px" title="Perdido: ${fmtV(d.lost)}"></div>`:''}
+                ${d.open>0?`<div style="width:${pOpen}%;background:#D1D5DB;min-width:2px" title="Sem sinal: ${fmtV(d.open)}"></div>`:''}
+              </div>
+              <div style="width:110px;font-size:10px;color:var(--tm);text-align:right;flex-shrink:0">${fmtV(d.shipped+d.forecast)}<span style="color:#D1D5DB"> / ${fmtV(d.shipped+d.forecast+d.lost+d.open)}</span></div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 4: By Manager (donut-style) -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:16px">
+      <p style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--t1)">👤 Carteira por gerente</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+        ${mgrData.map(([mgr,d],i)=>{
+          const total=d.shipped+d.open+d.lost||1;
+          const pShip=Math.round(d.shipped/total*100);
+          const pOpen=Math.round(d.open/total*100);
+          const pLost=Math.round(d.lost/total*100);
+          const color=COLORS[i%COLORS.length];
+          return `<div style="border:1px solid ${color}33;border-left:3px solid ${color};border-radius:var(--r-md);padding:12px">
+            <p style="font-size:12px;font-weight:700;color:var(--t1);margin-bottom:8px">${mgr}</p>
+            <div style="display:flex;height:10px;border-radius:4px;overflow:hidden;margin-bottom:8px;gap:1px">
+              ${d.shipped>0?`<div style="width:${pShip}%;background:#3A8C4C" title="Embarcado"></div>`:''}
+              ${d.open>0?`<div style="width:${pOpen}%;background:#93C5FD" title="Em aberto"></div>`:''}
+              ${d.lost>0?`<div style="width:${pLost}%;background:#C0392B" title="Perdido"></div>`:''}
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+              <div><p style="font-size:9px;color:#166534;text-transform:uppercase;font-weight:600">Embarcado</p><p style="font-size:12px;font-weight:700;color:#166534">${fmtV(d.shipped)}</p></div>
+              <div><p style="font-size:9px;color:#185FA5;text-transform:uppercase;font-weight:600">Em aberto</p><p style="font-size:12px;font-weight:700;color:#185FA5">${fmtV(d.open)}</p></div>
+              <div><p style="font-size:9px;color:#991B1B;text-transform:uppercase;font-weight:600">Perdido</p><p style="font-size:12px;font-weight:700;color:#991B1B">${fmtV(d.lost)}</p></div>
+              <div><p style="font-size:9px;color:var(--tm);text-transform:uppercase;font-weight:600">Total carteira</p><p style="font-size:12px;font-weight:700;color:var(--t1)">${fmtV(total)}</p></div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- Row 5: Shipment rate -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px">
+      <p style="font-size:12px;font-weight:700;margin-bottom:14px;color:var(--t1)">📊 Taxa de embarque — visão consolidada</p>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+        <div style="text-align:center">
+          <div style="font-size:32px;font-weight:800;color:#3A8C4C">${potencial>0?Math.round(shippedVal/potencial*100):0}%</div>
+          <p style="font-size:11px;color:var(--tm)">Realizado vs Potencial</p>
+          <p style="font-size:10px;color:var(--tm);margin-top:2px">${fmtV(shippedVal)} / ${fmtV(potencial)}</p>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:32px;font-weight:800;color:#D97706">${(openVal+shippedVal)>0?Math.round(forecastVal/(openVal+shippedVal)*100):0}%</div>
+          <p style="font-size:11px;color:var(--tm)">Previsto vs Total em aberto</p>
+          <p style="font-size:10px;color:var(--tm);margin-top:2px">${fmtV(forecastVal)} sinalizado</p>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:32px;font-weight:800;color:#991B1B">${(openVal+shippedVal)>0?Math.round(perdidoVal/(openVal+shippedVal)*100):0}%</div>
+          <p style="font-size:11px;color:var(--tm)">Perda no mês</p>
+          <p style="font-size:10px;color:var(--tm);margin-top:2px">${fmtV(perdidoVal)} perdido</p>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+  // Store items for filter re-renders
+  window._painelItems=allItems;
 }
 
 const fmt=v=>v==null?'—':'USD '+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
