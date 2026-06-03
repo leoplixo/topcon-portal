@@ -1502,6 +1502,11 @@ async function renderAdminBacklog(el){
     return;
   }
 
+  // Always reload clientManagerMap fresh so recently saved managers are picked up
+  const{data:profiles}=await sb.from('user_profiles').select('id,manager_name');
+  window._clientManagerMap={};
+  (profiles||[]).forEach(p=>{if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;});
+
   // Patch items with manager_name from clientManagerMap if not set in DB
   items.forEach(i=>{
     if(!i.manager_name && i.client_user_id && window._clientManagerMap?.[i.client_user_id]){
@@ -1526,6 +1531,12 @@ async function renderSalesOpsBacklog(){
     el.innerHTML='<div class="empty" style="margin-top:60px"><div class="empty-icon">📋</div><p style="font-size:14px;font-weight:500">Nenhum item no backlog ainda.</p></div>';
     return;
   }
+
+  // Always reload clientManagerMap fresh
+  const{data:profiles}=await sb.from('user_profiles').select('id,manager_name');
+  window._clientManagerMap={};
+  (profiles||[]).forEach(p=>{if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;});
+
   items.forEach(i=>{
     if(!i.manager_name && i.client_user_id && window._clientManagerMap?.[i.client_user_id]){
       i.manager_name=window._clientManagerMap[i.client_user_id];
