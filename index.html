@@ -4345,13 +4345,10 @@ function toggleOrderEdit(orderId){
 }
 
 async function saveMgrName(clientId, name){
-  const{error,data}=await sb.from('user_profiles').update({manager_name:name||null}).eq('id',clientId).select('id,manager_name').single();
+  const{error}=await sb.from('user_profiles').update({manager_name:name||null}).eq('id',clientId);
   if(error){
     console.error('saveMgrName error:',error);
-    alert('Erro ao salvar gerente: '+error.message+'\n\nVerifique as permissões RLS no Supabase para a tabela user_profiles.');
-    // Revert select visually
-    const sel=document.getElementById('mgr-name-'+clientId);
-    if(sel) renderAdminTab('clients');
+    alert('Erro ao salvar gerente: '+error.message);
     return;
   }
   // Update clientManagerMap cache
