@@ -2557,49 +2557,90 @@ function openPartialModal(itemId, selectEl){
   const modal=document.getElementById('bl-ship-modal');
   if(!modal)return;
   modal.style.display='flex';
+  const today=new Date().toISOString().slice(0,10);
   modal.innerHTML='<div style="background:#fff;border-radius:16px;width:90%;max-width:380px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
     +'<h3 style="font-size:16px;font-weight:700">🔀 Embarque parcial</h3>'
-    +'<button onclick="document.getElementById(\'bl-ship-modal\').style.display=\'none\';if(window._pendingPartialSelect){const i=window._backlogItems?.find(x=>x.id===\''+itemId+'\');window._pendingPartialSelect.value=i?.partial_qty>0?\'partial\':i?.will_ship_month===true?\'true\':i?.will_ship_month===false?\'false\':\'\';}window._pendingPartialSelect=null;" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--tm)">×</button>'
+    +'<button onclick="document.getElementById(\'bl-ship-modal\').style.display=\'none\';" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--tm)">×</button>'
     +'</div>'
-    +'<p style="font-size:13px;color:var(--tm);margin-bottom:6px">PN: <strong>'+item.pn+'</strong></p>'
+    +'<p style="font-size:13px;color:var(--tm);margin-bottom:4px">PN: <strong>'+item.pn+'</strong></p>'
     +'<p style="font-size:13px;color:var(--tm);margin-bottom:14px">Em aberto: <strong>'+qtyOpen+' un</strong> · RDD: <strong>'+(item.rdd?new Date(item.rdd+'T12:00:00').toLocaleDateString('pt-BR'):'—')+'</strong></p>'
-    +'<label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Quantidade que embarcará neste mês de referência</label>'
-    +'<input type="number" id="partial-qty-input" min="1" max="'+(qtyOpen-1)+'" value="'+(item.partial_qty||Math.ceil(qtyOpen/2))+'" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:14px;margin-bottom:6px;box-sizing:border-box"/>'
-    +'<p style="font-size:11px;color:var(--tm);margin-bottom:14px">O restante ficará em aberto para o próximo mês de referência.</p>'
-    +'<button onclick="confirmPartial(\''+itemId+'\')" style="width:100%;background:#D97706;color:#fff;border:none;border-radius:var(--r-md);padding:11px;font-size:14px;font-weight:600;cursor:pointer">Confirmar parcial</button>'
+    +'<label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Quantidade que embarca agora (parcial)</label>'
+    +'<input type="number" id="ship-qty" min="1" max="'+(qtyOpen-1)+'" value="'+(item.partial_qty&&item.partial_qty<qtyOpen?item.partial_qty:Math.ceil(qtyOpen/2))+'" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:14px;margin-bottom:10px;box-sizing:border-box"/>'
+    +'<label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Data de embarque</label>'
+    +'<input type="date" id="ship-date" value="'+today+'" max="'+today+'" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;margin-bottom:10px;box-sizing:border-box"/>'
+    +'<label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Observações (opcional)</label>'
+    +'<input type="text" id="ship-notes" placeholder="Ex: embarque parcial aguardando estoque" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;margin-bottom:14px;box-sizing:border-box"/>'
+    +'<p style="font-size:11px;color:var(--tm);margin-bottom:14px">O saldo restante ficará em aberto até o próximo embarque.</p>'
+    +'<button onclick="confirmPartialShipment(\''+itemId+'\','+item.qty_ordered+')" style="width:100%;background:#D97706;color:#fff;border:none;border-radius:var(--r-md);padding:11px;font-size:14px;font-weight:600;cursor:pointer">✅ Confirmar embarque parcial</button>'
     +'</div>';
   window._pendingPartialSelect=selectEl;
   modal.addEventListener('click',e=>{
     if(e.target===modal){
       modal.style.display='none';
+      // Revert select to previous value
       const i=window._backlogItems?.find(x=>x.id===itemId);
       if(selectEl) selectEl.value=i?.partial_qty>0?'partial':i?.will_ship_month===true?'true':i?.will_ship_month===false?'false':'';
     }
   },{once:true});
 }
 
-async function confirmPartial(itemId){
-  const qty=parseFloat(document.getElementById('partial-qty-input')?.value||0);
+async function confirmPartialShipment(itemId, qtyOrdered){
+  const qty=parseFloat(document.getElementById('ship-qty')?.value||0);
+  const date=document.getElementById('ship-date')?.value;
+  const notes=document.getElementById('ship-notes')?.value||'Embarque parcial';
+  if(!qty||qty<=0){alert('Informe uma quantidade válida.');return;}
+  const today=new Date().toISOString().slice(0,10);
+  if(date&&date>today){
+    alert('❌ Não é possível registrar embarque em data futura.');
+    return;
+  }
   const item=window._backlogItems?.find(i=>i.id===itemId);
-  if(!item||!qty||qty<=0){alert('Informe uma quantidade válida.');return;}
+  if(!item)return;
   const qtyOpen=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
-  if(qty>=qtyOpen){alert('Quantidade parcial deve ser menor que o total em aberto ('+qtyOpen+').');return;}
-  const{error}=await sb.from('backlog_items').update({
-    will_ship_month:true,
-    partial_qty:qty,
-    updated_at:new Date().toISOString(),
-    updated_by:cProfile?.full_name||'Admin'
+  if(qty>=qtyOpen){
+    alert('Quantidade parcial deve ser menor que o total em aberto ('+qtyOpen+'). Para embarque total use o botão 📦.');
+    return;
+  }
+  // Register shipment record
+  const{error:sErr}=await sb.from('backlog_shipments').insert({
+    backlog_item_id: itemId,
+    qty_shipped:     qty,
+    ship_date:       date||today,
+    notes:           notes,
+    created_by:      cProfile?.full_name||'Admin',
+  });
+  if(sErr){alert('Erro ao registrar embarque: '+sErr.message);return;}
+
+  // Update backlog item — partial: NOT Shipped, keep classification, save partial_qty signal
+  const newTotal=Number(item.qty_shipped||0)+qty;
+  const{error:uErr}=await sb.from('backlog_items').update({
+    qty_shipped:   newTotal,
+    partial_qty:   qty,
+    will_ship_month: true,
+    updated_at:    new Date().toISOString(),
+    updated_by:    cProfile?.full_name||'Admin'
   }).eq('id',itemId);
-  if(error){alert('Erro: '+error.message);return;}
-  item.will_ship_month=true;
+  if(uErr){alert('Erro: '+uErr.message);return;}
+
+  // Update local cache
+  item.qty_shipped=newTotal;
   item.partial_qty=qty;
+  item.will_ship_month=true;
+  if(!item.backlog_shipments)item.backlog_shipments=[];
+  item.backlog_shipments.push({qty_shipped:qty,ship_date:date||today,notes,created_by:cProfile?.full_name});
+
   document.getElementById('bl-ship-modal').style.display='none';
   window._pendingPartialSelect=null;
-  refreshBacklogKPIs();
+
   const isAdm=cProfile?.is_admin?true:cProfile?.role==='salesops'?'salesops':false;
   const el=document.getElementById(cProfile?.is_admin?'admin-content':'salesops-content');
   if(el&&window._backlogItems) renderBacklogGrid(el,window._backlogItems,isAdm);
+}
+
+async function confirmPartial(itemId){
+  // Legacy: kept for compatibility — now uses confirmPartialShipment
+  await confirmPartialShipment(itemId, window._backlogItems?.find(i=>i.id===itemId)?.qty_ordered||0);
 }
 
 function openShipModal(itemId, qtyOrdered, qtyShipped){
