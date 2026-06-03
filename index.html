@@ -1566,14 +1566,31 @@ function renderBacklogGrid(el, items, isAdmin){
   const rmLabel=rmLocalDate?rmLocalDate.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'';
   const rmShort=rmLocalDate?rmLocalDate.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}):'';
 
-  const openItems   = filtered.filter(i=>i.classification!=='Shipped');
-  const forecastItems = filtered.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped');
-  const perdidoItems  = filtered.filter(i=>i.will_ship_month===false&&i.classification!=='Shipped');
+  // When rm is set: base for cards/breakdown = items with RDD ≤ end of rm (not yet shipped OR shipped in rm)
+  // RDD is the anchor — items with RDD after rm are not "of this month"
+  // Items with no RDD always show (we can't know their month)
+  const rmBase = rm ? filtered.filter(i=>{
+    const isShippedInRm=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
+    if(isShippedInRm) return true; // shipped this month always counts
+    if(i.classification==='Shipped') return false; // shipped in a past month, already closed
+    // open items: include if no RDD, or RDD <= end of rm
+    if(!i.rdd) return true;
+    return i.rdd.slice(0,7)<=rm;
+  }) : filtered;
 
-  // Shipped: if rm set use ship_date in rm, else all Shipped
+  // Shipped in rm: ship_date in rm
   const shippedItems = rm
-    ? filtered.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
+    ? rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
     : filtered.filter(i=>i.classification==='Shipped');
+
+  // Open = rmBase not shipped (classification !== Shipped and no ship_date in rm)
+  const openItems = rmBase.filter(i=>i.classification!=='Shipped'&&!(rm&&(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm)));
+
+  // Forecast = open + will_ship_month=true
+  const forecastItems = openItems.filter(i=>i.will_ship_month===true);
+
+  // Lost = open + will_ship_month=false
+  const perdidoItems = openItems.filter(i=>i.will_ship_month===false);
 
   const openVal = openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const shippedVal = rm
@@ -1590,9 +1607,13 @@ function renderBacklogGrid(el, items, isAdmin){
   const perdidoVal = perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const potencial  = shippedVal+forecastVal;
 
-  // breakdown by classification for the ref month panel
+  // Unclassified uses rmBase
+  const unclassifiedRm=rmBase.filter(i=>(!i.classification||i.classification==='')&&i.classification!=='Shipped');
+  const unclassifiedRmVal=unclassifiedRm.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
+
+  // Breakdown by classification — uses openItems (rmBase, not shipped)
   const clsBreakdown={};
-  filtered.filter(i=>i.classification!=='Shipped').forEach(i=>{
+  openItems.forEach(i=>{
     const cls=i.classification||'__unclassified__';
     if(!clsBreakdown[cls]) clsBreakdown[cls]={count:0,val:0};
     clsBreakdown[cls].count++;
@@ -1606,7 +1627,7 @@ function renderBacklogGrid(el, items, isAdmin){
     // title row
     +'<div style="display:flex;justify-content:space-between;align-items:center;padding-top:8px;margin-bottom:10px;flex-wrap:wrap;gap:8px">'
     +'<h1 class="page-title" style="margin-bottom:0">Backlog Operacional</h1>'
-    +'<span style="font-size:12px;color:var(--tm)">'+filtered.length+' linha(s) · Atualizado agora'+(rm?' · 📆 '+rmLabel:'')+'</span>'
+    +'<span style="font-size:12px;color:var(--tm)">'+(rm?rmBase.length:filtered.length)+' linha(s) · Atualizado agora'+(rm?' · 📆 '+rmLabel:'')+'</span>'
     +'</div>'
 
     // ── KPI cards (4 always + potencial when rm set) ──────────────────────
@@ -1616,7 +1637,7 @@ function renderBacklogGrid(el, items, isAdmin){
       {icon:'🎯', label:'Previsto embarcar'+(rm?' '+rmShort:''), count:forecastItems.length, val:fmt(forecastVal), color:'#D97706',     kpi:'ship',    kpiv:'forecast'},
       {icon:'✅', label:'Embarcado'+(rm?' '+rmShort:''),         count:shippedItems.length,  val:fmt(shippedVal),  color:'#166534',     kpi:'shipped', kpiv:'shippedval'},
       {icon:'❌', label:'Não embarca'+(rm?' '+rmShort:''),       count:perdidoItems.length,  val:fmt(perdidoVal),  color:'#991B1B',     kpi:'lost',    kpiv:'lostval'},
-      ...(unclassified.length>0?[{icon:'⚠️',label:'Sem classificação',count:unclassified.length,val:fmt(unclassifiedVal),color:'#C0392B',kpi:'uncls',kpiv:'unclsval'}]:[]),
+      ...(unclassifiedRm.length>0?[{icon:'⚠️',label:'Sem classificação',count:unclassifiedRm.length,val:fmt(unclassifiedRmVal),color:'#C0392B',kpi:'uncls',kpiv:'unclsval'}]:[]),
       ...(rm?[{icon:'💰',label:'Potencial fechamento',count:'',val:fmt(potencial),color:'#5B2D99',kpi:'',kpiv:'potencial',highlight:true}]:[]),
     ].map(k=>'<div class="dash-card" style="padding:12px 14px;margin-bottom:0;border-left:3px solid '+k.color+';'+(k.highlight?'background:linear-gradient(135deg,#F3E8FF,#EDE9FE);':'')+'">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
