@@ -5304,13 +5304,16 @@ async function renderNetworksTab(el){
     sb.from('user_profiles').select('id,full_name,manager_name').eq('is_admin',false).neq('role','salesops').order('full_name'),
     sb.from('network_purchases').select('*').order('month',{ascending:false}),
     sb.from('targets').select('user_id,target_networks_usd').eq('year',year),
-    sb.from('parts').select('pn,description,latam_scheduled,seg')
+    sb.from('parts').select('pn,description,seg,part_prices(scheduled_price,client_groups(slug))').eq('seg','NETWORKS')
   ]);
 
   const clients=clientsRes.data||[];
   const purchases=purchasesRes.data||[];
   const targetMap={};(targetsRes.data||[]).forEach(t=>targetMap[t.user_id]=Number(t.target_networks_usd||0));
-  const networkParts=(partsRes.data||[]).filter(p=>p.seg==='NETWORKS');
+  const networkParts=(partsRes.data||[]).map(p=>{
+    const latamPrice=p.part_prices?.find(pp=>pp.client_groups?.slug==='latam')?.scheduled_price||0;
+    return{pn:p.pn,description:p.description,latam_scheduled:latamPrice};
+  });
   const pnPriceMap={};networkParts.forEach(p=>{pnPriceMap[p.pn]={price:Number(p.latam_scheduled||0),desc:p.description};});
 
   // Summary by client (annual)
@@ -5447,9 +5450,12 @@ function filterNetworksPurchases(){
 async function openNetworksPurchaseModal(){
 
   // Always fetch fresh from DB to ensure latest catalog
-  const{data:partsData}=await sb.from('parts').select('pn,description,latam_scheduled,seg');
-  const networkParts=(partsData||[]).filter(p=>p.seg==='NETWORKS');
-  console.log('Total parts:',partsData?.length,'Networks:',networkParts.length,'Sample segs:',[...new Set((partsData||[]).map(p=>p.seg))].slice(0,10));
+  const{data:partsData}=await sb.from('parts').select('pn,description,seg,part_prices(scheduled_price,client_groups(slug))');
+  const networkParts=(partsData||[]).filter(p=>p.seg==='NETWORKS').map(p=>{
+    const latamPrice=p.part_prices?.find(pp=>pp.client_groups?.slug==='latam')?.scheduled_price||0;
+    return{pn:p.pn,description:p.description,latam_scheduled:latamPrice};
+  }).sort((a,b)=>a.pn.localeCompare(b.pn));
+  console.log('Networks parts found:',networkParts.length);
   window._networksParts=networkParts;
   const pnPriceMap={};networkParts.forEach(p=>{pnPriceMap[p.pn]={price:Number(p.latam_scheduled||0),desc:p.description||''};});
   window._networksPnMap=pnPriceMap;
