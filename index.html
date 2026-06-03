@@ -337,6 +337,7 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
       <button class="atab active" onclick="setTab(this,'upload')">Upload CSV</button>
       <button class="atab" onclick="setTab(this,'backlog')">📋 Backlog</button>
       <button class="atab" onclick="setTab(this,'painel')">📈 Painel Mensal</button>
+      <button class="atab" onclick="setTab(this,'networks')">📡 Networks</button>
       <button class="atab" onclick="setTab(this,'cutoffs')">📅 Cutoffs</button>
       <button class="atab" onclick="setTab(this,'catalog')">Catálogo completo</button>
       <button class="atab" onclick="setTab(this,'orders')">Pedidos</button>
@@ -1174,18 +1175,23 @@ async function renderDashboard(){
 
   // Fetch in parallel
   const[targetRes,windowsRes,ordersRes]=await Promise.all([
-    sb.from('targets').select('target_usd,target_swoaf_usd').eq('user_id',cUser.id).eq('year',FISCAL_YEAR).single(),
+    sb.from('targets').select('target_usd,target_networks_usd').eq('user_id',cUser.id).eq('year',FISCAL_YEAR).single(),
     sb.from('windows').select('*').eq('year',FISCAL_YEAR).order('window_number'),
     sb.from('orders').select('id,reference,total_usd,final_total_usd,price_type,created_at,requested_delivery_date,status,order_items(pn,description,unit_price,quantity)')
       .eq('user_id',cUser.id).gte('created_at',FISCAL_START.toISOString()).order('created_at',{ascending:false})
   ]);
 
   const annualTarget=targetRes.data?.target_usd||0;
-  const annualSWOAF=targetRes.data?.target_swoaf_usd||0;
-  const annualTotalTarget=annualTarget+annualSWOAF;
+  const annualNetworks=targetRes.data?.target_networks_usd||0;
+  const annualTotalTarget=annualTarget+annualNetworks;
   const windows=windowsRes.data||[];
   const orders=ordersRes.data||[];
   const purchased=orders.filter(o=>o.status!=='cancelled'&&(o.order_items?.length||0)>0).reduce((s,o)=>s+Number(o.final_total_usd||o.total_usd||0),0);
+
+  // Fetch networks purchases for this dealer
+  const{data:netPurchases}=await sb.from('network_purchases').select('qty,unit_price,total_value,month').eq('user_id',cUser.id);
+  const networksTotal=(netPurchases||[]).reduce((s,p)=>s+Number(p.total_value||p.qty*p.unit_price||0),0);
+  const netPct=annualNetworks>0?Math.min(100,Math.round(networksTotal/annualNetworks*100)):0;
 
   // Current window (open right now)
   const currentWindow=windows.find(w=>today>=new Date(w.open_date)&&today<=new Date(w.close_date));
@@ -1408,6 +1414,17 @@ async function renderDashboard(){
     ${progressCard}
     ${windowsCard}
     ${annualCard}
+    ${annualNetworks>0?`<div class="dash-card">
+      <p style="font-size:13px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">📡 Networks — Sinais PPP · FY2026</p>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:13px;font-weight:600;color:${netPct>=100?'#166534':netPct>=70?'#D97706':'#C0392B'}">${fmt(networksTotal)}</span>
+        <span style="font-size:12px;color:var(--tm)">Meta: ${fmt(annualNetworks)} (${netPct}%)</span>
+      </div>
+      <div style="background:var(--g100);border-radius:20px;height:10px;overflow:hidden">
+        <div style="height:100%;border-radius:20px;background:${netPct>=100?'#3A8C4C':netPct>=70?'#D97706':'#C0392B'};width:${netPct}%;transition:width .6s ease"></div>
+      </div>
+      <p style="font-size:11px;color:var(--tm);margin-top:6px">Compras de sinais TopNET Live registradas pela Topcon no final de cada mês.</p>
+    </div>`:''}
     ${ordersHtml}`;
 }
 
@@ -3617,6 +3634,7 @@ requestAnimationFrame(()=>{
                   <option value="AG" ${p.seg==='AG'?'selected':''}>AG</option>
                   <option value="FD" ${p.seg==='FD'?'selected':''}>FD</option>
                   <option value="SW-OAF" ${p.seg==='SW-OAF'?'selected':''}>SW-OAF</option>
+                  <option value="NETWORKS" ${p.seg==='NETWORKS'?'selected':''}>NETWORKS</option>
                 </select></div>
               <div><label style="font-size:10px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Produto</label>
                 <input id="e-prod-${p.id}" value="${(p.product||'').replace(/"/g,'&quot;')}" style="width:100%;padding:6px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"/></div>
@@ -3825,6 +3843,11 @@ requestAnimationFrame(()=>{
     return;
   }
 
+  if(tab==='networks'){
+    await renderNetworksTab(el);
+    return;
+  }
+
   if(tab==='cutoffs'){
     await renderCutoffsTab(el);
     return;
@@ -3835,11 +3858,11 @@ requestAnimationFrame(()=>{
     const year=new Date().getFullYear();
     const[clientsRes,targetsRes,managersRes]=await Promise.all([
       sb.from('user_profiles').select('*,client_groups(label,segment)').eq('is_admin',false).neq('role','salesops').order('full_name'),
-      sb.from('targets').select('user_id,target_usd,target_swoaf_usd').eq('year',year),
+      sb.from('targets').select('user_id,target_usd,target_networks_usd').eq('year',year),
       sb.from('managers').select('*').order('name')
     ]);
     const clients=clientsRes.data||[];
-    const tMap={};(targetsRes.data||[]).forEach(t=>tMap[t.user_id]={parts:t.target_usd,swoaf:t.target_swoaf_usd||0});
+    const tMap={};(targetsRes.data||[]).forEach(t=>tMap[t.user_id]={parts:t.target_usd,networks:t.target_networks_usd||0});
     // Fallback: if managers table doesn't exist yet, use defaults
     const managers=(managersRes.data&&managersRes.data.length>0)
       ? managersRes.data
@@ -3875,7 +3898,7 @@ requestAnimationFrame(()=>{
           <th>Seg.</th>
           <th style="text-align:right">Meta AG/FD FY${year}</th>
           <th></th>
-          <th style="text-align:right">Meta SW-OAF FY${year}</th>
+          <th style="text-align:right">Meta Networks FY${year}</th>
           <th></th>
           <th>Gerente responsável</th>
           <th>Status</th>
@@ -3900,12 +3923,12 @@ requestAnimationFrame(()=>{
           <td style="text-align:right">
             <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px">
               <span style="font-size:12px;color:var(--tm)">USD</span>
-              <input type="number" id="ct-swoaf-${cl.id}" value="${tMap[cl.id]?.swoaf||''}" placeholder="0.00"
+              <input type="number" id="ct-networks-${cl.id}" value="${tMap[cl.id]?.networks||''}" placeholder="0.00"
                 style="width:120px;padding:6px 9px;border:1px solid #EDE0F9;border-radius:var(--r-md);font-size:13px;font-family:inherit;text-align:right"/>
             </div>
           </td>
           <td>
-            <button class="btn btn-sm" style="background:#5B2D99;color:#fff;border:none;border-radius:var(--r-md);padding:6px 10px;font-size:12px;cursor:pointer" onclick="saveClientSWOAFTarget('${cl.id}',${year})">Salvar</button>
+            <button class="btn btn-sm" style="background:#5B2D99;color:#fff;border:none;border-radius:var(--r-md);padding:6px 10px;font-size:12px;cursor:pointer" onclick="saveClientNetworksTarget('${cl.id}',${year})">Salvar</button>
           </td>
           <td>
             <div style="display:flex;align-items:center;gap:6px">
@@ -4662,10 +4685,10 @@ async function saveClientTarget(userId, year){
   setTimeout(()=>{btn.textContent='Salvar';btn.style.background=''},2000);
 }
 
-async function saveClientSWOAFTarget(userId, year){
-  const input=document.getElementById('ct-swoaf-'+userId);
+async function saveClientNetworksTarget(userId, year){
+  const input=document.getElementById('ct-networks-'+userId);
   const val=parseFloat(input?.value)||0;
-  const{error}=await sb.from('targets').upsert({user_id:userId,year,target_swoaf_usd:val},{onConflict:'user_id,year'});
+  const{error}=await sb.from('targets').upsert({user_id:userId,year,target_networks_usd:val},{onConflict:'user_id,year'});
   if(error){alert('Erro: '+error.message);return;}
   const btn=event.target;btn.textContent='✓ Salvo';btn.style.background='#5B2D99';
   setTimeout(()=>{btn.textContent='Salvar';btn.style.background=''},2000);
@@ -4673,13 +4696,13 @@ async function saveClientSWOAFTarget(userId, year){
 
 // ── Catalog edit functions ────────────────────────────────────
 let _catalogSegFilter='ALL';
-let _swoafNoticeShown=false;
+let _networksNoticeShown=false;
 
-function showSWOAFNotice(){
-  if(_swoafNoticeShown) return;
-  _swoafNoticeShown=true;
+function showNetworksNotice(){
+  if(_networksNoticeShown) return;
+  _networksNoticeShown=true;
   const modal=document.createElement('div');
-  modal.id='swoaf-modal';modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.6);z-index:99999;display:flex;align-items:center;justify-content:center';
+  modal.id='networks-modal';modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.6);z-index:99999;display:flex;align-items:center;justify-content:center';
   modal.innerHTML='<div style="background:#fff;border-radius:16px;padding:28px;max-width:440px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
     +'<div style="text-align:center;margin-bottom:16px">'
     +'<div style="font-size:40px;margin-bottom:8px">ℹ️</div>'
@@ -4689,7 +4712,7 @@ function showSWOAFNotice(){
     +'<p style="font-size:14px;color:#C0392B;font-weight:600;line-height:1.6">'
     +'A compra destes itens deve ser realizada exclusivamente através do portal <strong>TAP</strong>.</p>'
     +'</div>'
-    +'<button onclick="document.getElementById(\'swoaf-modal\').remove()" '
+    +'<button onclick="document.getElementById(\'networks-modal\').remove()" '
     +'style="width:100%;background:var(--blue);color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px">Entendido</button>'
     +'</div>';
   document.body.appendChild(modal);
@@ -5188,6 +5211,391 @@ function buildPainelHTML(el, allItems){
 
   // Store items for filter re-renders
   window._painelItems=allItems;
+
+  // Fetch networks for painel
+  const{data:netData}=await sb.from('network_purchases').select('*');
+  window._painelNetworks=netData||[];
+  buildPainelNetworksSection(el, netData||[]);
+}
+
+function buildPainelNetworksSection(el, netPurchases){
+  const rmFrom=painelFilters.monthFrom;
+  const rmTo=painelFilters.monthTo;
+  const inRange=sm=>(!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);
+
+  const filtered=netPurchases.filter(p=>{
+    if(painelFilters.manager){
+      const client=(window._networksClients||[]).find(c=>c.id===p.user_id);
+      if(!client||client.manager_name!==painelFilters.manager) return false;
+    }
+    return inRange(p.month);
+  });
+
+  if(!filtered.length) return;
+
+  const totalNetworks=filtered.reduce((s,p)=>s+Number(p.total_value||p.qty*p.unit_price||0),0);
+  const byDealer={};
+  filtered.forEach(p=>{
+    const d=p.client_name||'—';
+    if(!byDealer[d])byDealer[d]=0;
+    byDealer[d]+=Number(p.total_value||p.qty*p.unit_price||0);
+  });
+  const maxD=Math.max(...Object.values(byDealer))||1;
+  const fmtV=v=>'USD '+Number(v||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  const COLORS=['#185FA5','#3A8C4C','#D97706','#991B1B','#5B2D99','#0A7A8C','#854F0B'];
+
+  const netDiv=document.createElement('div');
+  netDiv.style.cssText='background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-top:16px';
+  netDiv.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <p style="font-size:12px;font-weight:700;color:var(--t1)">📡 Networks — Sinais PPP no período</p>
+      <span style="font-size:14px;font-weight:800;color:#185FA5">${fmtV(totalNetworks)}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <p style="font-size:10px;font-weight:600;color:var(--tm);margin-bottom:8px;text-transform:uppercase">Por dealer</p>
+        ${Object.entries(byDealer).sort((a,b)=>b[1]-a[1]).map(([d,v],i)=>`
+          <div style="margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+              <span style="font-size:11px;font-weight:500">${d}</span>
+              <span style="font-size:11px;font-weight:700;color:${COLORS[i%COLORS.length]}">${fmtV(v)}</span>
+            </div>
+            <div style="background:#F3F4F6;border-radius:4px;height:6px">
+              <div style="background:${COLORS[i%COLORS.length]};height:100%;width:${Math.round(v/maxD*100)}%;border-radius:4px"></div>
+            </div>
+          </div>`).join('')}
+      </div>
+      <div>
+        <p style="font-size:10px;font-weight:600;color:var(--tm);margin-bottom:8px;text-transform:uppercase">Detalhe por PN</p>
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead><tr style="background:var(--g100)">
+            <th style="padding:4px 6px;text-align:left;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2)">PN</th>
+            <th style="padding:4px 6px;text-align:left;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2)">Dealer</th>
+            <th style="padding:4px 6px;text-align:center;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2)">Qty</th>
+            <th style="padding:4px 6px;text-align:right;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2)">Total</th>
+          </tr></thead>
+          <tbody>
+            ${filtered.sort((a,b)=>Number(b.total_value||0)-Number(a.total_value||0)).slice(0,15).map((p,i)=>`
+              <tr style="background:${i%2===0?'#fff':'#FAFBFC'}">
+                <td style="padding:4px 6px;font-family:'JetBrains Mono',monospace;font-weight:600">${p.pn}</td>
+                <td style="padding:4px 6px;font-size:10px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.client_name||'—'}</td>
+                <td style="padding:4px 6px;text-align:center">${p.qty}</td>
+                <td style="padding:4px 6px;text-align:right;font-weight:600;color:#185FA5">USD ${Number(p.total_value||p.qty*p.unit_price||0).toFixed(0)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  el.querySelector('div')?.appendChild(netDiv);
+
+// ═══════════════════════════════════════════════════════════
+// NETWORKS TAB
+// ═══════════════════════════════════════════════════════════
+async function renderNetworksTab(el){
+  el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando Networks…</div></div>';
+
+  const year=new Date().getFullYear();
+  const curMonth=new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0');
+
+  const[clientsRes,purchasesRes,targetsRes,partsRes]=await Promise.all([
+    sb.from('user_profiles').select('id,full_name,manager_name').eq('is_admin',false).neq('role','salesops').order('full_name'),
+    sb.from('network_purchases').select('*').order('month',{ascending:false}),
+    sb.from('targets').select('user_id,target_networks_usd').eq('year',year),
+    sb.from('parts').select('pn,description,latam_scheduled').eq('seg','NETWORKS').order('pn')
+  ]);
+
+  const clients=clientsRes.data||[];
+  const purchases=purchasesRes.data||[];
+  const targetMap={};(targetsRes.data||[]).forEach(t=>targetMap[t.user_id]=Number(t.target_networks_usd||0));
+  const networkParts=partsRes.data||[];
+  const pnPriceMap={};networkParts.forEach(p=>{pnPriceMap[p.pn]={price:Number(p.latam_scheduled||0),desc:p.description};});
+
+  // Summary by client (annual)
+  const clientSummary={};
+  clients.forEach(c=>{clientSummary[c.id]={name:c.full_name,manager:c.manager_name,target:targetMap[c.id]||0,total:0,months:{}};});
+  purchases.forEach(p=>{
+    if(!clientSummary[p.user_id]) clientSummary[p.user_id]={name:p.client_name||'—',manager:'',target:0,total:0,months:{}};
+    clientSummary[p.user_id].total+=Number(p.total_value||p.qty*p.unit_price||0);
+    const m=p.month;
+    if(!clientSummary[p.user_id].months[m]) clientSummary[p.user_id].months[m]=0;
+    clientSummary[p.user_id].months[m]+=Number(p.total_value||p.qty*p.unit_price||0);
+  });
+
+  const fmtV=v=>'USD '+Number(v||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  const totalTarget=Object.values(clientSummary).reduce((s,c)=>s+c.target,0);
+  const totalActual=Object.values(clientSummary).reduce((s,c)=>s+c.total,0);
+  const pct=totalTarget>0?Math.round(totalActual/totalTarget*100):0;
+
+  el.innerHTML=`
+  <div style="max-width:1200px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <div>
+        <h1 class="page-title" style="margin-bottom:2px">📡 Networks — Sinais PPP</h1>
+        <p style="font-size:12px;color:var(--tm)">Compras de sinais TopNET Live e SkyBridge · FY${year}</p>
+      </div>
+      <button onclick="openNetworksPurchaseModal()" style="padding:8px 16px;background:#001423;color:#fff;border:none;border-radius:var(--r-md);font-size:13px;font-weight:600;cursor:pointer">+ Registrar compras</button>
+    </div>
+
+    <!-- KPI bar -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:20px">
+      ${[
+        {icon:'🎯',label:'Meta anual total',val:fmtV(totalTarget),color:'#185FA5'},
+        {icon:'✅',label:'Realizado FY'+year,val:fmtV(totalActual),color:'#166534'},
+        {icon:'📊',label:'Atingimento',val:pct+'%',color:pct>=100?'#166534':pct>=70?'#D97706':'#C0392B'},
+        {icon:'📋',label:'Faltam',val:fmtV(Math.max(0,totalTarget-totalActual)),color:'#991B1B'},
+      ].map(k=>`<div style="background:#fff;border:1px solid var(--border);border-left:3px solid ${k.color};border-radius:var(--r-md);padding:12px 14px">
+        <div style="font-size:16px;margin-bottom:4px">${k.icon}</div>
+        <p style="font-size:9px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${k.label}</p>
+        <p style="font-size:15px;font-weight:800;color:${k.color}">${k.val}</p>
+      </div>`).join('')}
+    </div>
+
+    <!-- Per-client performance -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:20px">
+      <p style="font-size:12px;font-weight:700;margin-bottom:12px">🏢 Desempenho por dealer — FY${year}</p>
+      ${Object.entries(clientSummary).filter(([,c])=>c.target>0||c.total>0).sort((a,b)=>b[1].total-a[1].total).map(([id,c])=>{
+        const p2=c.target>0?Math.min(100,Math.round(c.total/c.target*100)):0;
+        const color=p2>=100?'#3A8C4C':p2>=70?'#D97706':'#C0392B';
+        return `<div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+            <div>
+              <span style="font-size:12px;font-weight:600;color:var(--t1)">${c.name}</span>
+              ${c.manager?`<span style="font-size:10px;color:var(--tm);margin-left:6px">${c.manager}</span>`:''}
+            </div>
+            <div style="text-align:right">
+              <span style="font-size:11px;font-weight:700;color:${color}">${fmtV(c.total)}</span>
+              <span style="font-size:10px;color:var(--tm)"> / ${fmtV(c.target)} (${p2}%)</span>
+            </div>
+          </div>
+          <div style="background:#F3F4F6;border-radius:4px;height:8px;overflow:hidden">
+            <div style="background:${color};height:100%;width:${p2}%;border-radius:4px;transition:width .3s"></div>
+          </div>
+        </div>`;
+      }).join('')||'<p style="font-size:12px;color:var(--tm);text-align:center;padding:16px">Nenhum dado ainda.</p>'}
+    </div>
+
+    <!-- Purchase history -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <p style="font-size:12px;font-weight:700">📋 Histórico de compras</p>
+        <div style="display:flex;gap:8px">
+          <select id="net-filter-client" onchange="filterNetworksPurchases()" style="padding:5px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
+            <option value="">Todos os dealers</option>
+            ${clients.map(c=>`<option value="${c.id}">${c.full_name}</option>`).join('')}
+          </select>
+          <input type="month" id="net-filter-month" onchange="filterNetworksPurchases()" style="padding:5px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px" placeholder="Mês"/>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px" id="net-purchases-table">
+          <thead><tr style="background:var(--g100)">
+            <th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2);font-weight:600">Mês</th>
+            <th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2);font-weight:600">Dealer</th>
+            <th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2);font-weight:600">PN</th>
+            <th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2);font-weight:600">Descrição</th>
+            <th style="padding:6px 8px;text-align:center;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2);font-weight:600">Qty</th>
+            <th style="padding:6px 8px;text-align:right;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2);font-weight:600">Preço unit.</th>
+            <th style="padding:6px 8px;text-align:right;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2);font-weight:600">Total</th>
+            <th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);font-size:10px;color:var(--t2);font-weight:600">Obs.</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border)"></th>
+          </tr></thead>
+          <tbody>
+            ${purchases.length===0?'<tr><td colspan="9" style="padding:20px;text-align:center;color:var(--tm)">Nenhuma compra registrada ainda.</td></tr>':
+              purchases.map((p,i)=>`<tr id="net-row-${p.id}" style="background:${i%2===0?'#fff':'#FAFBFC'}">
+                <td style="padding:6px 8px;font-family:'JetBrains Mono',monospace;font-size:11px">${p.month}</td>
+                <td style="padding:6px 8px;font-size:11px;font-weight:500">${p.client_name||'—'}</td>
+                <td style="padding:6px 8px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600">${p.pn}</td>
+                <td style="padding:6px 8px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${p.description||''}">${p.description||'—'}</td>
+                <td style="padding:6px 8px;text-align:center;font-weight:600">${p.qty}</td>
+                <td style="padding:6px 8px;text-align:right;color:var(--tm)">USD ${Number(p.unit_price).toFixed(2)}</td>
+                <td style="padding:6px 8px;text-align:right;font-weight:700;color:#185FA5">USD ${Number(p.total_value||p.qty*p.unit_price).toFixed(2)}</td>
+                <td style="padding:6px 8px;font-size:11px;color:var(--tm)">${p.notes||''}</td>
+                <td style="padding:6px 8px">
+                  <button onclick="deleteNetworkPurchase('${p.id}')" style="background:#FEE2E2;color:#991B1B;border:none;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer">🗑</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>`;
+
+  // Store data for filter
+  window._networksPurchases=purchases;
+  window._networksClients=clients;
+  window._networksParts=networkParts;
+  window._networksPnMap=pnPriceMap;
+}
+
+function filterNetworksPurchases(){
+  const clientFilter=document.getElementById('net-filter-client')?.value||'';
+  const monthFilter=document.getElementById('net-filter-month')?.value||'';
+  const rows=document.querySelectorAll('#net-purchases-table tbody tr[id^="net-row-"]');
+  const purchases=window._networksPurchases||[];
+  purchases.forEach(p=>{
+    const row=document.getElementById('net-row-'+p.id);
+    if(!row)return;
+    const matchClient=!clientFilter||p.user_id===clientFilter;
+    const matchMonth=!monthFilter||p.month===monthFilter;
+    row.style.display=(matchClient&&matchMonth)?'':'none';
+  });
+}
+
+function openNetworksPurchaseModal(){
+  const clients=window._networksClients||[];
+  const pnMap=window._networksPnMap||{};
+  const networkParts=window._networksParts||[];
+  const curMonth=new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0');
+  const modal=document.createElement('div');
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML=`<div style="background:#fff;border-radius:14px;width:90%;max-width:560px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25);max-height:90vh;overflow-y:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="font-size:16px;font-weight:700">📡 Registrar compras de Networks</h3>
+      <button onclick="this.closest('[style*=fixed]').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--tm)">×</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div>
+        <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Dealer *</label>
+        <select id="net-modal-client" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px">
+          <option value="">— Selecione —</option>
+          ${clients.map(c=>`<option value="${c.id}" data-name="${c.full_name}">${c.full_name}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Mês de referência *</label>
+        <input type="month" id="net-modal-month" value="${curMonth}" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;box-sizing:border-box"/>
+      </div>
+    </div>
+    <div id="net-modal-lines">
+      <div class="net-line" style="display:grid;grid-template-columns:2fr 80px 100px auto;gap:8px;align-items:end;margin-bottom:8px">
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">PN</label>
+          <select onchange="fillNetworkPN(this)" style="width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
+            <option value="">— Selecione o PN —</option>
+            ${networkParts.map(p=>`<option value="${p.pn}" data-price="${p.latam_scheduled||0}" data-desc="${p.description||''}">${p.pn} — ${(p.description||'').slice(0,40)}</option>`).join('')}
+            <option value="__manual__">Outro PN (manual)</option>
+          </select>
+          <input type="text" placeholder="PN manual" style="display:none;width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;margin-top:4px;box-sizing:border-box" class="net-pn-manual"/>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Qty</label>
+          <input type="number" min="1" value="1" class="net-qty" onchange="updateNetLineTotal(this)" style="width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;box-sizing:border-box"/>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Preço unit. USD</label>
+          <input type="number" min="0" step="0.01" class="net-price" onchange="updateNetLineTotal(this)" style="width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;box-sizing:border-box"/>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">Total</label>
+          <p class="net-total" style="font-size:13px;font-weight:700;color:#185FA5;padding-top:8px">USD 0</p>
+        </div>
+      </div>
+    </div>
+    <button onclick="addNetworkLine()" style="font-size:12px;padding:5px 12px;border:1px dashed var(--border-md);border-radius:var(--r-md);background:#fff;cursor:pointer;color:var(--t2);margin-bottom:12px">+ Adicionar linha</button>
+    <div>
+      <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Observações</label>
+      <input type="text" id="net-modal-notes" placeholder="Ex: Carga mensal de sinais" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;box-sizing:border-box"/>
+    </div>
+    <div style="margin-top:16px;padding:10px;background:#EEF6FF;border-radius:var(--r-md);display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:12px;font-weight:600;color:#185FA5">Total do lançamento:</span>
+      <span id="net-modal-total" style="font-size:16px;font-weight:800;color:#185FA5">USD 0</span>
+    </div>
+    <button onclick="saveNetworkPurchases()" style="width:100%;margin-top:14px;background:#001423;color:#fff;border:none;border-radius:var(--r-md);padding:12px;font-size:14px;font-weight:600;cursor:pointer">💾 Salvar compras</button>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click',e=>{if(e.target===modal)modal.remove();});
+}
+
+function fillNetworkPN(sel){
+  const line=sel.closest('.net-line');
+  const manualInput=line.querySelector('.net-pn-manual');
+  const priceInput=line.querySelector('.net-price');
+  if(sel.value==='__manual__'){
+    manualInput.style.display='block';
+    priceInput.value='';
+  } else {
+    manualInput.style.display='none';
+    const price=sel.selectedOptions[0]?.dataset.price||0;
+    priceInput.value=Number(price).toFixed(2);
+    updateNetLineTotal(priceInput);
+  }
+}
+
+function updateNetLineTotal(inp){
+  const line=inp.closest('.net-line');
+  const qty=parseFloat(line.querySelector('.net-qty').value||0);
+  const price=parseFloat(line.querySelector('.net-price').value||0);
+  const total=qty*price;
+  line.querySelector('.net-total').textContent='USD '+total.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  // Update grand total
+  let grand=0;
+  document.querySelectorAll('.net-line').forEach(l=>{
+    const q=parseFloat(l.querySelector('.net-qty')?.value||0);
+    const p=parseFloat(l.querySelector('.net-price')?.value||0);
+    grand+=q*p;
+  });
+  const tot=document.getElementById('net-modal-total');
+  if(tot) tot.textContent='USD '+grand.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+function addNetworkLine(){
+  const networkParts=window._networksParts||[];
+  const container=document.getElementById('net-modal-lines');
+  if(!container)return;
+  const div=document.createElement('div');
+  div.className='net-line';
+  div.style.cssText='display:grid;grid-template-columns:2fr 80px 100px auto;gap:8px;align-items:end;margin-bottom:8px';
+  div.innerHTML=`<div>
+    <select onchange="fillNetworkPN(this)" style="width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
+      <option value="">— Selecione o PN —</option>
+      ${networkParts.map(p=>`<option value="${p.pn}" data-price="${p.latam_scheduled||0}" data-desc="${p.description||''}">${p.pn} — ${(p.description||'').slice(0,40)}</option>`).join('')}
+      <option value="__manual__">Outro PN (manual)</option>
+    </select>
+    <input type="text" placeholder="PN manual" style="display:none;width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;margin-top:4px;box-sizing:border-box" class="net-pn-manual"/>
+  </div>
+  <div><input type="number" min="1" value="1" class="net-qty" onchange="updateNetLineTotal(this)" style="width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;box-sizing:border-box"/></div>
+  <div><input type="number" min="0" step="0.01" class="net-price" onchange="updateNetLineTotal(this)" style="width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;box-sizing:border-box"/></div>
+  <div style="display:flex;align-items:center;gap:6px">
+    <p class="net-total" style="font-size:13px;font-weight:700;color:#185FA5;padding-top:8px">USD 0</p>
+    <button onclick="this.closest('.net-line').remove();updateNetLineTotal(document.querySelector('.net-qty'))" style="background:#FEE2E2;color:#991B1B;border:none;border-radius:4px;padding:3px 7px;font-size:11px;cursor:pointer;margin-top:6px">✕</button>
+  </div>`;
+  container.appendChild(div);
+}
+
+async function saveNetworkPurchases(){
+  const clientSel=document.getElementById('net-modal-client');
+  const userId=clientSel?.value;
+  const clientName=clientSel?.selectedOptions[0]?.dataset.name||'';
+  const month=document.getElementById('net-modal-month')?.value;
+  const notes=document.getElementById('net-modal-notes')?.value||'';
+  if(!userId||!month){alert('Selecione o dealer e o mês.');return;}
+
+  const lines=Array.from(document.querySelectorAll('.net-line'));
+  const rows=[];
+  for(const line of lines){
+    const sel=line.querySelector('select');
+    const manualInput=line.querySelector('.net-pn-manual');
+    const pn=sel?.value==='__manual__'?(manualInput?.value||'').trim():sel?.value||'';
+    const desc=sel?.value==='__manual__'?manualInput?.value:(sel?.selectedOptions[0]?.dataset.desc||'');
+    const qty=parseFloat(line.querySelector('.net-qty')?.value||0);
+    const price=parseFloat(line.querySelector('.net-price')?.value||0);
+    if(!pn||qty<=0){continue;}
+    rows.push({user_id:userId,client_name:clientName,pn,description:desc,month,qty,unit_price:price,notes,created_by:cProfile?.full_name||'Admin'});
+  }
+  if(!rows.length){alert('Adicione pelo menos uma linha com PN e quantidade.');return;}
+
+  const{error}=await sb.from('network_purchases').insert(rows);
+  if(error){alert('Erro: '+error.message);return;}
+  document.querySelector('[style*="fixed"]')?.remove();
+  await renderNetworksTab(document.getElementById('admin-content'));
+}
+
+async function deleteNetworkPurchase(id){
+  if(!confirm('Excluir este registro?'))return;
+  const{error}=await sb.from('network_purchases').delete().eq('id',id);
+  if(error){alert('Erro: '+error.message);return;}
+  document.getElementById('net-row-'+id)?.remove();
+  window._networksPurchases=(window._networksPurchases||[]).filter(p=>p.id!==id);
 }
 
 const fmt=v=>v==null?'—':'USD '+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
