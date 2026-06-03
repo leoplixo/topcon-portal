@@ -966,6 +966,18 @@ async function afterLogin(){
     return;
   }
   cProfile=profile; cGroup=profile.client_groups;
+
+  // Pre-load managers list and client→manager map once at login
+  const[mgrsRes,profilesRes]=await Promise.all([
+    sb.from('managers').select('*').order('name'),
+    sb.from('user_profiles').select('id,manager_name').eq('is_admin',false)
+  ]);
+  window._managers=(mgrsRes.data&&mgrsRes.data.length>0)?mgrsRes.data:[
+    {id:'1',name:'Leonardo Plixo'},{id:'2',name:'Dener Jaime'},
+    {id:'3',name:'Mauricio Rosa'},{id:'4',name:'Renato Dias'}
+  ];
+  window._clientManagerMap={};
+  (profilesRes.data||[]).forEach(p=>{if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;});
   // Robust role detection
   let detectedRole = profile.role;
   if(!detectedRole || detectedRole === 'client'){
@@ -1492,22 +1504,9 @@ async function renderAdminBacklog(el){
 
   window._backlogItems=items;
 
-  // Pre-load managers if not already loaded
-  if(!window._managers){
-    const{data:mgrs}=await sb.from('managers').select('*').order('name');
-    window._managers=(mgrs&&mgrs.length>0)?mgrs:[
-      {id:'1',name:'Leonardo Plixo'},{id:'2',name:'Dener Jaime'},
-      {id:'3',name:'Mauricio Rosa'},{id:'4',name:'Renato Dias'}
-    ];
-  }
-
-  // Build client_user_id → manager_name map from user_profiles for filter fallback
-  const{data:profiles}=await sb.from('user_profiles').select('id,manager_name').eq('is_admin',false);
-  window._clientManagerMap={};
-  (profiles||[]).forEach(p=>{if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;});
   // Patch items that have client_user_id but no manager_name yet
   items.forEach(i=>{
-    if(!i.manager_name && i.client_user_id && window._clientManagerMap[i.client_user_id]){
+    if(!i.manager_name && i.client_user_id && window._clientManagerMap?.[i.client_user_id]){
       i.manager_name=window._clientManagerMap[i.client_user_id];
     }
   });
@@ -1530,20 +1529,9 @@ async function renderSalesOpsBacklog(){
     return;
   }
   window._backlogItems=items;
-  if(!window._managers){
-    const{data:mgrs}=await sb.from('managers').select('*').order('name');
-    window._managers=(mgrs&&mgrs.length>0)?mgrs:[
-      {id:'1',name:'Leonardo Plixo'},{id:'2',name:'Dener Jaime'},
-      {id:'3',name:'Mauricio Rosa'},{id:'4',name:'Renato Dias'}
-    ];
-  }
-  if(!window._clientManagerMap){
-    const{data:profiles}=await sb.from('user_profiles').select('id,manager_name').eq('is_admin',false);
-    window._clientManagerMap={};
-    (profiles||[]).forEach(p=>{if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;});
-  }
+  // Patch items that have client_user_id but no manager_name yet
   items.forEach(i=>{
-    if(!i.manager_name && i.client_user_id && window._clientManagerMap[i.client_user_id]){
+    if(!i.manager_name && i.client_user_id && window._clientManagerMap?.[i.client_user_id]){
       i.manager_name=window._clientManagerMap[i.client_user_id];
     }
   });
