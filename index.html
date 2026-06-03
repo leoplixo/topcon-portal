@@ -5304,13 +5304,13 @@ async function renderNetworksTab(el){
     sb.from('user_profiles').select('id,full_name,manager_name').eq('is_admin',false).neq('role','salesops').order('full_name'),
     sb.from('network_purchases').select('*').order('month',{ascending:false}),
     sb.from('targets').select('user_id,target_networks_usd').eq('year',year),
-    sb.from('parts').select('pn,description,latam_scheduled').eq('seg','NETWORKS').order('pn')
+    sb.from('parts').select('pn,description,latam_scheduled,seg')
   ]);
 
   const clients=clientsRes.data||[];
   const purchases=purchasesRes.data||[];
   const targetMap={};(targetsRes.data||[]).forEach(t=>targetMap[t.user_id]=Number(t.target_networks_usd||0));
-  const networkParts=partsRes.data||[];
+  const networkParts=(partsRes.data||[]).filter(p=>p.seg==='NETWORKS');
   const pnPriceMap={};networkParts.forEach(p=>{pnPriceMap[p.pn]={price:Number(p.latam_scheduled||0),desc:p.description};});
 
   // Summary by client (annual)
@@ -5445,21 +5445,21 @@ function filterNetworksPurchases(){
 }
 
 async function openNetworksPurchaseModal(){
-  const clients=window._networksClients||[];
-  let networkParts=window._networksParts||[];
 
-  // Fetch parts if not loaded yet (modal opened before visiting Networks tab)
-  if(!networkParts.length){
-    const{data}=await sb.from('parts').select('pn,description,latam_scheduled').eq('seg','NETWORKS').order('pn');
-    networkParts=data||[];
-    window._networksParts=networkParts;
-    const pnPriceMap={};networkParts.forEach(p=>{pnPriceMap[p.pn]={price:Number(p.latam_scheduled||0),desc:p.description||''};});
-    window._networksPnMap=pnPriceMap;
-  }
+  // Always fetch fresh from DB to ensure latest catalog
+  const{data:partsData}=await sb.from('parts').select('pn,description,latam_scheduled,seg');
+  const networkParts=(partsData||[]).filter(p=>p.seg==='NETWORKS');
+  window._networksParts=networkParts;
+  if(partsErr) console.error('Networks parts error:',partsErr);
+  const networkParts=partsData||[];
+  window._networksParts=networkParts;
+  const pnPriceMap={};networkParts.forEach(p=>{pnPriceMap[p.pn]={price:Number(p.latam_scheduled||0),desc:p.description||''};});
+  window._networksPnMap=pnPriceMap;
 
-  // Also fetch clients if not loaded
-  const allClients=clients.length?clients:(await sb.from('user_profiles').select('id,full_name,manager_name').eq('is_admin',false).neq('role','salesops').order('full_name')).data||[];
-  if(!clients.length) window._networksClients=allClients;
+  // Fetch clients
+  const{data:clientsData}=await sb.from('user_profiles').select('id,full_name,manager_name').eq('is_admin',false).neq('role','salesops').order('full_name');
+  const allClients=clientsData||[];
+  window._networksClients=allClients;
   const curMonth=new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0');
   const modal=document.createElement('div');
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;display:flex;align-items:center;justify-content:center';
