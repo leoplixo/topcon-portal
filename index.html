@@ -1485,7 +1485,7 @@ const CLS_COLORS={
   'Shipped':         ['#E8F5EC','#166534'],
 };
 
-let backlogFilters={client:'',pn:'',classification:'',destination:'',shipMonth:'',rddFrom:'',rddTo:'',refMonth:'',manager:''};
+let backlogFilters={client:'',pn:'',classification:'',destination:'',shipMonth:'',rddFrom:'',rddTo:'',refMonthFrom:'',refMonthTo:'',manager:''};
 
 async function renderAdminBacklog(el){
   // Expand admin page to full width for backlog
@@ -1599,47 +1599,68 @@ function renderBacklogGrid(el, items, isAdmin){
 
 
   // ── compute all metrics once ──────────────────────────────────────────────
-  const rm=backlogFilters.refMonth;
-  const rmLocalDate=rm?(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})():null;
-  const rmLabel=rmLocalDate?rmLocalDate.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'';
-  const rmShort=rmLocalDate?rmLocalDate.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}):'';
+  const rmFrom=backlogFilters.refMonthFrom;
+  const rmTo=backlogFilters.refMonthTo;
+  // rm is active when at least one end is set; use from as anchor, to as upper bound
+  const rm=rmFrom||rmTo; // any filter active?
+  const rmStart2=rmFrom?(()=>{const[y,m]=rmFrom.split('-').map(Number);return new Date(y,m-1,1);})():null;
+  const rmEndDate=rmTo?(()=>{const[y,m]=rmTo.split('-').map(Number);return new Date(y,m,0,23,59,59);})():null;
+  // For labels: show range or single month
+  const fmtMo=d=>d?d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}):'';
+  const rmLabel=rmFrom&&rmTo&&rmFrom!==rmTo
+    ?(()=>{const[y1,m1]=rmFrom.split('-').map(Number);const[y2,m2]=rmTo.split('-').map(Number);return new Date(y1,m1-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'})+' – '+new Date(y2,m2-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});})()
+    :rmFrom?(()=>{const[y,m]=rmFrom.split('-').map(Number);return new Date(y,m-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});})()
+    :rmTo?(()=>{const[y,m]=rmTo.split('-').map(Number);return new Date(y,m-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});})():'';
+  const rmShort=rmFrom&&rmTo&&rmFrom!==rmTo?fmtMo(rmStart2)+' – '+fmtMo(rmEndDate?new Date(rmTo+'-01'):null):rmLabel;
   const today=new Date(); today.setHours(0,0,0,0);
-  // Is the ref month in the past?
-  const rmEnd=rmLocalDate?new Date(rmLocalDate.getFullYear(),rmLocalDate.getMonth()+1,0,23,59,59):null;
-  const isPastMonth=rmEnd?rmEnd<today:false;
+  // Is the ENTIRE range in the past?
+  const isPastMonth=rmEndDate?rmEndDate<today:false;
+  // The "effective rm" for single-month logic compatibility
+  const rmEff=rmTo||rmFrom; // upper bound for RDD comparisons
 
-  // ── rmBase: items that "belong" to this ref month ─────────────────────────
-  // Rule: shipped in rm → always included
-  //       still open (not Shipped) → include if RDD ≤ rm OR no RDD
-  //       shipped in another month → excluded (closed in that month)
+  // ── rmBase: items that "belong" to this ref range ─────────────────────────
+  // Rule: shipped anywhere in [rmFrom..rmTo] → always included
+  //       still open (not Shipped) → include if RDD ≤ rmTo (upper bound) OR no RDD
+  //       shipped outside range → excluded
   const rmBase = rm ? filtered.filter(i=>{
-    const shippedInRm=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
-    if(shippedInRm) return true;
-    if(i.classification==='Shipped') return false; // closed in another month
-    if(!i.rdd) return true; // no RDD: include (can't know its month)
-    return i.rdd.slice(0,7)<=rm;
+    const shippedInRange=(i.backlog_shipments||[]).some(s=>{
+      const sm=(s.ship_date||'').slice(0,7);
+      return (!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);
+    });
+    if(shippedInRange) return true;
+    if(i.classification==='Shipped') return false;
+    if(!i.rdd) return true;
+    return i.rdd.slice(0,7)<=(rmTo||rmFrom);
   }) : filtered;
 
-  // Shipped in rm
+  // Shipped in range
   const shippedItems = rm
-    ? rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
+    ? rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>{
+        const sm=(s.ship_date||'').slice(0,7);
+        return (!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);
+      }))
     : filtered.filter(i=>i.classification==='Shipped');
   const shippedVal = rm
     ? shippedItems.reduce((s,i)=>{
-        const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);
+        const q=(i.backlog_shipments||[])
+          .filter(s=>{const sm=(s.ship_date||'').slice(0,7);return(!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);})
+          .reduce((a,s)=>a+Number(s.qty_shipped||0),0);
         return s+q*Number(i.unit_price||0);
       },0)
     : shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
 
-  // For PAST months: "open" = items that HAD RDD in rm but didn't ship
+  // For PAST range: "open" = items with RDD in [rmFrom..rmTo] that didn't ship in range
   const pastNativeOpen = isPastMonth
-    ? rmBase.filter(i=>i.classification!=='Shipped' && (i.rdd||'').slice(0,7)===rm && !(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
+    ? rmBase.filter(i=>i.classification!=='Shipped'
+        && (i.rdd||'')>=(rmFrom||'')
+        && (i.rdd||'').slice(0,7)<=(rmTo||rmFrom||'')
+        && !(i.backlog_shipments||[]).some(s=>{const sm=(s.ship_date||'').slice(0,7);return(!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);}))
     : [];
 
-  // For CURRENT/FUTURE months: open = everything in rmBase not shipped in rm
+  // For CURRENT/FUTURE: open = everything in rmBase not shipped in range
   const openItems = isPastMonth
     ? pastNativeOpen
-    : rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
+    : rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>{const sm=(s.ship_date||'').slice(0,7);return(!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);}));
 
   // ── Mutually exclusive buckets — each item falls in exactly ONE ───────────
   // Priority: unclassified → own bucket regardless of signal
@@ -1757,13 +1778,17 @@ function renderBacklogGrid(el, items, isAdmin){
     +destinations.map(d=>'<option value="'+d+'"'+(backlogFilters.destination===d?' selected':'')+'>'+d+'</option>').join('')
     +'</select>'
     +(isAdmin?'<select id="bl-filter-ship" oninput="backlogFilters.shipMonth=this.value;renderBacklogGrid(document.getElementById(\'admin-content\')||document.querySelector(\'[id*=content]\'),window._backlogItems,true)" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px"><option value="">Embarca no mês?</option><option value="yes"'+(backlogFilters.shipMonth==='yes'?' selected':'')+'>✅ Sim</option><option value="no"'+(backlogFilters.shipMonth==='no'?' selected':'')+'>❌ Não</option></select>':'')
-    // Mês ref — principal filtro temporal, substitui RDD de/até na barra
+    // Mês ref — range de/até
     +'<div style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#EEF6FF;border:1px solid #93C5FD;border-radius:var(--r-md)">'
     +'<label style="font-size:11px;font-weight:700;color:#1D4ED8;white-space:nowrap">📆 Mês ref.:</label>'
-    +'<input type="month" id="bl-filter-refmonth" value="'+(backlogFilters.refMonth||'')+'"'
-    +' onchange="backlogFilters.refMonth=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
-    +' style="padding:4px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff">'
-    +'<button onclick="backlogFilters.refMonth=\'\';document.getElementById(\'bl-filter-refmonth\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:2px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);cursor:pointer;background:#fff;color:#1D4ED8;line-height:1">✕</button>'
+    +'<input type="month" id="bl-filter-refmonth-from" value="'+(backlogFilters.refMonthFrom||'')+'"'
+    +' onchange="backlogFilters.refMonthFrom=this.value;if(!backlogFilters.refMonthTo||this.value>backlogFilters.refMonthTo){backlogFilters.refMonthTo=this.value;document.getElementById(\'bl-filter-refmonth-to\').value=this.value;}renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
+    +' style="padding:3px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff">'
+    +'<span style="font-size:11px;color:#1D4ED8;font-weight:600;padding:0 2px">até</span>'
+    +'<input type="month" id="bl-filter-refmonth-to" value="'+(backlogFilters.refMonthTo||'')+'"'
+    +' onchange="backlogFilters.refMonthTo=this.value;if(!backlogFilters.refMonthFrom||this.value<backlogFilters.refMonthFrom){backlogFilters.refMonthFrom=this.value;document.getElementById(\'bl-filter-refmonth-from\').value=this.value;}renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')"'
+    +' style="padding:3px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff">'
+    +'<button onclick="backlogFilters.refMonthFrom=\'\';backlogFilters.refMonthTo=\'\';document.getElementById(\'bl-filter-refmonth-from\').value=\'\';document.getElementById(\'bl-filter-refmonth-to\').value=\'\';renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\'),window._backlogItems,'+isAdmin+')" style="font-size:11px;padding:2px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);cursor:pointer;background:#fff;color:#1D4ED8;line-height:1">✕</button>'
     +'</div>'
     +'</div>'
 
@@ -1787,8 +1812,12 @@ function renderBacklogGrid(el, items, isAdmin){
     +'</tr></thead><tbody>'
 
     +(()=>{
-      const rm=backlogFilters.refMonth; // e.g. "2026-06"
+      const rmFrom=backlogFilters.refMonthFrom;
+      const rmTo=backlogFilters.refMonthTo;
+      const rm=rmFrom||rmTo;
+      const rmEff=rmTo||rmFrom; // upper bound
       const colCount=['Cliente','Pedido','PN','Descrição','RDD','Sales Doc','Qtd','Emb.','Aberto',(isAdmin||isAdmin==='salesops')?'Preço':'',(isAdmin||isAdmin==='salesops')?'Valor aberto':'',(isAdmin||isAdmin==='salesops')?'Total linha':'','Embarcado em','Prev. Prontidão',isAdmin===true?'Embarca?':isAdmin==='salesops'?'Embarca?':'','Classificação','Coment.','Ações'].filter(Boolean).length;
+      const inRange=sm=>(!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);
 
       // helper: build a section divider row
       const divRow=(icon,label,sublabel,bg,tc)=>
@@ -1890,34 +1919,33 @@ function renderBacklogGrid(el, items, isAdmin){
         return filtered.map((item,idx)=>buildRow(item,idx,0)).join('');
       }
 
-      // ── WITH ref month: split into 3 groups ──────────────────────────
-      const rmStart=(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})();
-      const rmEnd=new Date(rmStart.getFullYear(),rmStart.getMonth()+1,0,23,59,59);
-      const isPast=rmEnd<today;
+      // ── WITH ref range: split into groups ──────────────────────────
+      const rmStart=(()=>{const ref=rmFrom||rmTo;const[y,m]=ref.split('-').map(Number);return new Date(y,m-1,1);})();
+      const rmEndLocal=(()=>{const ref=rmTo||rmFrom;const[y,m]=ref.split('-').map(Number);return new Date(y,m,0,23,59,59);})();
+      const isPast=rmEndLocal<today;
 
-      // Group 1: Shipped in rm (ship_date in rm)
+      // Group 1: Shipped in range
       const shippedInRm=filtered.filter(i=>
-        (i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm)
+        (i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7)))
       );
 
-      // Group 2: RDD = rm exactly, not shipped in rm, not closed
+      // Group 2: RDD in range, not shipped in range, not closed
       const nativeOpen=filtered.filter(i=>{
         const rddMk=(i.rdd||'').slice(0,7);
-        const shippedThisMonth=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
-        return rddMk===rm && !shippedThisMonth && i.classification!=='Shipped';
+        const shippedThisRange=(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7)));
+        return rddMk>=(rmFrom||rddMk) && rddMk<=(rmTo||rddMk) && !shippedThisRange && i.classification!=='Shipped';
       });
 
-      // Group 3: Overdue — RDD < rm, not shipped, not closed
-      // Uses filtered (all items passing user filters) so availability_date doesn't affect inclusion
+      // Group 3: Overdue — RDD < rmFrom, not shipped in range, not closed
       const overdue=filtered.filter(i=>{
         const rddMk=(i.rdd||'').slice(0,7);
-        return rddMk && rddMk<rm && i.classification!=='Shipped'
-          && !(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
+        return rddMk && rddMk<(rmFrom||rmTo) && i.classification!=='Shipped'
+          && !(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7)));
       });
 
-      // Group 4: No RDD set, not shipped — show at bottom for current/future months
+      // Group 4: No RDD set, not shipped in range
       const noRddItems=filtered.filter(i=>!i.rdd&&i.classification!=='Shipped'
-        &&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
+        &&!(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))));
 
       // For past months: toggle "como poderia ter sido"
       // Store toggle state on window
@@ -1950,7 +1978,7 @@ function renderBacklogGrid(el, items, isAdmin){
             rows+=divRow('🔴','Atrasadas (RDD anterior) — não embarcadas',overdue.length+' linha(s)','#FFF1F0','#C0392B');
             overdue.forEach((item,i)=>{
               const rddDate=item.rdd?new Date(item.rdd+'T12:00:00'):null;
-              const delay=rddDate?Math.max(0,Math.round((rmEnd-rddDate)/(1000*60*60*24))):0;
+              const delay=rddDate?Math.max(0,Math.round((rmEndLocal-rddDate)/(1000*60*60*24))):0;
               rows+=buildRow(item,i,delay);
             });
           }
@@ -2378,11 +2406,13 @@ async function importBacklogCSV(input){
 function refreshBacklogKPIs(){
   const items=window._backlogItems||[];
   const f=backlogFilters;
-  const rm=f.refMonth;
-  const rmLocalDate=rm?(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})():null;
-  const rmEnd=rmLocalDate?new Date(rmLocalDate.getFullYear(),rmLocalDate.getMonth()+1,0,23,59,59):null;
+  const rmFrom=f.refMonthFrom;
+  const rmTo=f.refMonthTo;
+  const rm=rmFrom||rmTo;
+  const inRange=sm=>(!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);
+  const rmEndDate=rmTo?(()=>{const[y,m]=rmTo.split('-').map(Number);return new Date(y,m,0,23,59,59);})():null;
   const today=new Date();today.setHours(0,0,0,0);
-  const isPastMonth=rmEnd?rmEnd<today:false;
+  const isPastMonth=rmEndDate?rmEndDate<today:false;
 
   let filtered=items.filter(item=>{
     if(f.client&&!item.client_name.toLowerCase().includes(f.client.toLowerCase()))return false;
@@ -2397,20 +2427,20 @@ function refreshBacklogKPIs(){
   });
 
   const rmBase=rm?filtered.filter(i=>{
-    const shippedInRm=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
-    if(shippedInRm)return true;
+    const shippedInRange=(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7)));
+    if(shippedInRange)return true;
     if(i.classification==='Shipped')return false;
     if(!i.rdd)return true;
-    return i.rdd.slice(0,7)<=rm;
+    return i.rdd.slice(0,7)<=(rmTo||rmFrom);
   }):filtered;
 
   const shippedItems=rm
-    ?rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
+    ?rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))))
     :filtered.filter(i=>i.classification==='Shipped');
 
   const openItems=isPastMonth
-    ?rmBase.filter(i=>i.classification!=='Shipped'&&(i.rdd||'').slice(0,7)===rm&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
-    :rm?rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
+    ?rmBase.filter(i=>i.classification!=='Shipped'&&(i.rdd||'').slice(0,7)>=(rmFrom||'')&&(i.rdd||'').slice(0,7)<=(rmTo||rmFrom||'')&&!(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))))
+    :rm?rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))))
     :filtered.filter(i=>i.classification!=='Shipped');
 
   const classifiedOpen=openItems.filter(i=>i.classification&&i.classification!=='');
@@ -2421,7 +2451,7 @@ function refreshBacklogKPIs(){
 
   const openVal=openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const shippedVal=rm
-    ?shippedItems.reduce((s,i)=>{const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);return s+q*Number(i.unit_price||0);},0)
+    ?shippedItems.reduce((s,i)=>{const q=(i.backlog_shipments||[]).filter(s=>inRange((s.ship_date||'').slice(0,7))).reduce((a,s)=>a+Number(s.qty_shipped||0),0);return s+q*Number(i.unit_price||0);},0)
     :shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
   const forecastVal=forecastItems.reduce((s,i)=>{const o=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));const q=i.partial_qty>0?Math.min(Number(i.partial_qty),o):o;return s+q*Number(i.unit_price||0);},0);
   const perdidoVal=perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
@@ -4790,7 +4820,7 @@ async function downloadCatalogCSV(){
 // ═══════════════════════════════════════════════════════════
 // PAINEL MENSAL
 // ═══════════════════════════════════════════════════════════
-let painelFilters={month:'', manager:'', destination:''};
+let painelFilters={monthFrom:'', monthTo:'', manager:'', destination:''};
 
 async function renderPainelMensal(el){
   const pw=document.getElementById('admin-page-wrap');
@@ -4812,21 +4842,28 @@ async function renderPainelMensal(el){
   }
 
   // Auto-set month to current if empty
-  if(!painelFilters.month){
+  if(!painelFilters.monthFrom){
     const now=new Date();
-    painelFilters.month=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    const cur=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    painelFilters.monthFrom=cur;
+    painelFilters.monthTo=cur;
   }
 
   buildPainelHTML(el, items||[]);
 }
 
 function buildPainelHTML(el, allItems){
-  const rm=painelFilters.month;
-  const rmDate=rm?(()=>{const[y,m]=rm.split('-').map(Number);return new Date(y,m-1,1);})():null;
-  const rmLabel=rmDate?rmDate.toLocaleDateString('pt-BR',{month:'long',year:'numeric'}):'—';
-  const rmEnd=rmDate?new Date(rmDate.getFullYear(),rmDate.getMonth()+1,0,23,59,59):null;
+  const rmFrom=painelFilters.monthFrom;
+  const rmTo=painelFilters.monthTo;
+  const rm=rmFrom||rmTo;
+  const inRange=sm=>(!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);
+  const rmDate=rmFrom?(()=>{const[y,m]=rmFrom.split('-').map(Number);return new Date(y,m-1,1);})():null;
+  const rmEndDate=rmTo?(()=>{const[y,m]=rmTo.split('-').map(Number);return new Date(y,m,0,23,59,59);})():null;
+  const rmLabel=rmFrom&&rmTo&&rmFrom!==rmTo
+    ?(()=>{const[y1,m1]=rmFrom.split('-').map(Number);const[y2,m2]=rmTo.split('-').map(Number);return new Date(y1,m1-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'})+' – '+new Date(y2,m2-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});})()
+    :rmFrom?(()=>{const[y,m]=rmFrom.split('-').map(Number);return new Date(y,m-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});})():'—';
   const today=new Date();today.setHours(0,0,0,0);
-  const isPast=rmEnd&&rmEnd<today;
+  const isPast=rmEndDate?rmEndDate<today:false;
 
   // Get filter options
   const managers=[...new Set(allItems.map(i=>i.manager_name).filter(Boolean))].sort();
@@ -4839,26 +4876,26 @@ function buildPainelHTML(el, allItems){
     return true;
   });
 
-  // Base for month: shipped in rm OR (open with RDD <= rm)
+  // Base for range: shipped in range OR (open with RDD <= rmTo)
   const rmBase=rm?items.filter(i=>{
-    const shippedInRm=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
-    if(shippedInRm)return true;
+    const shippedInRange=(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7)));
+    if(shippedInRange)return true;
     if(i.classification==='Shipped')return false;
     if(!i.rdd)return true;
-    return i.rdd.slice(0,7)<=rm;
+    return i.rdd.slice(0,7)<=(rmTo||rmFrom);
   }):items;
 
-  // Shipped in rm
-  const shippedItems=rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
+  // Shipped in range
+  const shippedItems=rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))));
   const shippedVal=shippedItems.reduce((s,i)=>{
-    const q=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0);
+    const q=(i.backlog_shipments||[]).filter(s=>inRange((s.ship_date||'').slice(0,7))).reduce((a,s)=>a+Number(s.qty_shipped||0),0);
     return s+q*Number(i.unit_price||0);
   },0);
 
   // Open items
   const openItems=isPast
-    ? rmBase.filter(i=>i.classification!=='Shipped'&&(i.rdd||'').slice(0,7)===rm&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm))
-    : rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
+    ? rmBase.filter(i=>i.classification!=='Shipped'&&(i.rdd||'').slice(0,7)>=(rmFrom||'')&&(i.rdd||'').slice(0,7)<=(rmTo||rmFrom||'')&&!(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))))
+    : rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))));
 
   const classifiedOpen=openItems.filter(i=>i.classification&&i.classification!=='');
   const forecastItems=isPast?[]:classifiedOpen.filter(i=>i.will_ship_month===true);
@@ -4887,7 +4924,7 @@ function buildPainelHTML(el, allItems){
   rmBase.forEach(i=>{
     const d=i.client_name||'—';
     if(!dealerMap[d])dealerMap[d]={shipped:0,forecast:0,lost:0,open:0};
-    const shVal=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0)*Number(i.unit_price||0);
+    const shVal=(i.backlog_shipments||[]).filter(s=>inRange((s.ship_date||'').slice(0,7))).reduce((a,s)=>a+Number(s.qty_shipped||0),0)*Number(i.unit_price||0);
     const oVal=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
     dealerMap[d].shipped+=shVal;
     if(i.will_ship_month===true&&i.classification!=='Shipped')dealerMap[d].forecast+=oVal;
@@ -4901,7 +4938,7 @@ function buildPainelHTML(el, allItems){
   rmBase.forEach(i=>{
     const m=i.manager_name||'Sem gerente';
     if(!mgrMap[m])mgrMap[m]={shipped:0,open:0,lost:0};
-    const shVal=(i.backlog_shipments||[]).filter(s=>(s.ship_date||'').slice(0,7)===rm).reduce((a,s)=>a+Number(s.qty_shipped||0),0)*Number(i.unit_price||0);
+    const shVal=(i.backlog_shipments||[]).filter(s=>inRange((s.ship_date||'').slice(0,7))).reduce((a,s)=>a+Number(s.qty_shipped||0),0)*Number(i.unit_price||0);
     const oVal=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
     mgrMap[m].shipped+=shVal;
     if(i.will_ship_month===false)mgrMap[m].lost+=oVal;
@@ -4939,9 +4976,13 @@ function buildPainelHTML(el, allItems){
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <div style="display:flex;align-items:center;gap:5px;padding:5px 10px;background:#EEF6FF;border:1px solid #93C5FD;border-radius:var(--r-md)">
           <label style="font-size:11px;font-weight:700;color:#1D4ED8;white-space:nowrap">📆 Mês:</label>
-          <input type="month" value="${painelFilters.month}"
-            onchange="painelFilters.month=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
-            style="padding:4px 8px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff"/>
+          <input type="month" value="${painelFilters.monthFrom}"
+            onchange="painelFilters.monthFrom=this.value;if(!painelFilters.monthTo||this.value>painelFilters.monthTo)painelFilters.monthTo=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
+            style="padding:4px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff"/>
+          <span style="font-size:11px;color:#1D4ED8;font-weight:600">até</span>
+          <input type="month" value="${painelFilters.monthTo}"
+            onchange="painelFilters.monthTo=this.value;if(!painelFilters.monthFrom||this.value<painelFilters.monthFrom)painelFilters.monthFrom=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
+            style="padding:4px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff"/>
         </div>
         <select onchange="painelFilters.manager=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
           style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
