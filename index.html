@@ -970,7 +970,7 @@ async function afterLogin(){
   // Pre-load managers list and client→manager map once at login
   const[mgrsRes,profilesRes]=await Promise.all([
     sb.from('managers').select('*').order('name'),
-    sb.from('user_profiles').select('id,manager_name').eq('is_admin',false)
+    sb.from('user_profiles').select('id,manager_name')
   ]);
   window._managers=(mgrsRes.data&&mgrsRes.data.length>0)?mgrsRes.data:[
     {id:'1',name:'Leonardo Plixo'},{id:'2',name:'Dener Jaime'},
@@ -1502,15 +1502,13 @@ async function renderAdminBacklog(el){
     return;
   }
 
-  window._backlogItems=items;
-
-  // Patch items that have client_user_id but no manager_name yet
+  // Patch items with manager_name from clientManagerMap if not set in DB
   items.forEach(i=>{
     if(!i.manager_name && i.client_user_id && window._clientManagerMap?.[i.client_user_id]){
       i.manager_name=window._clientManagerMap[i.client_user_id];
     }
   });
-
+  window._backlogItems=items;
   renderBacklogGrid(el, items, true);
 }
 
@@ -1528,13 +1526,12 @@ async function renderSalesOpsBacklog(){
     el.innerHTML='<div class="empty" style="margin-top:60px"><div class="empty-icon">📋</div><p style="font-size:14px;font-weight:500">Nenhum item no backlog ainda.</p></div>';
     return;
   }
-  window._backlogItems=items;
-  // Patch items that have client_user_id but no manager_name yet
   items.forEach(i=>{
     if(!i.manager_name && i.client_user_id && window._clientManagerMap?.[i.client_user_id]){
       i.manager_name=window._clientManagerMap[i.client_user_id];
     }
   });
+  window._backlogItems=items;
   renderBacklogGrid(el, items, 'salesops');
 }
 
@@ -1544,10 +1541,8 @@ function renderBacklogGrid(el, items, isAdmin){
     const f=backlogFilters;
     if(f.client && !item.client_name.toLowerCase().includes(f.client.toLowerCase())) return false;
     if(f.manager){
-      // Match by manager_name on the backlog item itself
-      // Falls back to checking via _clientManagerMap if field not yet populated
-      const directMatch=item.manager_name===f.manager;
-      if(!directMatch) return false;
+      const mgr=item.manager_name||(window._clientManagerMap?.[item.client_user_id]);
+      if(mgr!==f.manager) return false;
     }
     if(f.pn && !item.pn.toLowerCase().includes(f.pn.toLowerCase()) && !item.description?.toLowerCase().includes(f.pn.toLowerCase())) return false;
     if(f.classification==='__unclassified__' && (item.classification&&item.classification!=='')) return false;
