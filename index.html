@@ -5444,13 +5444,27 @@ function filterNetworksPurchases(){
   });
 }
 
-function openNetworksPurchaseModal(){
+async function openNetworksPurchaseModal(){
   const clients=window._networksClients||[];
-  const pnMap=window._networksPnMap||{};
-  const networkParts=window._networksParts||[];
+  let networkParts=window._networksParts||[];
+
+  // Fetch parts if not loaded yet (modal opened before visiting Networks tab)
+  if(!networkParts.length){
+    const{data}=await sb.from('parts').select('pn,description,latam_scheduled').eq('seg','NETWORKS').order('pn');
+    networkParts=data||[];
+    window._networksParts=networkParts;
+    const pnPriceMap={};networkParts.forEach(p=>{pnPriceMap[p.pn]={price:Number(p.latam_scheduled||0),desc:p.description||''};});
+    window._networksPnMap=pnPriceMap;
+  }
+
+  // Also fetch clients if not loaded
+  const allClients=clients.length?clients:(await sb.from('user_profiles').select('id,full_name,manager_name').eq('is_admin',false).neq('role','salesops').order('full_name')).data||[];
+  if(!clients.length) window._networksClients=allClients;
   const curMonth=new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0');
   const modal=document.createElement('div');
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;display:flex;align-items:center;justify-content:center';
+  const pnOptions=networkParts.map(p=>`<option value="${p.pn}" data-price="${p.latam_scheduled||0}" data-desc="${p.description||''}">${p.pn} — ${(p.description||'').slice(0,40)}</option>`).join('');
+  const clientOptions=allClients.map(c=>`<option value="${c.id}" data-name="${c.full_name}">${c.full_name}</option>`).join('');
   modal.innerHTML=`<div style="background:#fff;border-radius:14px;width:90%;max-width:560px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25);max-height:90vh;overflow-y:auto">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h3 style="font-size:16px;font-weight:700">📡 Registrar compras de Networks</h3>
@@ -5461,7 +5475,7 @@ function openNetworksPurchaseModal(){
         <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:4px">Dealer *</label>
         <select id="net-modal-client" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px">
           <option value="">— Selecione —</option>
-          ${clients.map(c=>`<option value="${c.id}" data-name="${c.full_name}">${c.full_name}</option>`).join('')}
+          ${clientOptions}
         </select>
       </div>
       <div>
@@ -5475,7 +5489,7 @@ function openNetworksPurchaseModal(){
           <label style="font-size:11px;font-weight:600;color:var(--t2);display:block;margin-bottom:3px">PN</label>
           <select onchange="fillNetworkPN(this)" style="width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
             <option value="">— Selecione o PN —</option>
-            ${networkParts.map(p=>`<option value="${p.pn}" data-price="${p.latam_scheduled||0}" data-desc="${p.description||''}">${p.pn} — ${(p.description||'').slice(0,40)}</option>`).join('')}
+            ${pnOptions}
             <option value="__manual__">Outro PN (manual)</option>
           </select>
           <input type="text" placeholder="PN manual" style="display:none;width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;margin-top:4px;box-sizing:border-box" class="net-pn-manual"/>
@@ -5543,6 +5557,7 @@ function updateNetLineTotal(inp){
 
 function addNetworkLine(){
   const networkParts=window._networksParts||[];
+  const pnOptions=networkParts.map(p=>`<option value="${p.pn}" data-price="${p.latam_scheduled||0}" data-desc="${p.description||''}">${p.pn} — ${(p.description||'').slice(0,40)}</option>`).join('');
   const container=document.getElementById('net-modal-lines');
   if(!container)return;
   const div=document.createElement('div');
@@ -5551,7 +5566,7 @@ function addNetworkLine(){
   div.innerHTML=`<div>
     <select onchange="fillNetworkPN(this)" style="width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
       <option value="">— Selecione o PN —</option>
-      ${networkParts.map(p=>`<option value="${p.pn}" data-price="${p.latam_scheduled||0}" data-desc="${p.description||''}">${p.pn} — ${(p.description||'').slice(0,40)}</option>`).join('')}
+      ${pnOptions}
       <option value="__manual__">Outro PN (manual)</option>
     </select>
     <input type="text" placeholder="PN manual" style="display:none;width:100%;padding:7px 8px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;margin-top:4px;box-sizing:border-box" class="net-pn-manual"/>
