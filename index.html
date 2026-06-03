@@ -5449,6 +5449,7 @@ async function openNetworksPurchaseModal(){
   // Always fetch fresh from DB to ensure latest catalog
   const{data:partsData}=await sb.from('parts').select('pn,description,latam_scheduled,seg');
   const networkParts=(partsData||[]).filter(p=>p.seg==='NETWORKS');
+  console.log('Total parts:',partsData?.length,'Networks:',networkParts.length,'Sample segs:',[...new Set((partsData||[]).map(p=>p.seg))].slice(0,10));
   window._networksParts=networkParts;
   const pnPriceMap={};networkParts.forEach(p=>{pnPriceMap[p.pn]={price:Number(p.latam_scheduled||0),desc:p.description||''};});
   window._networksPnMap=pnPriceMap;
