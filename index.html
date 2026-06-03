@@ -1900,20 +1900,24 @@ function renderBacklogGrid(el, items, isAdmin){
         (i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm)
       );
 
-      // Group 2: RDD in rm, not shipped in rm (native month, still open or shipped other month)
+      // Group 2: RDD = rm exactly, not shipped in rm, not closed
       const nativeOpen=filtered.filter(i=>{
         const rddMk=(i.rdd||'').slice(0,7);
         const shippedThisMonth=(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
         return rddMk===rm && !shippedThisMonth && i.classification!=='Shipped';
       });
 
-      // Group 3: Overdue — RDD before rm, not shipped at all (classification !== Shipped)
-      // Only shown for current/future months (for past months hidden by default, toggle shows)
+      // Group 3: Overdue — RDD < rm, not shipped, not closed
+      // Uses filtered (all items passing user filters) so availability_date doesn't affect inclusion
       const overdue=filtered.filter(i=>{
         const rddMk=(i.rdd||'').slice(0,7);
         return rddMk && rddMk<rm && i.classification!=='Shipped'
           && !(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm);
       });
+
+      // Group 4: No RDD set, not shipped — show at bottom for current/future months
+      const noRddItems=filtered.filter(i=>!i.rdd&&i.classification!=='Shipped'
+        &&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
 
       // For past months: toggle "como poderia ter sido"
       // Store toggle state on window
@@ -1983,11 +1987,9 @@ function renderBacklogGrid(el, items, isAdmin){
         }
 
         // Items with no RDD set but not shipped — show at bottom
-        const noRdd=filtered.filter(i=>!i.rdd&&i.classification!=='Shipped'
-          &&!(i.backlog_shipments||[]).some(s=>(s.ship_date||'').slice(0,7)===rm));
-        if(noRdd.length>0){
-          rows+=divRow('❓','Sem RDD definido',noRdd.length+' linha(s)','#F8F9FA','#888');
-          noRdd.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
+        if(noRddItems.length>0){
+          rows+=divRow('❓','Sem RDD definido',noRddItems.length+' linha(s)','#F8F9FA','#888');
+          noRddItems.forEach((item,i)=>{ rows+=buildRow(item,i,0); });
         }
       }
 
