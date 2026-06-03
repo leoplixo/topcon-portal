@@ -2117,34 +2117,25 @@ async function saveBacklogSalesDoc(itemId, orderRef, value, inputEl){
 }
 
 async function updateBacklogField(itemId, field, value){
-  const{error,data}=await sb.from('backlog_items').update({
+  const{error}=await sb.from('backlog_items').update({
     [field]:value,
     updated_at:new Date().toISOString(),
     updated_by:cProfile?.full_name||'Admin'
-  }).eq('id',itemId).select(field);
-  if(error){
-    console.error('Backlog update error:',error);
-    alert('Erro ao salvar: '+error.message);
-    return false;
-  }
-  if(!data||data.length===0){
-    console.warn('UPDATE retornou 0 linhas — RLS pode estar bloqueando. itemId:',itemId,'field:',field,'value:',value);
-    alert('⚠️ Atenção: a alteração não foi salva (0 linhas afetadas). Verifique as permissões no Supabase.\n\nCampo: '+field+'\nValor: '+value);
-    return false;
-  }
-  console.log('✅ Saved:',field,'=',data[0][field],'for item',itemId);
+  }).eq('id',itemId);
+  if(error){console.error('Backlog update error:',error);alert('Erro: '+error.message);return;}
   // Update local cache
   if(window._backlogItems){
     const idx=window._backlogItems.findIndex(i=>i.id===itemId);
     if(idx>=0){
       window._backlogItems[idx][field]=value;
+      // Auto-suggest will_ship_month when availability_date changes
       if(field==='availability_date' && value){
         await autoCalcWillShip(itemId, value);
       }
     }
   }
+  // Refresh KPI cards without re-rendering full table
   refreshBacklogKPIs();
-  return true;
 }
 
 async function autoCalcWillShip(itemId, availDate){
