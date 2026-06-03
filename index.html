@@ -4913,10 +4913,14 @@ async function renderPainelMensal(el){
     painelFilters.monthTo=cur;
   }
 
-  buildPainelHTML(el, items||[]);
+  // Fetch networks purchases
+  const{data:netData}=await sb.from('network_purchases').select('*');
+  window._painelNetworks=netData||[];
+
+  buildPainelHTML(el, items||[], netData||[]);
 }
 
-function buildPainelHTML(el, allItems){
+function buildPainelHTML(el, allItems, allNetworks=null){
   const rmFrom=painelFilters.monthFrom;
   const rmTo=painelFilters.monthTo;
   const rm=rmFrom||rmTo;
@@ -5212,10 +5216,8 @@ function buildPainelHTML(el, allItems){
   // Store items for filter re-renders
   window._painelItems=allItems;
 
-  // Fetch networks for painel
-  const{data:netData}=await sb.from('network_purchases').select('*');
-  window._painelNetworks=netData||[];
-  buildPainelNetworksSection(el, netData||[]);
+  // Build networks section using pre-fetched data
+  buildPainelNetworksSection(el, allNetworks||window._painelNetworks||[]);
 }
 
 function buildPainelNetworksSection(el, netPurchases){
@@ -5287,6 +5289,7 @@ function buildPainelNetworksSection(el, netPurchases){
       </div>
     </div>`;
   el.querySelector('div')?.appendChild(netDiv);
+}
 
 // ═══════════════════════════════════════════════════════════
 // NETWORKS TAB
