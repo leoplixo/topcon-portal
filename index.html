@@ -2085,18 +2085,16 @@ async function saveBacklogSalesDoc(itemId, orderRef, value, inputEl){
     inputEl.style.color=val?'#0A7A8C':'';
     inputEl.style.fontWeight=val?'600':'';
   }
-  // Propagate to all other inputs with the same order_reference (without overwriting ones already manually set differently)
-  const siblings=document.querySelectorAll('input[data-order-ref="'+orderRef+'"]');
-  siblings.forEach(async inp=>{
-    if(inp===inputEl) return; // skip the one just edited
+  // Propagate to all other inputs with the same order_reference
+  const siblings=Array.from(document.querySelectorAll('input[data-order-ref="'+orderRef+'"]'));
+  for(const inp of siblings){
+    if(inp===inputEl) continue;
     const currentVal=inp.value.trim();
-    // Only propagate if the sibling is empty OR has the same value (not manually overridden to something different)
     if(!currentVal || currentVal===val){
       inp.value=val;
       inp.style.borderColor=val?'#0A7A8C':'';
       inp.style.color=val?'#0A7A8C':'';
       inp.style.fontWeight=val?'600':'';
-      // Find the item id for this input's row
       const row=inp.closest('tr');
       if(row){
         const rowId=row.id?.replace('bl-row-','');
@@ -2113,7 +2111,7 @@ async function saveBacklogSalesDoc(itemId, orderRef, value, inputEl){
         }
       }
     }
-  });
+  }
 }
 
 async function updateBacklogField(itemId, field, value){
@@ -2502,19 +2500,20 @@ async function saveBacklogComment(itemId){
   if(contentEl&&window._backlogItems) renderBacklogGrid(contentEl,window._backlogItems,isAdmin);
 }
 
-function onWillShipChange(itemId, value, selectEl){
+async function onWillShipChange(itemId, value, selectEl){
   if(value==='partial'){
     openPartialModal(itemId, selectEl);
   } else {
     const boolVal=value==='true'?true:value==='false'?false:null;
     const item=window._backlogItems?.find(i=>i.id===itemId);
     if(item){item.will_ship_month=boolVal;item.partial_qty=null;}
-    sb.from('backlog_items').update({
+    const{error}=await sb.from('backlog_items').update({
       will_ship_month:boolVal,
       partial_qty:null,
       updated_at:new Date().toISOString(),
       updated_by:cProfile?.full_name||'Admin'
     }).eq('id',itemId);
+    if(error){console.error('will_ship update error:',error);alert('Erro: '+error.message);return;}
     refreshBacklogKPIs();
   }
 }
