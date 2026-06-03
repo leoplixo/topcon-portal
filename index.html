@@ -5450,9 +5450,6 @@ async function openNetworksPurchaseModal(){
   const{data:partsData}=await sb.from('parts').select('pn,description,latam_scheduled,seg');
   const networkParts=(partsData||[]).filter(p=>p.seg==='NETWORKS');
   window._networksParts=networkParts;
-  if(partsErr) console.error('Networks parts error:',partsErr);
-  const networkParts=partsData||[];
-  window._networksParts=networkParts;
   const pnPriceMap={};networkParts.forEach(p=>{pnPriceMap[p.pn]={price:Number(p.latam_scheduled||0),desc:p.description||''};});
   window._networksPnMap=pnPriceMap;
 
