@@ -4175,7 +4175,7 @@ async function forwardOrder(orderId, destination){
 
   // Now fetch full order with updated discounts
   const{data:order,error:oErr}=await sb.from('orders')
-    .select('*,user_profiles(full_name,notification_email),client_groups(label),order_items(pn,description,unit_price,quantity,additional_discount)')
+    .select('*,user_profiles(id,full_name,notification_email,manager_name),client_groups(label),order_items(pn,description,unit_price,quantity,additional_discount)')
     .eq('id',orderId).single();
   if(oErr){alert('Erro ao buscar pedido: '+oErr.message);return;}
 
@@ -4523,17 +4523,20 @@ function toggleOrderEdit(orderId){
 }
 
 async function saveMgrName(clientId, name){
+  // 1. Update user profile
   const{error}=await sb.from('user_profiles').update({manager_name:name||null}).eq('id',clientId);
   if(error){
     console.error('saveMgrName error:',error);
     alert('Erro ao salvar gerente: '+error.message);
     return;
   }
-  // Update clientManagerMap cache
+  // 2. Also update all existing backlog items for this client
+  await sb.from('backlog_items').update({manager_name:name||null}).eq('client_user_id',clientId);
+  // 3. Update clientManagerMap cache
   if(!window._clientManagerMap) window._clientManagerMap={};
   if(name) window._clientManagerMap[clientId]=name;
   else delete window._clientManagerMap[clientId];
-  // Update cached backlog items
+  // 4. Update cached backlog items in memory
   if(window._backlogItems){
     window._backlogItems.forEach(i=>{if(i.client_user_id===clientId) i.manager_name=name||null;});
   }
