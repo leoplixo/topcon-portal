@@ -969,17 +969,23 @@ async function afterLogin(){
   }
   cProfile=profile; cGroup=profile.client_groups;
 
-  // Pre-load managers list and client→manager map once at login
+  // Pre-load managers list and client maps once at login
   const[mgrsRes,profilesRes]=await Promise.all([
     sb.from('managers').select('*').order('name'),
-    sb.from('user_profiles').select('id,manager_name')
+    sb.from('user_profiles').select('id,manager_name,segment,country')
   ]);
   window._managers=(mgrsRes.data&&mgrsRes.data.length>0)?mgrsRes.data:[
     {id:'1',name:'Leonardo Plixo'},{id:'2',name:'Dener Jaime'},
     {id:'3',name:'Mauricio Rosa'},{id:'4',name:'Renato Dias'}
   ];
   window._clientManagerMap={};
-  (profilesRes.data||[]).forEach(p=>{if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;});
+  window._clientSegmentMap={};
+  window._clientCountryMap={};
+  (profilesRes.data||[]).forEach(p=>{
+    if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;
+    if(p.segment)      window._clientSegmentMap[p.id]=p.segment;
+    if(p.country)      window._clientCountryMap[p.id]=p.country;
+  });
   // Robust role detection
   let detectedRole = profile.role;
   if(!detectedRole || detectedRole === 'client'){
@@ -1502,7 +1508,7 @@ const CLS_COLORS={
   'Shipped':         ['#E8F5EC','#166534'],
 };
 
-let backlogFilters={client:'',pn:'',classification:'',destination:'',shipMonth:'',rddFrom:'',rddTo:'',refMonthFrom:'',refMonthTo:'',manager:''};
+let backlogFilters={client:'',pn:'',classification:'',destination:'',shipMonth:'',rddFrom:'',rddTo:'',refMonthFrom:'',refMonthTo:'',manager:'',segment:'',country:''};
 
 async function renderAdminBacklog(el){
   // Expand admin page to full width for backlog
@@ -1520,10 +1526,16 @@ async function renderAdminBacklog(el){
     return;
   }
 
-  // Always reload clientManagerMap fresh so recently saved managers are picked up
-  const{data:profiles}=await sb.from('user_profiles').select('id,manager_name');
+  // Always reload client maps fresh so recently saved values are picked up
+  const{data:profiles}=await sb.from('user_profiles').select('id,manager_name,segment,country');
   window._clientManagerMap={};
-  (profiles||[]).forEach(p=>{if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;});
+  window._clientSegmentMap={};
+  window._clientCountryMap={};
+  (profiles||[]).forEach(p=>{
+    if(p.manager_name) window._clientManagerMap[p.id]=p.manager_name;
+    if(p.segment)      window._clientSegmentMap[p.id]=p.segment;
+    if(p.country)      window._clientCountryMap[p.id]=p.country;
+  });
 
   // Patch items with manager_name from clientManagerMap if not set in DB
   items.forEach(i=>{
@@ -1573,6 +1585,14 @@ function renderBacklogGrid(el, items, isAdmin){
       const mgr=item.manager_name||(window._clientManagerMap?.[item.client_user_id]);
       if(mgr!==f.manager) return false;
     }
+    if(f.segment){
+      const seg=window._clientSegmentMap?.[item.client_user_id];
+      if(seg!==f.segment) return false;
+    }
+    if(f.country){
+      const ctry=window._clientCountryMap?.[item.client_user_id];
+      if(ctry!==f.country) return false;
+    }
     if(f.pn && !item.pn.toLowerCase().includes(f.pn.toLowerCase()) && !item.description?.toLowerCase().includes(f.pn.toLowerCase())) return false;
     if(f.classification==='__unclassified__' && (item.classification&&item.classification!=='')) return false;
     else if(f.classification && f.classification!=='__unclassified__' && item.classification!==f.classification) return false;
@@ -1613,6 +1633,8 @@ function renderBacklogGrid(el, items, isAdmin){
   // Destinations for filter
   const destinations=[...new Set(items.map(i=>i.destination).filter(Boolean))];
   const clients=[...new Set(items.map(i=>i.client_name).filter(Boolean))].sort();
+  const segments=[...new Set(items.map(i=>window._clientSegmentMap?.[i.client_user_id]).filter(Boolean))].sort();
+  const countries=[...new Set(items.map(i=>window._clientCountryMap?.[i.client_user_id]).filter(Boolean))].sort();
 
 
   // ── compute all metrics once ──────────────────────────────────────────────
@@ -1785,6 +1807,16 @@ function renderBacklogGrid(el, items, isAdmin){
     +'<option value="">Todos os gerentes</option>'
     +(window._managers||[]).map(m=>'<option value="'+m.name+'"'+(backlogFilters.manager===m.name?' selected':'')+'>'+m.name+'</option>').join('')
     +'</select>'
+    // Segment filter
+    +(segments.length>0?'<select id="bl-filter-seg" oninput="backlogFilters.segment=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:130px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
+    +'<option value="">Todos segmentos</option>'
+    +segments.map(s=>'<option value="'+s+'"'+(backlogFilters.segment===s?' selected':'')+'>'+s+'</option>').join('')
+    +'</select>':'')
+    // Country filter
+    +(countries.length>0?'<select id="bl-filter-country" oninput="backlogFilters.country=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:110px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
+    +'<option value="">Todos países</option>'
+    +countries.map(c=>'<option value="'+c+'"'+(backlogFilters.country===c?' selected':'')+'>'+c+'</option>').join('')
+    +'</select>':'')
     +'<select id="bl-filter-cls" oninput="backlogFilters.classification=this.value;renderBacklogGrid(document.getElementById(\''+(isAdmin?'admin-content':'salesops-content')+'\')||document.querySelector(\'[id*=content]\'),window._backlogItems,'+isAdmin+')" style="flex:1;min-width:140px;padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">'
     +'<option value="">Todas classificações</option>'
     +'<option value="__unclassified__"'+(backlogFilters.classification==='__unclassified__'?' selected':'')+'>⚠️ Sem classificação</option>'
@@ -2432,6 +2464,8 @@ function refreshBacklogKPIs(){
   let filtered=items.filter(item=>{
     if(f.client&&!item.client_name.toLowerCase().includes(f.client.toLowerCase()))return false;
     if(f.manager&&(item.manager_name||(window._clientManagerMap?.[item.client_user_id]))!==f.manager)return false;
+    if(f.segment&&window._clientSegmentMap?.[item.client_user_id]!==f.segment)return false;
+    if(f.country&&window._clientCountryMap?.[item.client_user_id]!==f.country)return false;
     if(f.pn&&!item.pn.toLowerCase().includes(f.pn.toLowerCase())&&!item.description?.toLowerCase().includes(f.pn.toLowerCase()))return false;
     if(f.classification==='__unclassified__'&&(item.classification&&item.classification!==''))return false;
     else if(f.classification&&f.classification!=='__unclassified__'&&item.classification!==f.classification)return false;
@@ -5114,7 +5148,7 @@ async function downloadCatalogCSV(){
 // ═══════════════════════════════════════════════════════════
 // PAINEL MENSAL
 // ═══════════════════════════════════════════════════════════
-let painelFilters={monthFrom:'', monthTo:'', manager:'', destination:''};
+let painelFilters={monthFrom:'', monthTo:'', manager:'', destination:'', segment:'', country:''};
 
 async function renderPainelMensal(el){
   const pw=document.getElementById('admin-page-wrap');
@@ -5166,11 +5200,15 @@ function buildPainelHTML(el, allItems, allNetworks=null){
   // Get filter options
   const managers=[...new Set(allItems.map(i=>i.manager_name).filter(Boolean))].sort();
   const destinations=[...new Set(allItems.map(i=>i.destination).filter(Boolean))].sort();
+  const segments=[...new Set(allItems.map(i=>window._clientSegmentMap?.[i.client_user_id]).filter(Boolean))].sort();
+  const countries=[...new Set(allItems.map(i=>window._clientCountryMap?.[i.client_user_id]).filter(Boolean))].sort();
 
   // Apply filters
   let items=allItems.filter(i=>{
     if(painelFilters.manager&&i.manager_name!==painelFilters.manager)return false;
     if(painelFilters.destination&&i.destination!==painelFilters.destination)return false;
+    if(painelFilters.segment&&window._clientSegmentMap?.[i.client_user_id]!==painelFilters.segment)return false;
+    if(painelFilters.country&&window._clientCountryMap?.[i.client_user_id]!==painelFilters.country)return false;
     return true;
   });
 
@@ -5287,12 +5325,22 @@ function buildPainelHTML(el, allItems, allNetworks=null){
           <option value="">Todos os gerentes</option>
           ${managers.map(m=>`<option value="${m}"${painelFilters.manager===m?' selected':''}>${m}</option>`).join('')}
         </select>
+        ${segments.length>0?`<select onchange="painelFilters.segment=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
+          style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
+          <option value="">Todos segmentos</option>
+          ${segments.map(s=>`<option value="${s}"${painelFilters.segment===s?' selected':''}>${s}</option>`).join('')}
+        </select>`:''}
+        ${countries.length>0?`<select onchange="painelFilters.country=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
+          style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
+          <option value="">Todos países</option>
+          ${countries.map(c=>`<option value="${c}"${painelFilters.country===c?' selected':''}>${c}</option>`).join('')}
+        </select>`:''}
         <select onchange="painelFilters.destination=this.value;buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
           style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px">
           <option value="">Todos os destinos</option>
           ${destinations.map(d=>`<option value="${d}"${painelFilters.destination===d?' selected':''}>${d}</option>`).join('')}
         </select>
-        <button onclick="painelFilters.manager='';painelFilters.destination='';buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
+        <button onclick="painelFilters.manager='';painelFilters.destination='';painelFilters.segment='';painelFilters.country='';buildPainelHTML(document.getElementById('admin-content'),window._painelItems)"
           style="padding:6px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;background:#fff;cursor:pointer;color:var(--tm)">✕ Limpar</button>
       </div>
     </div>
