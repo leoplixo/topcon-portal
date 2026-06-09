@@ -2852,7 +2852,7 @@ async function saveCutoff(userId){
 
 async function doLogout(){
   await sb.auth.signOut();
-  cart={};cUser=null;cProfile=null;cGroup=null;catalog=[];
+  cart={};priceOverrides={};cUser=null;cProfile=null;cGroup=null;catalog=[];
   document.getElementById('login-email').value='';
   document.getElementById('login-pass').value='';
   document.getElementById('login-err').style.display='none';
@@ -2979,11 +2979,30 @@ function updBadge(){
   const b=document.getElementById('cart-badge');
   if(b){b.style.display=n>0?'flex':'none';b.textContent=n;}
 }
+// Price overrides during admin impersonation (only used when cProfile._adminImpersonating is true)
+let priceOverrides = {};
+
+function setItemPriceOverride(pn, value){
+  const v=parseFloat(value);
+  if(isNaN(v)||v<0){
+    alert('Preço inválido');
+    renderQuote();
+    return;
+  }
+  priceOverrides[pn]=v;
+  renderQuote();
+}
+
 const getItems=()=>Object.entries(cart).map(([pn,qty])=>{
   const p=catalog.find(x=>x.pn===pn);
-  const price=priceType==='scheduled'?p.scheduled_price:p.spot_price;
+  if(!p) return null;
+  let price = priceType==='scheduled'?p.scheduled_price:p.spot_price;
+  // Apply admin price override if impersonating and override exists
+  if(cProfile?._adminImpersonating && priceOverrides[pn]!=null){
+    price = priceOverrides[pn];
+  }
   return{...p,qty,price,total:price*qty};
-});
+}).filter(Boolean);
 const getTotal=()=>getItems().reduce((s,i)=>s+i.total,0);
 
 // VIEWS
@@ -3061,7 +3080,19 @@ function renderQuote(){
       <th style="text-align:left">PN#</th><th style="text-align:left">Descrição</th>
       <th style="text-align:center">Qtd</th><th style="text-align:right">Preço unit.</th>
       <th style="text-align:right">Total</th><th></th>
-    </tr></thead><tbody>${items.map(i=>`<tr>
+    </tr></thead><tbody>${items.map(i=>{
+      const isImpersonating = cProfile?._adminImpersonating;
+      const priceCell = isImpersonating
+        ? `<td style="text-align:right">
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px">
+              <span style="font-size:10px;color:#D97706;font-weight:700">USD</span>
+              <input type="number" step="0.01" min="0" value="${Number(i.price).toFixed(2)}"
+                onchange="setItemPriceOverride('${i.pn}',this.value)"
+                style="width:90px;text-align:right;font-weight:600;font-size:12px;border:1px solid #F59E0B;border-radius:5px;padding:3px 6px;background:#FFFBEB;font-family:inherit"/>
+            </div>
+          </td>`
+        : `<td style="text-align:right;color:var(--t2)">${fmt(i.price)}</td>`;
+      return `<tr>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${i.pn}</td>
       <td>${i.description}</td>
       <td style="text-align:center"><div class="qty-ctrl" style="justify-content:center">
@@ -3071,10 +3102,11 @@ function renderQuote(){
           style="width:52px;text-align:center;font-weight:600;font-size:13px;border:1px solid var(--border-md);border-radius:6px;padding:3px 4px;font-family:inherit"/>
         <button class="qty-btn" onclick="changeQty('${i.pn}',1)">+</button>
       </div></td>
-      <td style="text-align:right;color:var(--t2)">${fmt(i.price)}</td>
+      ${priceCell}
       <td style="text-align:right;font-weight:700">${fmt(i.total)}</td>
       <td><button class="rm-btn" onclick="changeQty('${i.pn}',-999)">×</button></td>
-    </tr>`).join('')}</tbody></table></div>
+    </tr>`;
+    }).join('')}</tbody></table></div>
     <div class="sum-box">
       <div class="sum-row"><span>${items.length} item(s)</span><span>${fmt(total)}</span></div>
       <div class="sum-row"><span>Frete</span><span>A consultar</span></div>
@@ -3170,8 +3202,10 @@ async function sendOrder(){
   const items=getItems();const total=getTotal();
   const ref='TOP-'+Date.now().toString().slice(-7);
   const deliveryDate=document.getElementById('delivery-date')?.value||null;
+  // When admin is impersonating, save order under client's user_id (cProfile.id) not admin's auth id
+  const effectiveUserId = cProfile?._adminImpersonating ? cProfile.id : cUser.id;
   const {data:order,error:oErr}=await sb.from('orders').insert({
-    reference:ref,user_id:cUser.id,group_id:cGroup.id,price_type:priceType,
+    reference:ref,user_id:effectiveUserId,group_id:cGroup.id,price_type:priceType,
     total_usd:total,requested_delivery_date:deliveryDate,
     packaging_pref:packaging||null,shipping_pref:shippingPref||null,order_comments:orderComments||null
   }).select().single();
@@ -3184,7 +3218,7 @@ async function sendOrder(){
     if(btn){btn.disabled=false;btn.innerHTML='Enviar pedido →';}
     return;
   }
-  cart={};
+  cart={};priceOverrides={};
   document.getElementById('confirm-ref').textContent='Referência: '+ref;
   // Send email notification
   await sendOrderEmail(order, items, cProfile.full_name, cGroup?.label||'', deliveryDate);
@@ -3669,6 +3703,7 @@ async function renderAdminTab(tab){
           <th></th>
           <th>Gerente</th>
           <th>Budget mensal<br><span style="font-size:9px;font-weight:400;color:var(--tm)">interno</span></th>
+          <th>Acessar</th>
           <th>Status</th>
         </tr></thead>
         <tbody>${filteredClients.map(cl=>`<tr>
@@ -3728,6 +3763,10 @@ async function renderAdminTab(tab){
           <td>
             <button onclick="openBudgetModal('${cl.id}',this.dataset.name)" data-name="${cl.full_name.replace(/'/g,'&#39;').replace(/"/g,'&quot;')}"
               style="padding:5px 10px;background:#001423;color:#fff;border:none;border-radius:var(--r-md);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">💰 Editar</button>
+          </td>
+          <td>
+            <button onclick="impersonateClient('${cl.id}')" title="Acessar o portal como este cliente (admin)"
+              style="padding:5px 10px;background:#F59E0B;color:#fff;border:none;border-radius:var(--r-md);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">🎭 Acessar</button>
           </td>
           <td><span style="font-size:11px;color:#166534;font-weight:600">● ${cl.active?'Ativo':'Inativo'}</span></td>
         </tr>`).join('')}
@@ -4309,6 +4348,161 @@ function toggleOrderEdit(orderId){
   const el=document.getElementById('order-edit-'+orderId);
   if(el)el.style.display=el.style.display==='none'?'block':'none';
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// ADMIN IMPERSONATION — "Acessar como cliente"
+// ═══════════════════════════════════════════════════════════════════
+async function impersonateClient(clientId){
+  // Verify we're admin
+  if(!cProfile?.is_admin){
+    alert('Apenas administradores podem usar este recurso.');
+    return;
+  }
+
+  // Fetch the client profile
+  const{data:targetProfile,error}=await sb.from('user_profiles')
+    .select('*, client_groups(id,slug,label,segment)')
+    .eq('id',clientId).single();
+  if(error||!targetProfile){
+    alert('Cliente não encontrado: '+(error?.message||''));
+    return;
+  }
+
+  // Save the original admin context to localStorage for restoration
+  const adminCtx={
+    profile: cProfile,
+    group: cGroup,
+    userId: cUser.id,
+    userEmail: cUser.email,
+    timestamp: Date.now()
+  };
+  try{
+    localStorage.setItem('_adminImpersonateCtx', JSON.stringify(adminCtx));
+  }catch(e){
+    alert('Erro ao salvar contexto admin: '+e.message);
+    return;
+  }
+
+  // Save the impersonation flag and target id
+  localStorage.setItem('_impersonatingClientId', clientId);
+
+  // Replace cProfile / cGroup with target
+  // cUser stays the same (admin's auth user) — but cProfile reflects the client
+  cProfile = targetProfile;
+  cGroup = targetProfile.client_groups;
+
+  // Set a special admin-impersonating flag on profile to allow special features (price edit)
+  cProfile._adminImpersonating = true;
+
+  // Show client screen with impersonation banner
+  showImpersonationBanner(targetProfile.full_name);
+
+  // Set client UI elements
+  const av=document.getElementById('u-av'); if(av) av.textContent=targetProfile.full_name[0].toUpperCase();
+  const nm=document.getElementById('u-nm'); if(nm) nm.textContent=targetProfile.full_name;
+  const grp=document.getElementById('u-grp'); if(grp) grp.textContent='· '+(cGroup?.label||'');
+
+  // Clear cart from any previous session
+  cart={};priceOverrides={};
+  catalog=[];
+  updBadge();
+
+  showScreen('client');
+  showView('dashboard');
+
+  // Load client data
+  await Promise.all([checkClientEligibility(), renderDashboard(), loadCatalog()]);
+}
+
+function showImpersonationBanner(clientName){
+  // Remove existing banner if any
+  const existing=document.getElementById('impersonate-banner');
+  if(existing) existing.remove();
+
+  const banner=document.createElement('div');
+  banner.id='impersonate-banner';
+  banner.style.cssText='position:fixed;top:0;left:0;right:0;background:linear-gradient(90deg,#F59E0B,#D97706);color:#fff;padding:8px 16px;z-index:99998;display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.15)';
+  banner.innerHTML=`
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:18px">🎭</span>
+      <span>Você está navegando como <strong>${clientName}</strong> (modo Admin)</span>
+      <span style="font-size:11px;background:rgba(0,0,0,.2);padding:2px 8px;border-radius:10px">Preços editáveis no carrinho</span>
+    </div>
+    <button onclick="exitImpersonation()" style="background:#fff;color:#D97706;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer">← Voltar ao Admin</button>
+  `;
+  document.body.appendChild(banner);
+
+  // Push down the rest of the page to not be hidden by banner
+  document.body.style.paddingTop='42px';
+}
+
+async function exitImpersonation(){
+  // Restore admin context
+  const ctxStr=localStorage.getItem('_adminImpersonateCtx');
+  if(!ctxStr){
+    alert('Contexto admin não encontrado. Faça login novamente.');
+    await sb.auth.signOut();
+    location.reload();
+    return;
+  }
+
+  // Clear impersonation flags
+  localStorage.removeItem('_adminImpersonateCtx');
+  localStorage.removeItem('_impersonatingClientId');
+
+  // Remove banner
+  const banner=document.getElementById('impersonate-banner');
+  if(banner) banner.remove();
+  document.body.style.paddingTop='';
+
+  // Re-fetch full admin profile fresh from DB (safer than restoring from localStorage)
+  const{data:adminProfile,error}=await sb.from('user_profiles')
+    .select('*, client_groups(id,slug,label,segment)')
+    .eq('id',cUser.id).single();
+  if(error||!adminProfile){
+    alert('Erro ao restaurar perfil admin: '+(error?.message||''));
+    await sb.auth.signOut();
+    location.reload();
+    return;
+  }
+
+  cProfile=adminProfile;
+  cGroup=adminProfile.client_groups;
+
+  // Clear cart
+  cart={};priceOverrides={};
+  catalog=[];
+
+  // Show admin screen and go to Clients tab
+  showScreen('admin');
+  // Trigger click on Clientes tab
+  const tabs=document.querySelectorAll('#admin-page-wrap .atab');
+  let clientsTabBtn=null;
+  tabs.forEach(b=>{ if(b.textContent.trim().toLowerCase().includes('clientes')) clientsTabBtn=b; });
+  if(clientsTabBtn){
+    clientsTabBtn.click();
+  } else {
+    renderAdminTab('clients');
+  }
+}
+
+// On page load, check if we're returning from a refresh during impersonation
+(function restoreImpersonationOnReload(){
+  document.addEventListener('DOMContentLoaded', async ()=>{
+    const ctxStr=localStorage.getItem('_adminImpersonateCtx');
+    const targetId=localStorage.getItem('_impersonatingClientId');
+    // The auth listener will trigger afterLogin which will check this; we handle the banner display there
+    if(ctxStr && targetId){
+      // Wait for auth to settle, then re-impersonate
+      setTimeout(async ()=>{
+        if(cProfile?.is_admin && !cProfile._adminImpersonating){
+          // We just logged in as admin but there's an impersonation context — re-impersonate
+          await impersonateClient(targetId);
+        }
+      }, 500);
+    }
+  });
+})();
 
 async function saveMgrName(clientId, name){
   // 1. Update user profile
