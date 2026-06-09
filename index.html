@@ -457,6 +457,13 @@ async function sendForwardedEmail(order, destination){
 }
 
 let cUser=null, cProfile=null, cGroup=null;
+
+// Returns the effective client user ID for queries.
+// When admin is impersonating a client, returns the client's profile ID.
+// Otherwise returns the auth user ID (which equals profile ID for regular clients).
+function getClientId(){
+  return cProfile?._adminImpersonating ? cProfile.id : (cUser?.id || null);
+}
 let clientEligibility=null;
 let LANG='pt'; // 'pt' | 'es' | 'en'
 try{LANG=localStorage.getItem('topcon_lang')||'pt';}catch(e){}
@@ -1048,7 +1055,7 @@ async function renderMyBacklog(){
   el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>';
 
   // Fetch all orders for this user (all statuses, including forwarded)
-  const{data:orders}=await sb.from('orders').select('id,reference,requested_delivery_date').eq('user_id',cUser.id);
+  const{data:orders}=await sb.from('orders').select('id,reference,requested_delivery_date').eq('user_id',getClientId());
   const orderIds=(orders||[]).map(o=>o.id);
   if(!orderIds.length){
     el.innerHTML='<h1 class="page-title" style="margin-bottom:16px">'+t('myOrdersStatus')+'</h1>'
@@ -1181,10 +1188,10 @@ async function renderDashboard(){
 
   // Fetch in parallel
   const[targetRes,windowsRes,ordersRes]=await Promise.all([
-    sb.from('targets').select('target_usd,target_networks_usd').eq('user_id',cUser.id).eq('year',FISCAL_YEAR).single(),
+    sb.from('targets').select('target_usd,target_networks_usd').eq('user_id',getClientId()).eq('year',FISCAL_YEAR).single(),
     sb.from('windows').select('*').eq('year',FISCAL_YEAR).order('window_number'),
     sb.from('orders').select('id,reference,total_usd,final_total_usd,price_type,created_at,requested_delivery_date,status,order_items(pn,description,unit_price,quantity)')
-      .eq('user_id',cUser.id).gte('created_at',FISCAL_START.toISOString()).order('created_at',{ascending:false})
+      .eq('user_id',getClientId()).gte('created_at',FISCAL_START.toISOString()).order('created_at',{ascending:false})
   ]);
 
   const annualTarget=targetRes.data?.target_usd||0;
@@ -1195,7 +1202,7 @@ async function renderDashboard(){
   const purchased=orders.filter(o=>o.status!=='cancelled'&&(o.order_items?.length||0)>0).reduce((s,o)=>s+Number(o.final_total_usd||o.total_usd||0),0);
 
   // Fetch networks purchases for this dealer
-  const{data:netPurchases}=await sb.from('network_purchases').select('qty,unit_price,total_value,month').eq('user_id',cUser.id);
+  const{data:netPurchases}=await sb.from('network_purchases').select('qty,unit_price,total_value,month').eq('user_id',getClientId());
   const networksTotal=(netPurchases||[]).reduce((s,p)=>s+Number(p.total_value||p.qty*p.unit_price||0),0);
   const netPct=annualNetworks>0?Math.min(100,Math.round(networksTotal/annualNetworks*100)):0;
 
@@ -1444,8 +1451,8 @@ async function checkClientEligibility(){
   const FISCAL_START='2026-04-01';
   const[winRes,targetRes,ordersRes]=await Promise.all([
     sb.from('windows').select('*').order('window_number'),
-    sb.from('targets').select('target_usd').eq('user_id',cUser.id).eq('year',2026).single(),
-    sb.from('orders').select('total_usd,final_total_usd,status').eq('user_id',cUser.id)
+    sb.from('targets').select('target_usd').eq('user_id',getClientId()).eq('year',2026).single(),
+    sb.from('orders').select('total_usd,final_total_usd,status').eq('user_id',getClientId())
       .gte('created_at',FISCAL_START).neq('status','cancelled')
   ]);
   const windows=winRes.data||[];
