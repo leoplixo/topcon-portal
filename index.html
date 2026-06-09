@@ -331,7 +331,7 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
       <button id="admin-logout-btn" class="btn btn-ghost btn-sm" onclick="doLogout()">Sair</button>
     </div>
   </div>
-  <div class="page" id="admin-page-wrap" style="max-width:100%;padding-left:32px;padding-right:32px;margin:0">
+  <div class="page" id="admin-page-wrap" style="max-width:1060px">
     <div class="admin-tabs">
       <button class="atab" onclick="setTab(this,'admindash')">📊 Dashboard</button>
       <button class="atab active" onclick="setTab(this,'upload')">Upload CSV</button>
@@ -3850,6 +3850,9 @@ requestAnimationFrame(()=>{
   }
 
   if(tab==='clients'){
+    // Expand admin page to full width like backlog
+    const pw=document.getElementById('admin-page-wrap');
+    if(pw) pw.style.maxWidth='100%';
     el.innerHTML=`<h1 class="page-title" style="margin-bottom:16px">Clientes</h1><div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>`;
     const year=new Date().getFullYear();
     const[clientsRes,targetsRes,managersRes]=await Promise.all([
