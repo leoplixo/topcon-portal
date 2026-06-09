@@ -331,7 +331,7 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
       <button id="admin-logout-btn" class="btn btn-ghost btn-sm" onclick="doLogout()">Sair</button>
     </div>
   </div>
-  <div class="page" id="admin-page-wrap" style="max-width:100%;padding-left:32px;padding-right:32px">
+  <div class="page" id="admin-page-wrap" style="max-width:100%;padding-left:32px;padding-right:32px;margin:0">
     <div class="admin-tabs">
       <button class="atab" onclick="setTab(this,'admindash')">📊 Dashboard</button>
       <button class="atab active" onclick="setTab(this,'upload')">Upload CSV</button>
@@ -3887,7 +3887,7 @@ requestAnimationFrame(()=>{
         </div>
       </div>
       <div style="border-radius:var(--r-md);border:1px solid var(--border);overflow:auto">
-      <table class="dtbl" style="font-size:12px;min-width:1400px">
+      <table class="dtbl" style="font-size:12px;width:100%">
         <thead><tr>
           <th>Cliente</th>
           <th>Grupo preço</th>
