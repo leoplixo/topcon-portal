@@ -1691,11 +1691,7 @@ function renderBacklogGrid(el, items, isAdmin){
   const semSinalItems   = classifiedOpen.filter(i=>i.will_ship_month===null||i.will_ship_month===undefined);
 
   const openVal           = openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-  const forecastVal       = forecastItems.reduce((s,i)=>{
-    const open=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));
-    const qty=i.partial_qty>0?Math.min(Number(i.partial_qty),open):open;
-    return s+qty*Number(i.unit_price||0);
-  },0);
+  const forecastVal       = forecastItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const perdidoVal        = perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const semSinalVal       = semSinalItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const unclassifiedRmVal = unclassifiedRm.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
@@ -1909,11 +1905,9 @@ function renderBacklogGrid(el, items, isAdmin){
           +(isAdmin?'<td style="padding:7px 10px;text-align:center">'
           +'<select onchange="onWillShipChange(\''+item.id+'\',this.value,this)" style="padding:3px 5px;border:1px solid var(--border-md);border-radius:5px;font-size:11px;font-family:inherit;width:76px">'
           +'<option value=""'+(item.will_ship_month===null||item.will_ship_month===undefined?' selected':'')+'>—</option>'
-          +'<option value="true"'+(item.will_ship_month===true&&!(item.partial_qty>0)?' selected':'')+'>✅ Sim</option>'
-          +'<option value="partial"'+(item.partial_qty>0?' selected':'')+'>🔀 Parcial</option>'
+          +'<option value="true"'+(item.will_ship_month===true?' selected':'')+'>✅ Sim</option>'
           +'<option value="false"'+(item.will_ship_month===false?' selected':'')+'>❌ Não</option>'
           +'</select>'
-          +(item.partial_qty>0?'<p style="font-size:9px;color:#92400E;margin-top:2px;font-weight:600">'+item.partial_qty+' un</p>':'')
           +'</td>':'')
           +'<td style="padding:7px 10px">'
           +'<select data-prev-cls="'+(item.classification||'')+'" onchange="onClassificationChange(\''+item.id+'\',this.value,this.dataset.prevCls,this)" style="padding:3px 5px;border:1px solid '+clsBg+';background:'+clsBg+';color:'+clsTxt+';border-radius:5px;font-size:10px;font-family:inherit;font-weight:600;max-width:130px">'
@@ -2470,7 +2464,7 @@ function refreshBacklogKPIs(){
   const shippedVal=rm
     ?shippedItems.reduce((s,i)=>{const q=(i.backlog_shipments||[]).filter(s=>inRange((s.ship_date||'').slice(0,7))).reduce((a,s)=>a+Number(s.qty_shipped||0),0);return s+q*Number(i.unit_price||0);},0)
     :shippedItems.reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
-  const forecastVal=forecastItems.reduce((s,i)=>{const o=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));const q=i.partial_qty>0?Math.min(Number(i.partial_qty),o):o;return s+q*Number(i.unit_price||0);},0);
+  const forecastVal=forecastItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const perdidoVal=perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const semSinalVal=semSinalItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const unclsVal=unclsItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
@@ -2550,21 +2544,16 @@ async function saveBacklogComment(itemId){
 }
 
 async function onWillShipChange(itemId, value, selectEl){
-  if(value==='partial'){
-    openPartialModal(itemId, selectEl);
-  } else {
-    const boolVal=value==='true'?true:value==='false'?false:null;
-    const item=window._backlogItems?.find(i=>i.id===itemId);
-    if(item){item.will_ship_month=boolVal;item.partial_qty=null;}
-    const{error}=await sb.from('backlog_items').update({
-      will_ship_month:boolVal,
-      partial_qty:null,
-      updated_at:new Date().toISOString(),
-      updated_by:cProfile?.full_name||'Admin'
-    }).eq('id',itemId);
-    if(error){console.error('will_ship update error:',error);alert('Erro: '+error.message);return;}
-    refreshBacklogKPIs();
-  }
+  const boolVal=value==='true'?true:value==='false'?false:null;
+  const item=window._backlogItems?.find(i=>i.id===itemId);
+  if(item){item.will_ship_month=boolVal;}
+  const{error}=await sb.from('backlog_items').update({
+    will_ship_month:boolVal,
+    updated_at:new Date().toISOString(),
+    updated_by:cProfile?.full_name||'Admin'
+  }).eq('id',itemId);
+  if(error){console.error('will_ship update error:',error);alert('Erro: '+error.message);return;}
+  refreshBacklogKPIs();
 }
 
 function openPartialModal(itemId, selectEl){
@@ -4974,7 +4963,7 @@ function buildPainelHTML(el, allItems, allNetworks=null){
   const semSinalItems=classifiedOpen.filter(i=>i.will_ship_month===null||i.will_ship_month===undefined);
   const unclsItems=openItems.filter(i=>!i.classification||i.classification==='');
 
-  const forecastVal=forecastItems.reduce((s,i)=>{const o=Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0));const q=i.partial_qty>0?Math.min(Number(i.partial_qty),o):o;return s+q*Number(i.unit_price||0);},0);
+  const forecastVal=forecastItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const perdidoVal=perdidoItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const semSinalVal=semSinalItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
   const openVal=openItems.reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
