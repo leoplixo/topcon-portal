@@ -3245,277 +3245,9 @@ async function renderAdminTab(tab){
 
   if(tab==='admindash'){
     const pw=document.getElementById('admin-page-wrap');
-    if(pw) pw.style.maxWidth='1060px';
-    el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando dashboard…</div></div>';
-
-    const FISCAL_START='2026-04-01';
-    const[ordersRes,targetsRes,windowsRes,clientsRes,backlogRes,partsRes]=await Promise.all([
-      sb.from('orders').select('id,total_usd,final_total_usd,price_type,status,created_at,forwarded_to,requested_delivery_date,user_profiles(full_name),client_groups(label),order_items(pn,unit_price,quantity,additional_discount)')
-        .gte('created_at',FISCAL_START).neq('status','cancelled').order('created_at'),
-      sb.from('targets').select('user_id,target_usd,user_profiles(full_name)'),
-      sb.from('windows').select('*').order('window_number'),
-      sb.from('user_profiles').select('id,full_name,client_groups(label)').eq('is_admin',false).neq('role','salesops').eq('active',true),
-      sb.from('backlog_items').select('classification,will_ship_month,unit_price,qty_ordered,qty_shipped,destination,availability_date,backlog_shipments(ship_date,qty_shipped)'),
-      sb.from('parts').select('pn,cost').not('cost','is',null).gt('cost',0)
-    ]);
-
-    const orders=ordersRes.data||[];
-
-    const targets=targetsRes.data||[];
-    const windows=windowsRes.data||[];
-    const clients=clientsRes.data||[];
-    const backlog=backlogRes.data||[];
-
-    const costMap={};(partsRes.data||[]).forEach(p=>costMap[p.pn]=Number(p.cost));
-    const TARGET_M=40;
-    const mItems=orders.flatMap(o=>(o.order_items||[]).map(i=>({
-      pn:i.pn,fp:Number(i.unit_price)-Number(i.additional_discount||0),
-      cost:costMap[i.pn]||0,qty:Number(i.quantity||1),
-      client:o.user_profiles?.full_name||'—',dest:o.forwarded_to||'—',
-      win:windows.find(w=>o.created_at>=w.open_date&&o.created_at<=w.close_date)?.window_number||null,
-    }))).filter(i=>i.cost>0&&i.fp>0);
-    const wCalc=items=>{if(!items.length)return null;const r=items.reduce((s,i)=>s+i.fp*i.qty,0);const co=items.reduce((s,i)=>s+i.cost*i.qty,0);return(r-co)/r*100;};
-    const mBar=(pct)=>{const w=Math.min(100,Math.max(0,pct));const col=pct>=TARGET_M?'#3A8C4C':pct>=TARGET_M*0.75?'#E67E22':'#C0392B';
-      return '<div style="display:flex;align-items:center;gap:8px;flex:1"><div style="flex:1;height:8px;background:var(--g100);border-radius:4px;position:relative"><div style="width:'+w+'%;height:100%;background:'+col+';border-radius:4px"></div><div style="position:absolute;top:0;left:'+TARGET_M+'%;width:2px;height:100%;background:#888;opacity:.4"></div></div><span style="font-size:12px;font-weight:700;color:'+col+';min-width:44px;text-align:right">'+pct.toFixed(1)+'%</span></div>';};
-    const byDealer={};mItems.forEach(i=>{if(!byDealer[i.client])byDealer[i.client]=[];byDealer[i.client].push(i);});
-    const dealerM=Object.entries(byDealer).map(([n,it])=>({n,m:wCalc(it),r:it.reduce((s,i)=>s+i.fp*i.qty,0)})).filter(x=>x.m!==null).sort((a,b)=>a.m-b.m);
-    const byWin={};mItems.forEach(i=>{const k=i.win?'Janela '+i.win:'Fora de janela';if(!byWin[k])byWin[k]=[];byWin[k].push(i);});
-    const winM=Object.entries(byWin).map(([n,it])=>({n,m:wCalc(it),r:it.reduce((s,i)=>s+i.fp*i.qty,0)})).filter(x=>x.m!==null).sort((a,b)=>a.n.localeCompare(b.n));
-    const byDest={};mItems.forEach(i=>{if(i.dest&&i.dest!=='—'){if(!byDest[i.dest])byDest[i.dest]=[];byDest[i.dest].push(i);}});
-    const destM=Object.entries(byDest).map(([n,it])=>({n,m:wCalc(it),r:it.reduce((s,i)=>s+i.fp*i.qty,0)})).filter(x=>x.m!==null).sort((a,b)=>a.n.localeCompare(b.n));
-    const overallM=wCalc(mItems);
-
-    const oTotal=o=>Number(o.final_total_usd||o.total_usd||0);
-    const totalRev=orders.reduce((s,o)=>s+oTotal(o),0);
-    const totalTarget=targets.reduce((s,t)=>s+Number(t.target_usd||0),0);
-    const pctTarget=totalTarget>0?((totalRev/totalTarget)*100).toFixed(1):0;
-    const pending=orders.filter(o=>o.status==='pending').length;
-
-    // Revenue by client
-    const revByClient={};
-    orders.forEach(o=>{
-      const n=o.user_profiles?.full_name||'—';
-      revByClient[n]=(revByClient[n]||0)+oTotal(o);
-    });
-    const clientRevArr=Object.entries(revByClient).sort((a,b)=>b[1]-a[1]);
-
-    // Build unified dealer list: merge targets + all dealers who placed orders
-    const targetByUser={};
-    targets.forEach(t=>targetByUser[t.user_id]={target:Number(t.target_usd),name:t.user_profiles?.full_name||'—'});
-    // Add dealers who have orders but no target entry
-    orders.forEach(o=>{
-      if(!o.user_profiles)return;
-      const alreadyInTarget=Object.values(targetByUser).some(t=>t.name===o.user_profiles.full_name);
-      if(!alreadyInTarget){
-        const fakeKey='order-'+o.user_profiles.full_name;
-        if(!targetByUser[fakeKey]) targetByUser[fakeKey]={target:0,name:o.user_profiles.full_name};
-      }
-    });
-
-    // Revenue by user
-    const revByUser={};
-    orders.forEach(o=>{if(o.user_profiles)revByUser[o.user_profiles.full_name]=(revByUser[o.user_profiles.full_name]||0)+oTotal(o);});
-
-    // Monthly revenue (FY2026: Apr-Mar)
-    const MK=['2026-04','2026-05','2026-06','2026-07','2026-08','2026-09','2026-10','2026-11','2026-12','2027-01','2027-02','2027-03'];
-    const ML=['Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez','Jan','Fev','Mar'];
-    // Shipped: use backlog_shipments.ship_date for accurate month grouping
-    const shippedByMonth={};MK.forEach(m=>shippedByMonth[m]=0);
-    const potentialByMonth={};MK.forEach(m=>potentialByMonth[m]=0);
-    (backlog||[]).forEach(b=>{
-      const price=Number(b.unit_price||0);
-      const ordered=Number(b.qty_ordered||0);
-      const shipped=Number(b.qty_shipped||0);
-      // Shipped: sum each shipment by its ship_date month
-      (b.backlog_shipments||[]).forEach(s=>{
-        const mk=(s.ship_date||'').slice(0,7);
-        if(mk&&shippedByMonth[mk]!==undefined)
-          shippedByMonth[mk]+=Number(s.qty_shipped||0)*price;
-      });
-      // Signaled potential: will_ship_month=true, availability_date in a future month, still open qty
-      if(b.will_ship_month&&(ordered-shipped)>0){
-        const mk=(b.availability_date||'').slice(0,7);
-        if(mk&&potentialByMonth[mk]!==undefined)
-          potentialByMonth[mk]+=((ordered-shipped)*price);
-      }
-    });
-
-    // Price type breakdown
-    const schedRev=orders.filter(o=>o.price_type==='scheduled').reduce((s,o)=>s+oTotal(o),0);
-    const spotRev=orders.filter(o=>o.price_type==='spot').reduce((s,o)=>s+oTotal(o),0);
-
-    // Window compliance
-    const today=new Date();
-    const closedW=windows.filter(w=>new Date(w.close_date)<today);
-    const closedM=closedW.reduce((s,w)=>s+w.months_covered,0);
-    const currentW=windows.find(w=>today>=new Date(w.open_date)&&today<=new Date(w.close_date));
-
-    // Backlog KPIs
-    const blOpen=backlog.filter(i=>i.classification!=='Shipped').length;
-    const blWillShip=backlog.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped').length;
-    const blWillShipVal=backlog.filter(i=>i.will_ship_month===true&&i.classification!=='Shipped')
-      .reduce((s,i)=>s+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0),0);
-    const blShippedVal=backlog.filter(i=>i.classification==='Shipped')
-      .reduce((s,i)=>s+Number(i.qty_shipped||0)*Number(i.unit_price||0),0);
-
-    // Backlog by destination
-    const blByDest={};
-    backlog.filter(i=>i.classification!=='Shipped').forEach(i=>{
-      const d=i.destination||'N/A';
-      blByDest[d]=(blByDest[d]||0)+Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))*Number(i.unit_price||0);
-    });
-
-    // Classification breakdown
-    const clsCounts={};
-    backlog.forEach(i=>{clsCounts[i.classification]=(clsCounts[i.classification]||0)+1;});
-
-    const COLORS=['#0A8CFA','#3A8C4C','#E67E22','#9B59B6','#E74C3C','#16A085','#F39C12','#2C3E50'];
-
-    el.innerHTML=
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">'
-      +'<div><h1 class="page-title">Dashboard Gerencial FY2026</h1>'
-      +'<p class="page-sub" style="margin-bottom:0">'+(currentW?'🟢 '+currentW.name+' aberta':'Próxima janela: '+(windows.find(w=>new Date(w.open_date)>today)?.name||'—'))+'</p></div>'
-      +'<span style="font-size:12px;color:var(--tm)">'+new Date().toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'})+'</span>'
-      +'</div>'
-
-      // ── KPI Row 1: Revenue
-      +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:20px">'
-      +[
-        {icon:'💰',label:'Receita FY2026',val:fmt(totalRev),sub:pctTarget+'% da meta',color:'var(--blue)'},
-        {icon:'🎯',label:'Meta total',val:fmt(totalTarget),sub:clients.length+' clientes',color:'var(--t2)'},
-        {icon:'📋',label:'Pedidos ativos',val:orders.length,sub:pending+' aguardando revisão',color:pending>0?'#D97706':'var(--t2)'},
-        {icon:'📦',label:'Backlog aberto',val:blOpen,sub:'linhas em aberto',color:'#C05000'},
-        {icon:'✅',label:'Faturamento previsto',val:fmt(blWillShipVal),sub:blWillShip+' linhas',color:'#166534'},
-        {icon:'🚚',label:'Já embarcado',val:fmt(blShippedVal),sub:'no ciclo',color:'#5B2D99'},
-      ].map(k=>
-        '<div class="dash-card" style="padding:14px;margin-bottom:0">'
-        +'<div style="font-size:20px;margin-bottom:4px">'+k.icon+'</div>'
-        +'<p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">'+k.label+'</p>'
-        +'<p style="font-size:19px;font-weight:700;color:'+k.color+';letter-spacing:-.02em">'+k.val+'</p>'
-        +'<p style="font-size:11px;color:var(--tm);margin-top:1px">'+k.sub+'</p>'
-        +'</div>'
-      ).join('')
-      +'</div>'
-
-      // ── Revenue vs Target per client
-      +'<div class="dash-card" style="margin-bottom:16px">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
-      +'<p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:0">Performance por cliente — FY2026</p>'
-      +'<div style="display:flex;gap:6px">'
-      +['pct','rev','name'].map(s=>{
-        const active=(!window._dashSort&&s==='pct')||window._dashSort===s;
-        const label=s==='pct'?'% Meta':s==='rev'?'Receita':'A-Z';
-        return '<button onclick="window._dashSort=\''+s+'\';renderAdminTab(\'admindash\')" style="font-size:11px;padding:3px 10px;border:1px solid var(--border-md);border-radius:6px;cursor:pointer;'+(active?'background:#001423;color:#fff':'background:#fff;color:var(--t2)')+'">' +label+'</button>';
-      }).join('')
-      +'</div></div>'
-      +Object.entries(targetByUser).sort(([,a],[,b])=>{
-        const rA=revByUser[a.name]||0, rB=revByUser[b.name]||0;
-        const pA=a.target>0?rA/a.target:0, pB=b.target>0?rB/b.target:0;
-        if(window._dashSort==='rev')  return rB-rA;
-        if(window._dashSort==='name') return a.name.localeCompare(b.name);
-        return pB-pA; // default: % meta best to worst
-      }).map(([uid,t],i)=>{
-        const rev=revByUser[t.name]||0;
-        const pct=t.target>0?Math.min(100,(rev/t.target*100)):0;
-        const accT=t.target*(closedM/12);
-        const minT=accT*0.75;
-        const eligible=closedM===0||rev>=minT;
-        const accPct=t.target>0?Math.min(100,(accT/t.target*100)):0;
-        return '<div style="margin-bottom:14px">'
-          +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;flex-wrap:wrap;gap:6px">'
-          +'<div style="display:flex;align-items:center;gap:8px">'
-          +'<span style="font-size:13px;font-weight:500">'+t.name+'</span>'
-          +'<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:'+(eligible?'#E8F5EC':'#FEF3C7')+';color:'+(eligible?'#166534':'#92400E')+';font-weight:600">'+(eligible?'✅ Scheduled':'⚠️ Em risco')+'</span>'
-          +'</div>'
-          +'<div style="text-align:right"><span style="font-size:13px;font-weight:700;color:var(--blue)">'+fmt(rev)+'</span><span style="font-size:11px;color:var(--tm)"> / '+fmt(t.target)+'</span></div>'
-          +'</div>'
-          +'<div style="position:relative;background:var(--g100);border-radius:10px;height:8px">'
-          +'<div style="height:100%;border-radius:10px;background:'+(eligible?'var(--ag-green)':'#E67E22')+';width:'+pct+'%;transition:width .6s"></div>'
-          +(closedM>0?'<div style="position:absolute;top:-4px;left:'+accPct+'%;width:2px;height:16px;background:#C0392B;border-radius:2px" title="Mínimo 75% acumulado"></div>':'')+'</div>'
-          +'<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--tm);margin-top:3px"><span>'+pct.toFixed(0)+'% da meta anual</span><span>Meta: '+fmt(t.target)+'</span></div>'
-          +'</div>';
-      }).join('')
-      +'</div>'
-
-      // ── 2-column: Monthly trend + Price breakdown
-      +'<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px">'
-      +'<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Embarcado vs Potencial — FY2026</p><p style="font-size:10px;color:var(--tm);margin:-10px 0 8px">🔵 Embarcado (qty_shipped × preço) · 🟠 Potencial sinalizado (will_ship_month = sim)</p><div style="position:relative;height:160px"><canvas id="adm-chart-monthly"></canvas></div></div>'
-      +'<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Scheduled vs SPOT</p><canvas id="adm-chart-ptype" height="160"></canvas>'
-      +'<div style="margin-top:10px">'
-      +'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span style="color:var(--blue)">● Scheduled</span><span style="font-weight:600">'+fmt(schedRev)+'</span></div>'
-      +'<div style="display:flex;justify-content:space-between;font-size:12px"><span style="color:#E67E22">● SPOT</span><span style="font-weight:600">'+fmt(spotRev)+'</span></div>'
-      +'</div></div>'
-      +'</div>'
-
-      // ── Backlog by destination + Classification
-      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'
-      +'<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Backlog por destino (valor em aberto)</p>'
-      +Object.entries(blByDest).map(([dest,val],i)=>{
-        const maxV=Math.max(...Object.values(blByDest));
-        const pct=maxV>0?(val/maxV*100):0;
-        return '<div style="margin-bottom:10px">'
-          +'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span style="font-weight:500">'+dest+'</span><span>'+fmt(val)+'</span></div>'
-          +'<div style="background:var(--g100);border-radius:6px;height:6px"><div style="height:100%;border-radius:6px;background:'+COLORS[i%COLORS.length]+';width:'+pct+'%"></div></div>'
-          +'</div>';
-      }).join('')
-      +'</div>'
-      +'<div class="dash-card" style="margin-bottom:0"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Backlog por classificação</p>'
-      +Object.entries(clsCounts).sort((a,b)=>b[1]-a[1]).map(([cls,n],i)=>{
-        const total=backlog.length||1;
-        const pct=(n/total*100).toFixed(0);
-        const[clsBg,clsTxt]=CLS_COLORS[cls]||['var(--g100)','var(--t2)'];
-        return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">'
-          +'<span style="min-width:130px;font-size:11px;padding:2px 8px;background:'+clsBg+';color:'+clsTxt+';border-radius:8px;font-weight:600">'+cls+'</span>'
-          +'<div style="flex:1;background:var(--g100);border-radius:4px;height:6px"><div style="height:100%;border-radius:4px;background:'+clsTxt+';width:'+pct+'%"></div></div>'
-          +'<span style="font-size:11px;color:var(--tm);min-width:28px;text-align:right">'+n+'</span>'
-          +'</div>';
-      }).join('')
-      +'</div></div>'
-
-      // ── FY2026 Windows progress
-      +'<div class="dash-card"><p style="font-size:12px;font-weight:600;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;margin-bottom:14px">Janelas FY2026</p>'
-      +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px">'
-      +windows.map(w=>{
-        const isOpen=today>=new Date(w.open_date)&&today<=new Date(w.close_date);
-        const isPast=new Date(w.close_date)<today;
-        const dot=isOpen?'🟢':isPast?'⚫':'⚪';
-        const wTarget=totalTarget*(w.months_covered/12);
-        return '<div style="background:var(--g50);border:1px solid '+(isOpen?'var(--blue)':'var(--border)')+';border-radius:var(--r-md);padding:12px">'
-          +'<p style="font-size:13px;font-weight:600;margin-bottom:2px">'+dot+' '+w.name+(isOpen?' <span style="font-size:10px;color:var(--blue)">ABERTA</span>':'')+'</p>'
-          +'<p style="font-size:10px;color:var(--tm);margin-bottom:5px">'+new Date(w.open_date).toLocaleDateString('pt-BR')+' – '+new Date(w.close_date).toLocaleDateString('pt-BR')+'</p>'
-          +'<p style="font-size:13px;font-weight:700;color:var(--blue)">'+fmt(wTarget)+'</p>'
-          +'<p style="font-size:10px;color:var(--tm)">'+w.months_covered+' meses · objetivo</p>'
-          +'</div>';
-      }).join('')
-      +'</div></div>';
-
-    
-    // Margin section
-    if(overallM!==null){
-      const oc=overallM>=TARGET_M?'#3A8C4C':overallM>=TARGET_M*0.75?'#E67E22':'#C0392B';
-      const dRow=d=>'<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)"><div style="min-width:180px;font-size:13px;font-weight:500">'+d.n+'</div>'+mBar(d.m)+'<div style="min-width:80px;text-align:right;font-size:11px;color:var(--tm)">'+fmt(d.r)+'</div></div>';
-      const mHTML='<div class="dash-card" style="margin-top:16px"><div style="display:flex;align-items:baseline;gap:12px;margin-bottom:12px"><h2 style="font-size:15px;font-weight:700">📊 Análise de Margem FY2026</h2><span style="font-size:18px;font-weight:800;color:'+oc+'">'+overallM.toFixed(1)+'%</span><span style="font-size:12px;color:var(--tm)">(meta '+TARGET_M+'% · '+mItems.length+' linhas com custo)</span></div>'+(dealerM.length?'<details open><summary style="font-size:13px;font-weight:600;cursor:pointer;padding:6px 0;color:var(--t2)">Por dealer ('+dealerM.length+')</summary><div style="padding-top:6px">'+dealerM.map(dRow).join('')+'</div></details>':'')+(winM.length?'<details style="margin-top:10px"><summary style="font-size:13px;font-weight:600;cursor:pointer;padding:6px 0;color:var(--t2)">Por janela</summary><div style="padding-top:6px">'+winM.map(dRow).join('')+'</div></details>':'')+(destM.length?'<details style="margin-top:10px"><summary style="font-size:13px;font-weight:600;cursor:pointer;padding:6px 0;color:var(--t2)">Por destino</summary><div style="padding-top:6px">'+destM.map(dRow).join('')+'</div></details>':'')+'</div>';
-      const mDiv=document.createElement('div');mDiv.innerHTML=mHTML;el.appendChild(mDiv);
-    }
-requestAnimationFrame(()=>{
-      const mCtx=document.getElementById('adm-chart-monthly');
-      if(mCtx) new Chart(mCtx,{type:'bar',
-        data:{labels:ML,datasets:[
-          {label:'Embarcado',data:MK.map(m=>shippedByMonth[m]||0),
-            backgroundColor:'rgba(10,140,250,0.85)',borderColor:'rgba(10,140,250,1)',borderWidth:1,borderRadius:4,order:1},
-          {label:'Potencial sinalizado',data:MK.map(m=>potentialByMonth[m]||0),
-            backgroundColor:'rgba(255,165,0,0.5)',borderColor:'rgba(255,140,0,0.8)',borderWidth:1,borderRadius:4,order:2}
-        ]},
-        options:{responsive:true,maintainAspectRatio:false,animation:{duration:400},
-          plugins:{legend:{display:true,position:'top',labels:{boxWidth:10,font:{size:10}}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': USD '+ctx.raw.toLocaleString('en-US',{minimumFractionDigits:0})}}},
-          scales:{y:{ticks:{callback:v=>'$'+Number(v).toLocaleString('en-US',{maximumFractionDigits:0})},grid:{color:'rgba(0,0,0,0.05)'}},x:{grid:{display:false}}}}});
-      const pCtx=document.getElementById('adm-chart-ptype');
-      if(pCtx&&(schedRev+spotRev)>0) new Chart(pCtx,{type:'doughnut',
-        data:{labels:['Scheduled','SPOT'],datasets:[{data:[schedRev,spotRev],
-          backgroundColor:['rgba(10,140,250,0.8)','rgba(230,126,34,0.8)'],borderWidth:0}]},
-        options:{responsive:true,cutout:'65%',plugins:{legend:{display:false},
-          tooltip:{callbacks:{label:ctx=>'USD '+ctx.raw.toLocaleString('en-US',{minimumFractionDigits:0})}}}}});
-    });
+    if(pw) pw.style.maxWidth='100%';
+    await renderAdminDashboardV2(el);
+    return;
   }
 
   if(tab==='upload'){
@@ -5568,6 +5300,953 @@ function buildPainelNetworksSection(el, netPurchases){
     </div>`;
   el.querySelector('div')?.appendChild(netDiv);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// ADMIN DASHBOARD V2 — GESTÃO COMPLETA
+// ═══════════════════════════════════════════════════════════════════
+
+// Filter state (sticky across re-renders)
+let adminDashFilters = window._adminDashFilters || {
+  monthFrom: '',
+  monthTo: '',
+  metaType: 'total',   // 'products' | 'networks' | 'total'
+  managers: [],        // multi-select
+  segments: [],        // multi-select
+  countries: [],       // multi-select
+  client: ''
+};
+window._adminDashFilters = adminDashFilters;
+
+function getFYStart(){
+  const now = new Date();
+  return now.getMonth() < 3 ? now.getFullYear()-1 : now.getFullYear();
+}
+
+// FY month sequence: month=1 → April of fyStart, month=12 → March of fyStart+1
+function fyMonthToYM(fyStart, month){
+  if(month <= 9){ return fyStart + '-' + String(month+3).padStart(2,'0'); }
+  return (fyStart+1) + '-' + String(month-9).padStart(2,'0');
+}
+
+function ymToFYMonth(fyStart, ym){
+  // returns month 1..12 of FY, or null if outside
+  const [y, m] = ym.split('-').map(Number);
+  if(y === fyStart && m >= 4) return m - 3;
+  if(y === fyStart+1 && m <= 3) return m + 9;
+  return null;
+}
+
+async function renderAdminDashboardV2(el){
+  el.innerHTML = '<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando dashboard…</div></div>';
+
+  const fyStart = getFYStart();
+  const fyEnd   = fyStart + 1;
+
+  // Default period: current month
+  if(!adminDashFilters.monthFrom){
+    const now = new Date();
+    const cur = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    adminDashFilters.monthFrom = cur;
+    adminDashFilters.monthTo   = cur;
+  }
+
+  // Fetch everything in parallel
+  const FY_START_DATE = fyStart + '-04-01';
+  const FY_END_DATE   = fyEnd   + '-03-31';
+
+  const [profilesRes, targetsRes, budgetsRes, backlogRes, ordersRes, netsRes, partsRes] = await Promise.all([
+    sb.from('user_profiles').select('id,full_name,manager_name,segment,country,client_groups(label)').eq('is_admin',false).neq('role','salesops'),
+    sb.from('targets').select('user_id,target_usd,target_networks_usd,year').eq('year', fyStart),
+    sb.from('monthly_budgets').select('*').eq('fiscal_year', fyStart),
+    sb.from('backlog_items').select('id,client_user_id,client_name,manager_name,classification,will_ship_month,unit_price,qty_ordered,qty_shipped,destination,rdd,backlog_shipments(ship_date,qty_shipped)'),
+    sb.from('orders').select('id,user_id,total_usd,final_total_usd,status,forwarded_at,created_at,user_profiles(full_name,manager_name,segment,country),order_items(pn,unit_price,quantity,additional_discount)').gte('created_at', FY_START_DATE).lte('created_at', FY_END_DATE+'T23:59:59'),
+    sb.from('network_purchases').select('*').eq('fiscal_year', fyStart).then(r => r.error ? sb.from('network_purchases').select('*') : r),
+    sb.from('parts').select('pn,cost').not('cost','is',null).gt('cost',0)
+  ]);
+
+  const profiles = profilesRes.data || [];
+  const targets  = targetsRes.data  || [];
+  const budgets  = budgetsRes.data  || [];
+  const backlog  = backlogRes.data  || [];
+  const orders   = ordersRes.data   || [];
+  const nets     = (netsRes.data    || []).filter(n => {
+    // Some rows may not have fiscal_year if older; include by month
+    const m = (n.month||'').slice(0,7);
+    return m >= (fyStart+'-04') && m <= (fyEnd+'-03');
+  });
+  const costMap = {};
+  (partsRes.data||[]).forEach(p => costMap[p.pn] = Number(p.cost));
+
+  // Build profile lookup
+  const profileById = {};
+  profiles.forEach(p => profileById[p.id] = p);
+
+  // Build budget lookup: userId → {month: {p, n}}
+  const budgetByUser = {};
+  budgets.forEach(b => {
+    if(!budgetByUser[b.user_id]) budgetByUser[b.user_id] = {};
+    budgetByUser[b.user_id][b.month] = {
+      p: Number(b.budget_products_usd||0),
+      n: Number(b.budget_networks_usd||0)
+    };
+  });
+
+  // Build target lookup (annual visible-to-client)
+  const targetByUser = {};
+  targets.forEach(t => targetByUser[t.user_id] = {
+    p: Number(t.target_usd||0),
+    n: Number(t.target_networks_usd||0)
+  });
+
+  // Store all data globally for re-renders
+  window._adminDashData = { profiles, targets, budgets, backlog, orders, nets, costMap, profileById, budgetByUser, targetByUser, fyStart };
+
+  renderAdminDashV2Content(el);
+}
+
+function renderAdminDashV2Content(el){
+  const d = window._adminDashData;
+  if(!d){ return; }
+  const { profiles, backlog, orders, nets, costMap, profileById, budgetByUser, targetByUser, fyStart } = d;
+  const f = window._adminDashFilters;
+
+  // ── Filter helpers ──
+  const passClientFilter = (clientId) => {
+    if(!clientId) return f.managers.length===0 && f.segments.length===0 && f.countries.length===0 && !f.client;
+    const p = profileById[clientId];
+    if(f.client && (!p || !p.full_name.toLowerCase().includes(f.client.toLowerCase()))) return false;
+    if(f.managers.length > 0 && (!p || !f.managers.includes(p.manager_name))) return false;
+    if(f.segments.length > 0 && (!p || !f.segments.includes(p.segment))) return false;
+    if(f.countries.length > 0 && (!p || !f.countries.includes(p.country))) return false;
+    return true;
+  };
+
+  // Filter clients
+  const filteredClients = profiles.filter(p => passClientFilter(p.id));
+  const filteredClientIds = new Set(filteredClients.map(p => p.id));
+
+  // ── Compute metrics ──
+  const inRange = (ym) => {
+    if(!ym) return false;
+    return (!f.monthFrom || ym >= f.monthFrom) && (!f.monthTo || ym <= f.monthTo);
+  };
+  const monthsInRange = [];
+  for(let m = 1; m <= 12; m++){
+    const ym = fyMonthToYM(fyStart, m);
+    if(inRange(ym)) monthsInRange.push({ m, ym });
+  }
+
+  // Budget in range (per type)
+  let budgetP = 0, budgetN = 0;
+  filteredClients.forEach(p => {
+    const userBudgets = budgetByUser[p.id] || {};
+    monthsInRange.forEach(({m}) => {
+      const b = userBudgets[m] || {p:0, n:0};
+      budgetP += b.p;
+      budgetN += b.n;
+    });
+  });
+
+  // Realized (shipped) products in range
+  let realizedP = 0;
+  backlog.forEach(item => {
+    if(!filteredClientIds.has(item.client_user_id)) return;
+    (item.backlog_shipments||[]).forEach(s => {
+      const ym = (s.ship_date||'').slice(0,7);
+      if(inRange(ym)){
+        realizedP += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+      }
+    });
+  });
+
+  // Realized networks in range
+  let realizedN = 0;
+  nets.forEach(n => {
+    if(!filteredClientIds.has(n.user_id)) return;
+    if(inRange(n.month)){
+      realizedN += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+    }
+  });
+
+  // Forecast (Previsto embarcar) in range — only open items with will_ship_month=true with RDD in range or past
+  let forecastP = 0;
+  backlog.forEach(item => {
+    if(!filteredClientIds.has(item.client_user_id)) return;
+    if(item.classification === 'Shipped') return;
+    if(item.will_ship_month !== true) return;
+    const openQty = Math.max(0, Number(item.qty_ordered||0) - Number(item.qty_shipped||0));
+    if(openQty <= 0) return;
+    // Check RDD is in range (or earlier, since it's pending)
+    const rddYm = (item.rdd||'').slice(0,7);
+    if(!rddYm || rddYm <= f.monthTo){
+      forecastP += openQty * Number(item.unit_price||0);
+    }
+  });
+
+  // Bookings in range (orders forwarded)
+  let bookingsTotal = 0;
+  orders.forEach(o => {
+    if(!o.forwarded_at) return;
+    const ym = o.forwarded_at.slice(0,7);
+    if(!inRange(ym)) return;
+    const userId = o.user_id;
+    if(!filteredClientIds.has(userId)) return;
+    bookingsTotal += Number(o.final_total_usd || o.total_usd || 0);
+  });
+
+  // Pick budget/realized based on metaType
+  let budget, realized;
+  if(f.metaType === 'products'){ budget = budgetP; realized = realizedP; }
+  else if(f.metaType === 'networks'){ budget = budgetN; realized = realizedN; }
+  else { budget = budgetP + budgetN; realized = realizedP + realizedN; }
+
+  const pct = budget > 0 ? Math.round(realized/budget*100) : 0;
+  const gap = budget - realized;
+  const forecastTotal = f.metaType === 'networks' ? realizedN : (f.metaType === 'products' ? realizedP + forecastP : realizedP + forecastP + realizedN);
+
+  // Check if current month is in range for "Previsão"
+  const now = new Date();
+  const curYm = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  const showForecastCard = inRange(curYm);
+
+  // ── Render filter bar + KPIs + sections ──
+  const fmt = v => 'USD ' + Number(v||0).toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
+
+  // Get unique values for filter options
+  const allManagers = [...new Set(profiles.map(p => p.manager_name).filter(Boolean))].sort();
+  const allSegments = ['Aftermarket','Regional OEM','Global OEM'];
+  const allCountries = [...new Set(profiles.map(p => p.country).filter(Boolean))].sort();
+
+  const tip = (text) => `<span class="dash-tip" title="${text.replace(/"/g,'&quot;')}" style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>`;
+
+  const kpiCard = (icon, label, value, color, tipText, sub) => `
+    <div style="background:#fff;border:1px solid var(--border);border-left:3px solid ${color};border-radius:var(--r-md);padding:14px 16px">
+      <div style="display:flex;align-items:center;margin-bottom:6px">
+        <span style="font-size:18px">${icon}</span>
+        ${tipText ? tip(tipText) : ''}
+      </div>
+      <p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:3px">${label}</p>
+      <p style="font-size:18px;font-weight:800;color:${color}">${value}</p>
+      ${sub ? `<p style="font-size:11px;color:var(--tm);margin-top:2px">${sub}</p>` : ''}
+    </div>`;
+
+  const metaTypeLabels = { products: 'Produtos', networks: 'Networks', total: 'Produtos + Networks' };
+  const curMetaLabel = metaTypeLabels[f.metaType];
+
+  el.innerHTML = `
+    <div style="margin-bottom:14px">
+      <h1 class="page-title" style="margin-bottom:2px">📊 Dashboard de Gestão</h1>
+      <p style="font-size:12px;color:var(--tm)">FY${fyStart} (abr/${String(fyStart).slice(2)} a mar/${String(fyStart+1).slice(2)}) · Visualizando: <strong>${curMetaLabel}</strong></p>
+    </div>
+
+    <!-- ── FILTROS STICKY ── -->
+    <div id="dash-filters" style="position:sticky;top:0;z-index:50;background:var(--g50);padding:8px 0;margin-bottom:12px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+
+        <!-- Period range -->
+        <div style="display:flex;align-items:center;gap:4px;padding:5px 8px;background:#EEF6FF;border:1px solid #93C5FD;border-radius:var(--r-md)">
+          <label style="font-size:11px;font-weight:700;color:#1D4ED8">📆 Período:</label>
+          <input type="month" value="${f.monthFrom}" onchange="adminDashSetField('monthFrom',this.value)"
+            style="padding:3px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff"/>
+          <span style="font-size:11px;color:#1D4ED8;font-weight:600">até</span>
+          <input type="month" value="${f.monthTo}" onchange="adminDashSetField('monthTo',this.value)"
+            style="padding:3px 6px;border:1px solid #93C5FD;border-radius:var(--r-md);font-size:12px;background:#fff"/>
+        </div>
+
+        <!-- Meta type toggle -->
+        <div style="display:flex;background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:2px">
+          ${['products','networks','total'].map(t => `
+            <button onclick="adminDashSetField('metaType','${t}')"
+              style="padding:4px 10px;border:none;background:${f.metaType===t?'#001423':'transparent'};color:${f.metaType===t?'#fff':'var(--tm)'};border-radius:var(--r-md);font-size:11px;font-weight:600;cursor:pointer">
+              ${t==='products'?'📦 Produtos':t==='networks'?'📡 Networks':'💼 Total'}
+            </button>
+          `).join('')}
+        </div>
+
+        <!-- Multi-select: Manager -->
+        ${buildMultiSelect('Gerentes', 'managers', allManagers, f.managers)}
+
+        <!-- Multi-select: Segment -->
+        ${buildMultiSelect('Segmentos', 'segments', allSegments, f.segments)}
+
+        <!-- Multi-select: Country -->
+        ${buildMultiSelect('Países', 'countries', allCountries, f.countries)}
+
+        <!-- Client autocomplete -->
+        <input type="text" placeholder="🔍 Cliente..." value="${f.client}"
+          oninput="adminDashSetField('client',this.value)"
+          style="padding:5px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;width:140px"/>
+
+        <!-- Reset -->
+        <button onclick="adminDashReset()"
+          style="padding:5px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;background:#fff;cursor:pointer;color:var(--tm)">✕ Limpar</button>
+      </div>
+    </div>
+
+    <!-- ── KPI CARDS ── -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;margin-bottom:18px">
+      ${kpiCard('🎯', 'Budget '+curMetaLabel, fmt(budget), '#185FA5',
+        'Soma do budget interno mensal cadastrado para os clientes filtrados no período. Este é o valor real comprometido com a empresa — diferente da meta que o cliente vê.')}
+      ${kpiCard('✅', 'Realizado', fmt(realized), '#166534',
+        'Para produtos: soma do que foi efetivamente shipped no período. Para networks: soma das compras de sinais registradas no período.')}
+      ${kpiCard('📊', '% Atingimento', pct+'%', pct>=100?'#166534':pct>=70?'#D97706':'#C0392B',
+        'Realizado / Budget × 100. ≥100% = meta batida (verde), 70-99% = atenção (laranja), <70% = abaixo (vermelho).',
+        budget>0 ? (realized>=budget ? `Superou em ${fmt(realized-budget)}` : `Faltam ${fmt(gap)}`) : 'Sem budget cadastrado')}
+      ${showForecastCard ? kpiCard('📈', 'Previsão do mês', fmt(forecastTotal), '#5B2D99',
+        'Realizado + Previsto Embarcar (itens marcados ✅ Sim no backlog). Estimativa de fechamento do mês atual.') : ''}
+      ${kpiCard('📦', 'Bookings no período', fmt(bookingsTotal), '#D97706',
+        'Soma dos pedidos forwarded a Madrid/Fort Atkinson no período. Mostra entrada de pedidos.')}
+      ${kpiCard('💰', 'Gap vs Budget', fmt(gap), gap>0?'#C0392B':'#166534',
+        'Diferença Budget - Realizado. Negativo = superou a meta. Positivo = ainda falta atingir.')}
+    </div>
+
+    <!-- ── Sections placeholders ── -->
+    <div id="dash-monthly-section"></div>
+    <div id="dash-manager-section"></div>
+    <div id="dash-client-section"></div>
+    <div id="dash-seg-country-section"></div>
+    <div id="dash-bookings-section"></div>
+    <div id="dash-margins-section"></div>
+  `;
+
+  // Render each section
+  renderMonthlyExecutionChart();
+  renderManagerPerformance();
+  renderClientPerformance();
+  renderSegmentCountryBreakdown();
+  renderBookingsWeekly();
+  renderMarginsAnalysis();
+}
+
+function buildMultiSelect(label, field, options, selected){
+  const cnt = selected.length;
+  const summary = cnt === 0 ? `Todos` : cnt === 1 ? selected[0] : `${cnt} selecionados`;
+  return `
+    <div style="position:relative" class="ms-container">
+      <button onclick="toggleMultiSelect(this)"
+        style="padding:5px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:12px;background:#fff;cursor:pointer;display:flex;align-items:center;gap:6px;min-width:130px">
+        <span style="color:var(--tm);font-size:10px;font-weight:600">${label}:</span>
+        <span style="font-weight:600">${summary}</span>
+        <span style="margin-left:auto">▾</span>
+      </button>
+      <div class="ms-dropdown" style="display:none;position:absolute;top:100%;left:0;background:#fff;border:1px solid var(--border-md);border-radius:var(--r-md);box-shadow:0 4px 12px rgba(0,0,0,.1);min-width:180px;max-height:240px;overflow-y:auto;z-index:60;padding:6px;margin-top:2px">
+        ${options.length === 0 ? '<p style="font-size:11px;color:var(--tm);padding:8px;text-align:center">Nenhuma opção</p>' :
+          options.map(opt => `
+            <label style="display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;font-size:12px;border-radius:4px" onmouseover="this.style.background='var(--g100)'" onmouseout="this.style.background=''">
+              <input type="checkbox" ${selected.includes(opt)?'checked':''}
+                onchange="adminDashToggleMulti('${field}','${opt.replace(/'/g,"\\'")}',this.checked)"/>
+              ${opt}
+            </label>
+          `).join('')}
+      </div>
+    </div>`;
+}
+
+function toggleMultiSelect(btn){
+  // Close all other dropdowns
+  document.querySelectorAll('.ms-dropdown').forEach(d => { if(d !== btn.nextElementSibling) d.style.display = 'none'; });
+  const dd = btn.nextElementSibling;
+  dd.style.display = dd.style.display === 'block' ? 'none' : 'block';
+}
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', e => {
+  if(!e.target.closest('.ms-container')){
+    document.querySelectorAll('.ms-dropdown').forEach(d => d.style.display = 'none');
+  }
+});
+
+function adminDashSetField(field, value){
+  window._adminDashFilters[field] = value;
+  const el = document.getElementById('admin-content');
+  if(el) renderAdminDashV2Content(el);
+}
+
+function adminDashToggleMulti(field, value, checked){
+  const arr = window._adminDashFilters[field];
+  if(checked && !arr.includes(value)) arr.push(value);
+  else if(!checked) window._adminDashFilters[field] = arr.filter(v => v !== value);
+  const el = document.getElementById('admin-content');
+  if(el) renderAdminDashV2Content(el);
+}
+
+function adminDashReset(){
+  const now = new Date();
+  const cur = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  window._adminDashFilters = {
+    monthFrom: cur, monthTo: cur, metaType: 'total',
+    managers: [], segments: [], countries: [], client: ''
+  };
+  const el = document.getElementById('admin-content');
+  if(el) renderAdminDashV2Content(el);
+}
+
+// ═══ Section: Monthly execution chart ═══
+function renderMonthlyExecutionChart(){
+  const d = window._adminDashData;
+  const f = window._adminDashFilters;
+  const { profiles, backlog, nets, profileById, budgetByUser, fyStart } = d;
+  const container = document.getElementById('dash-monthly-section');
+  if(!container) return;
+
+  const passClient = (id) => {
+    if(!id) return f.managers.length===0 && f.segments.length===0 && f.countries.length===0 && !f.client;
+    const p = profileById[id];
+    if(f.client && (!p || !p.full_name.toLowerCase().includes(f.client.toLowerCase()))) return false;
+    if(f.managers.length > 0 && (!p || !f.managers.includes(p.manager_name))) return false;
+    if(f.segments.length > 0 && (!p || !f.segments.includes(p.segment))) return false;
+    if(f.countries.length > 0 && (!p || !f.countries.includes(p.country))) return false;
+    return true;
+  };
+  const filteredIds = new Set(profiles.filter(p => passClient(p.id)).map(p => p.id));
+
+  // Compute budget, realized per FY month (1..12)
+  const monthData = [];
+  for(let m = 1; m <= 12; m++){
+    const ym = fyMonthToYM(fyStart, m);
+    let bP = 0, bN = 0, rP = 0, rN = 0;
+
+    profiles.forEach(p => {
+      if(!filteredIds.has(p.id)) return;
+      const b = (budgetByUser[p.id]||{})[m];
+      if(b){ bP += b.p; bN += b.n; }
+    });
+
+    backlog.forEach(item => {
+      if(!filteredIds.has(item.client_user_id)) return;
+      (item.backlog_shipments||[]).forEach(s => {
+        if((s.ship_date||'').slice(0,7) === ym){
+          rP += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+        }
+      });
+    });
+
+    nets.forEach(n => {
+      if(!filteredIds.has(n.user_id)) return;
+      if(n.month === ym){
+        rN += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+      }
+    });
+
+    let budget, realized;
+    if(f.metaType === 'products'){ budget = bP; realized = rP; }
+    else if(f.metaType === 'networks'){ budget = bN; realized = rN; }
+    else { budget = bP+bN; realized = rP+rN; }
+
+    monthData.push({ m, ym, budget, realized, label: ['Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez','Jan','Fev','Mar'][m-1] });
+  }
+
+  const maxVal = Math.max(...monthData.map(d => Math.max(d.budget, d.realized)), 1);
+  const fmt = v => Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+
+  container.innerHTML = `
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h3 style="font-size:13px;font-weight:700">📅 Execução mensal · FY${fyStart}
+          <span class="dash-tip" title="Comparação budget vs realizado mês a mês ao longo do ano fiscal. % atingimento por mês na ponta direita." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
+        </h3>
+        <span style="font-size:11px;color:var(--tm)">Cinza = Budget · Verde = Realizado</span>
+      </div>
+      <div>
+        ${monthData.map(d => {
+          const pct = d.budget > 0 ? Math.round(d.realized/d.budget*100) : 0;
+          const wB = Math.round(d.budget/maxVal*100);
+          const wR = Math.round(d.realized/maxVal*100);
+          const pctColor = pct>=100?'#166534':pct>=70?'#D97706':d.budget>0?'#C0392B':'#888';
+          return `<div style="display:grid;grid-template-columns:40px 1fr 80px;gap:10px;align-items:center;margin-bottom:6px;font-size:11px">
+            <span style="font-weight:600;color:var(--t2)">${d.label}</span>
+            <div style="position:relative;height:18px">
+              <div style="position:absolute;top:0;left:0;height:8px;width:${wB}%;background:#D1D5DB;border-radius:3px"></div>
+              <div style="position:absolute;top:10px;left:0;height:8px;width:${wR}%;background:#3A8C4C;border-radius:3px"></div>
+            </div>
+            <div style="text-align:right">
+              <span style="font-weight:700;color:${pctColor}">${d.budget>0?pct+'%':'—'}</span>
+              <span style="font-size:10px;color:var(--tm);display:block">USD ${fmt(d.realized)} / ${fmt(d.budget)}</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+// ═══ Section: Performance by manager ═══
+function renderManagerPerformance(){
+  const d = window._adminDashData;
+  const f = window._adminDashFilters;
+  const { profiles, backlog, nets, profileById, budgetByUser, fyStart } = d;
+  const container = document.getElementById('dash-manager-section');
+  if(!container) return;
+
+  const inRange = (ym) => (!f.monthFrom || ym >= f.monthFrom) && (!f.monthTo || ym <= f.monthTo);
+  const monthsInRange = [];
+  for(let m = 1; m <= 12; m++){
+    const ym = fyMonthToYM(fyStart, m);
+    if(inRange(ym)) monthsInRange.push(m);
+  }
+
+  // Group profiles by manager (respecting segment/country/client filter, but NOT manager filter)
+  const passNonMgr = (p) => {
+    if(f.client && !p.full_name.toLowerCase().includes(f.client.toLowerCase())) return false;
+    if(f.segments.length > 0 && !f.segments.includes(p.segment)) return false;
+    if(f.countries.length > 0 && !f.countries.includes(p.country)) return false;
+    return true;
+  };
+
+  const mgrMap = {};
+  profiles.forEach(p => {
+    if(!passNonMgr(p)) return;
+    const mgr = p.manager_name || 'Sem gerente';
+    if(f.managers.length > 0 && !f.managers.includes(mgr)) return;
+    if(!mgrMap[mgr]) mgrMap[mgr] = { clientIds: new Set(), budgetP:0, budgetN:0, realP:0, realN:0 };
+    mgrMap[mgr].clientIds.add(p.id);
+    monthsInRange.forEach(m => {
+      const b = (budgetByUser[p.id]||{})[m];
+      if(b){ mgrMap[mgr].budgetP += b.p; mgrMap[mgr].budgetN += b.n; }
+    });
+  });
+
+  backlog.forEach(item => {
+    Object.keys(mgrMap).forEach(mgr => {
+      if(!mgrMap[mgr].clientIds.has(item.client_user_id)) return;
+      (item.backlog_shipments||[]).forEach(s => {
+        if(inRange((s.ship_date||'').slice(0,7))){
+          mgrMap[mgr].realP += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+        }
+      });
+    });
+  });
+
+  nets.forEach(n => {
+    Object.keys(mgrMap).forEach(mgr => {
+      if(!mgrMap[mgr].clientIds.has(n.user_id)) return;
+      if(inRange(n.month)){
+        mgrMap[mgr].realN += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+      }
+    });
+  });
+
+  const fmt = v => 'USD ' + Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+
+  const mgrData = Object.entries(mgrMap).map(([name, data]) => {
+    let budget, realized;
+    if(f.metaType === 'products'){ budget = data.budgetP; realized = data.realP; }
+    else if(f.metaType === 'networks'){ budget = data.budgetN; realized = data.realN; }
+    else { budget = data.budgetP + data.budgetN; realized = data.realP + data.realN; }
+    return { name, budget, realized, clients: data.clientIds.size, pct: budget>0 ? Math.round(realized/budget*100) : 0 };
+  }).sort((a,b) => b.realized - a.realized);
+
+  container.innerHTML = `
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:14px">
+      <h3 style="font-size:13px;font-weight:700;margin-bottom:12px">👤 Performance por gerente
+        <span class="dash-tip" title="Carteira de cada gerente: budget total dos seus clientes vs realizado no período. O gerente pode ter realizado em clientes diferentes dos previstos." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
+      </h3>
+      ${mgrData.length === 0 ? '<p style="font-size:12px;color:var(--tm);text-align:center;padding:12px">Sem dados.</p>' :
+        mgrData.map(m => {
+          const color = m.pct >= 100 ? '#166534' : m.pct >= 70 ? '#D97706' : m.budget > 0 ? '#C0392B' : '#888';
+          const w = Math.min(100, m.pct);
+          return `<div style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <div>
+                <span style="font-size:13px;font-weight:600">${m.name}</span>
+                <span style="font-size:10px;color:var(--tm);margin-left:6px">${m.clients} dealer(s)</span>
+              </div>
+              <div style="text-align:right">
+                <span style="font-size:12px;font-weight:700;color:${color}">${fmt(m.realized)}</span>
+                <span style="font-size:10px;color:var(--tm)"> / ${fmt(m.budget)} · ${m.budget>0?m.pct+'%':'—'}</span>
+              </div>
+            </div>
+            <div style="background:#F3F4F6;height:8px;border-radius:4px;overflow:hidden">
+              <div style="background:${color};height:100%;width:${w}%;border-radius:4px;transition:width .3s"></div>
+            </div>
+          </div>`;
+        }).join('')}
+    </div>`;
+}
+
+// ═══ Section: Performance by client (ordenable) ═══
+let _dashClientSort = { field: 'realized', dir: 'desc' };
+
+function setDashClientSort(field){
+  if(_dashClientSort.field === field){
+    _dashClientSort.dir = _dashClientSort.dir === 'desc' ? 'asc' : 'desc';
+  } else {
+    _dashClientSort.field = field;
+    _dashClientSort.dir = field === 'name' ? 'asc' : 'desc';
+  }
+  renderClientPerformance();
+}
+
+function renderClientPerformance(){
+  const d = window._adminDashData;
+  const f = window._adminDashFilters;
+  const { profiles, backlog, nets, profileById, budgetByUser, targetByUser, fyStart } = d;
+  const container = document.getElementById('dash-client-section');
+  if(!container) return;
+
+  const passClient = (p) => {
+    if(f.client && !p.full_name.toLowerCase().includes(f.client.toLowerCase())) return false;
+    if(f.managers.length > 0 && !f.managers.includes(p.manager_name)) return false;
+    if(f.segments.length > 0 && !f.segments.includes(p.segment)) return false;
+    if(f.countries.length > 0 && !f.countries.includes(p.country)) return false;
+    return true;
+  };
+
+  const inRange = (ym) => (!f.monthFrom || ym >= f.monthFrom) && (!f.monthTo || ym <= f.monthTo);
+  const monthsInRange = [];
+  for(let m = 1; m <= 12; m++){
+    const ym = fyMonthToYM(fyStart, m);
+    if(inRange(ym)) monthsInRange.push(m);
+  }
+
+  const fmt = v => 'USD ' + Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+
+  const clientData = profiles.filter(p => passClient(p)).map(p => {
+    let bP = 0, bN = 0, rP = 0, rN = 0;
+    monthsInRange.forEach(m => {
+      const b = (budgetByUser[p.id]||{})[m];
+      if(b){ bP += b.p; bN += b.n; }
+    });
+    backlog.forEach(item => {
+      if(item.client_user_id !== p.id) return;
+      (item.backlog_shipments||[]).forEach(s => {
+        if(inRange((s.ship_date||'').slice(0,7))){
+          rP += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+        }
+      });
+    });
+    nets.forEach(n => {
+      if(n.user_id !== p.id) return;
+      if(inRange(n.month)){
+        rN += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+      }
+    });
+    let budget, realized;
+    if(f.metaType === 'products'){ budget = bP; realized = rP; }
+    else if(f.metaType === 'networks'){ budget = bN; realized = rN; }
+    else { budget = bP+bN; realized = rP+rN; }
+    return {
+      name: p.full_name,
+      manager: p.manager_name || '—',
+      segment: p.segment || '—',
+      country: p.country || '—',
+      budget, realized,
+      pct: budget > 0 ? Math.round(realized/budget*100) : (realized > 0 ? 999 : 0),
+      gap: budget - realized
+    };
+  }).filter(c => c.budget > 0 || c.realized > 0);
+
+  // Sort
+  const dir = _dashClientSort.dir === 'desc' ? -1 : 1;
+  clientData.sort((a,b) => {
+    const fld = _dashClientSort.field;
+    if(fld === 'name') return a.name.localeCompare(b.name) * dir;
+    return ((a[fld]||0) - (b[fld]||0)) * dir;
+  });
+
+  const arrow = (field) => _dashClientSort.field === field ? (_dashClientSort.dir === 'desc' ? ' ▼' : ' ▲') : '';
+
+  container.innerHTML = `
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:14px">
+      <h3 style="font-size:13px;font-weight:700;margin-bottom:10px">🏢 Performance por dealer (${clientData.length})
+        <span class="dash-tip" title="Tabela ordenável de dealers no período. Clique em qualquer coluna para ordenar A-Z, por valor ou por percentual." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
+      </h3>
+      <div style="overflow-x:auto;max-height:500px;overflow-y:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead style="position:sticky;top:0;background:var(--g100);z-index:1">
+            <tr>
+              <th onclick="setDashClientSort('name')" style="padding:6px 8px;text-align:left;font-size:10px;color:var(--t2);cursor:pointer;user-select:none">Cliente${arrow('name')}</th>
+              <th onclick="setDashClientSort('manager')" style="padding:6px 8px;text-align:left;font-size:10px;color:var(--t2);cursor:pointer;user-select:none">Gerente${arrow('manager')}</th>
+              <th onclick="setDashClientSort('segment')" style="padding:6px 8px;text-align:left;font-size:10px;color:var(--t2);cursor:pointer;user-select:none">Segmento${arrow('segment')}</th>
+              <th onclick="setDashClientSort('country')" style="padding:6px 8px;text-align:left;font-size:10px;color:var(--t2);cursor:pointer;user-select:none">País${arrow('country')}</th>
+              <th onclick="setDashClientSort('budget')" style="padding:6px 8px;text-align:right;font-size:10px;color:var(--t2);cursor:pointer;user-select:none">Budget${arrow('budget')}</th>
+              <th onclick="setDashClientSort('realized')" style="padding:6px 8px;text-align:right;font-size:10px;color:var(--t2);cursor:pointer;user-select:none">Realizado${arrow('realized')}</th>
+              <th onclick="setDashClientSort('pct')" style="padding:6px 8px;text-align:right;font-size:10px;color:var(--t2);cursor:pointer;user-select:none">%${arrow('pct')}</th>
+              <th onclick="setDashClientSort('gap')" style="padding:6px 8px;text-align:right;font-size:10px;color:var(--t2);cursor:pointer;user-select:none">Gap${arrow('gap')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${clientData.length===0 ? '<tr><td colspan="8" style="padding:14px;text-align:center;color:var(--tm)">Sem dados.</td></tr>' :
+              clientData.map((c,i) => {
+                const pctColor = c.pct >= 100 ? '#166534' : c.pct >= 70 ? '#D97706' : c.budget > 0 ? '#C0392B' : '#888';
+                return `<tr style="background:${i%2?'#fff':'#FAFBFC'};border-bottom:1px solid var(--border-light)">
+                  <td style="padding:5px 8px;font-weight:600">${c.name}</td>
+                  <td style="padding:5px 8px;color:var(--t2)">${c.manager}</td>
+                  <td style="padding:5px 8px;font-size:10px">${c.segment}</td>
+                  <td style="padding:5px 8px;font-size:10px">${c.country}</td>
+                  <td style="padding:5px 8px;text-align:right;color:var(--tm)">${fmt(c.budget)}</td>
+                  <td style="padding:5px 8px;text-align:right;font-weight:600">${fmt(c.realized)}</td>
+                  <td style="padding:5px 8px;text-align:right;font-weight:700;color:${pctColor}">${c.budget>0?c.pct+'%':'—'}</td>
+                  <td style="padding:5px 8px;text-align:right;color:${c.gap>0?'#C0392B':'#166534'}">${fmt(c.gap)}</td>
+                </tr>`;
+              }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// ═══ Section: Segment & Country breakdown ═══
+function renderSegmentCountryBreakdown(){
+  const d = window._adminDashData;
+  const f = window._adminDashFilters;
+  const { profiles, backlog, nets, profileById, budgetByUser, fyStart } = d;
+  const container = document.getElementById('dash-seg-country-section');
+  if(!container) return;
+
+  const inRange = (ym) => (!f.monthFrom || ym >= f.monthFrom) && (!f.monthTo || ym <= f.monthTo);
+  const monthsInRange = [];
+  for(let m = 1; m <= 12; m++){
+    if(inRange(fyMonthToYM(fyStart, m))) monthsInRange.push(m);
+  }
+
+  const passNonGroup = (p, skipField) => {
+    if(f.client && !p.full_name.toLowerCase().includes(f.client.toLowerCase())) return false;
+    if(skipField !== 'manager' && f.managers.length > 0 && !f.managers.includes(p.manager_name)) return false;
+    if(skipField !== 'segment' && f.segments.length > 0 && !f.segments.includes(p.segment)) return false;
+    if(skipField !== 'country' && f.countries.length > 0 && !f.countries.includes(p.country)) return false;
+    return true;
+  };
+
+  const computeByField = (fieldName, skipField) => {
+    const map = {};
+    profiles.forEach(p => {
+      if(!passNonGroup(p, skipField)) return;
+      const key = p[fieldName] || '—';
+      if(!map[key]) map[key] = { clientIds: new Set(), budget:0, realized:0 };
+      map[key].clientIds.add(p.id);
+      monthsInRange.forEach(m => {
+        const b = (budgetByUser[p.id]||{})[m];
+        if(b){
+          if(f.metaType === 'products') map[key].budget += b.p;
+          else if(f.metaType === 'networks') map[key].budget += b.n;
+          else map[key].budget += b.p + b.n;
+        }
+      });
+    });
+
+    backlog.forEach(item => {
+      Object.values(map).forEach(grp => {
+        if(!grp.clientIds.has(item.client_user_id)) return;
+        (item.backlog_shipments||[]).forEach(s => {
+          if(inRange((s.ship_date||'').slice(0,7)) && f.metaType !== 'networks'){
+            grp.realized += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+          }
+        });
+      });
+    });
+
+    nets.forEach(n => {
+      Object.values(map).forEach(grp => {
+        if(!grp.clientIds.has(n.user_id)) return;
+        if(inRange(n.month) && f.metaType !== 'products'){
+          grp.realized += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+        }
+      });
+    });
+
+    return Object.entries(map).map(([name, data]) => ({
+      name, budget: data.budget, realized: data.realized, clients: data.clientIds.size,
+      pct: data.budget > 0 ? Math.round(data.realized/data.budget*100) : 0
+    })).sort((a,b) => b.realized - a.realized);
+  };
+
+  const segData = computeByField('segment', 'segment');
+  const ctryData = computeByField('country', 'country');
+
+  const fmt = v => 'USD ' + Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+  const COLORS = ['#185FA5','#3A8C4C','#D97706','#991B1B','#5B2D99','#0A7A8C','#854F0B','#1F2937'];
+
+  const buildList = (data, title, tipText) => `
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:14px">
+      <h3 style="font-size:12px;font-weight:700;margin-bottom:10px">${title}
+        <span class="dash-tip" title="${tipText}" style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
+      </h3>
+      ${data.length === 0 ? '<p style="font-size:11px;color:var(--tm);text-align:center;padding:8px">Sem dados.</p>' :
+        data.map((g,i) => {
+          const color = COLORS[i % COLORS.length];
+          const maxR = Math.max(...data.map(x => x.realized), 1);
+          const w = Math.round(g.realized / maxR * 100);
+          return `<div style="margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
+              <span style="font-weight:600">${g.name} <span style="color:var(--tm);font-size:10px;font-weight:400">(${g.clients})</span></span>
+              <span style="font-weight:700;color:${color}">${fmt(g.realized)}<span style="color:var(--tm);font-size:10px;font-weight:400"> / ${fmt(g.budget)}${g.budget>0?` · ${g.pct}%`:''}</span></span>
+            </div>
+            <div style="background:#F3F4F6;height:6px;border-radius:3px">
+              <div style="background:${color};height:100%;width:${w}%;border-radius:3px"></div>
+            </div>
+          </div>`;
+        }).join('')}
+    </div>`;
+
+  container.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      ${buildList(segData, '🎯 Por segmento comercial', 'Breakdown da carteira filtrada por segmento (Aftermarket, Regional OEM, Global OEM).')}
+      ${buildList(ctryData, '🌎 Por país', 'Breakdown da carteira filtrada por país. Ranking por realizado.')}
+    </div>`;
+}
+
+// ═══ Section: Bookings weekly ═══
+function renderBookingsWeekly(){
+  const d = window._adminDashData;
+  const f = window._adminDashFilters;
+  const { profiles, orders, profileById, fyStart } = d;
+  const container = document.getElementById('dash-bookings-section');
+  if(!container) return;
+
+  const passClient = (id) => {
+    const p = profileById[id];
+    if(!p) return false;
+    if(f.client && !p.full_name.toLowerCase().includes(f.client.toLowerCase())) return false;
+    if(f.managers.length > 0 && !f.managers.includes(p.manager_name)) return false;
+    if(f.segments.length > 0 && !f.segments.includes(p.segment)) return false;
+    if(f.countries.length > 0 && !f.countries.includes(p.country)) return false;
+    return true;
+  };
+
+  // Compute week of FY for each order
+  const fyStartDate = new Date(fyStart, 3, 1); // Apr 1
+  const weeklyData = {};
+  for(let w = 1; w <= 52; w++) weeklyData[w] = 0;
+
+  orders.forEach(o => {
+    if(!o.forwarded_at) return;
+    if(!passClient(o.user_id)) return;
+    const fwd = new Date(o.forwarded_at);
+    if(fwd < fyStartDate) return;
+    const week = Math.floor((fwd - fyStartDate) / (7*24*60*60*1000)) + 1;
+    if(week > 52) return;
+    weeklyData[week] += Number(o.final_total_usd || o.total_usd || 0);
+  });
+
+  const fmt = v => Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+  const maxVal = Math.max(...Object.values(weeklyData), 1);
+  const totalBookings = Object.values(weeklyData).reduce((s,v) => s+v, 0);
+
+  container.innerHTML = `
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3 style="font-size:13px;font-weight:700">📈 Bookings semanais · FY${fyStart}
+          <span class="dash-tip" title="Pedidos forwarded a Madrid/Fort Atkinson por semana do ano fiscal. Indica entrada de pedidos ao longo do tempo." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
+        </h3>
+        <span style="font-size:11px;color:var(--tm)">Total FY: <strong style="color:#D97706">USD ${fmt(totalBookings)}</strong></span>
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:2px;height:120px;border-bottom:1px solid var(--border);padding-bottom:4px">
+        ${Object.entries(weeklyData).map(([w,v]) => {
+          const h = Math.round(v/maxVal*100);
+          return `<div style="flex:1;background:${v>0?'#D97706':'#F3F4F6'};height:${Math.max(2,h)}%;border-radius:2px 2px 0 0;cursor:help"
+            title="Semana ${w}: USD ${fmt(v)}"></div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--tm);margin-top:4px">
+        <span>S1 (abr)</span><span>S13 (jul)</span><span>S26 (out)</span><span>S39 (jan)</span><span>S52 (mar)</span>
+      </div>
+    </div>`;
+}
+
+// ═══ Section: Margins analysis ═══
+let _marginsGroupBy = 'dealer';
+
+function setMarginsGroupBy(field){
+  _marginsGroupBy = field;
+  renderMarginsAnalysis();
+}
+
+function renderMarginsAnalysis(){
+  const d = window._adminDashData;
+  const f = window._adminDashFilters;
+  const { profiles, orders, costMap, profileById, fyStart } = d;
+  const container = document.getElementById('dash-margins-section');
+  if(!container) return;
+
+  const inRange = (ym) => (!f.monthFrom || ym >= f.monthFrom) && (!f.monthTo || ym <= f.monthTo);
+
+  const passClient = (id) => {
+    const p = profileById[id];
+    if(!p) return false;
+    if(f.client && !p.full_name.toLowerCase().includes(f.client.toLowerCase())) return false;
+    if(f.managers.length > 0 && !f.managers.includes(p.manager_name)) return false;
+    if(f.segments.length > 0 && !f.segments.includes(p.segment)) return false;
+    if(f.countries.length > 0 && !f.countries.includes(p.country)) return false;
+    return true;
+  };
+
+  const mItems = orders.flatMap(o => {
+    if(!passClient(o.user_id)) return [];
+    const ym = (o.created_at||'').slice(0,7);
+    if(!inRange(ym)) return [];
+    const p = profileById[o.user_id] || {};
+    return (o.order_items||[]).map(i => ({
+      fp: Number(i.unit_price) - Number(i.additional_discount||0),
+      cost: costMap[i.pn] || 0,
+      qty: Number(i.quantity||1),
+      dealer: p.full_name || '—',
+      manager: p.manager_name || 'Sem gerente',
+      segment: p.segment || '—',
+      country: p.country || '—'
+    }));
+  }).filter(i => i.cost > 0 && i.fp > 0);
+
+  const wCalc = items => {
+    if(!items.length) return null;
+    const r = items.reduce((s,i) => s + i.fp*i.qty, 0);
+    const c = items.reduce((s,i) => s + i.cost*i.qty, 0);
+    return { margin: (r-c)/r*100, revenue: r };
+  };
+
+  const grouped = {};
+  mItems.forEach(i => {
+    const key = i[_marginsGroupBy];
+    if(!grouped[key]) grouped[key] = [];
+    grouped[key].push(i);
+  });
+
+  const data = Object.entries(grouped).map(([n,it]) => ({ name: n, ...wCalc(it) }))
+    .filter(x => x.margin !== null).sort((a,b) => b.revenue - a.revenue);
+
+  const TARGET_M = 40;
+  const fmt = v => 'USD ' + Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+
+  const groupOptions = [
+    {id:'dealer', label:'Por dealer'},
+    {id:'manager', label:'Por gerente'},
+    {id:'segment', label:'Por segmento'},
+    {id:'country', label:'Por país'}
+  ];
+
+  container.innerHTML = `
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h3 style="font-size:13px;font-weight:700">💎 Análise de margens
+          <span class="dash-tip" title="Margem ponderada por receita. Calculada como (Receita - Custo) / Receita × 100. Verde ≥ 40%, laranja ≥ 30%, vermelho < 30%. Apenas pedidos com custo de PN cadastrado entram no cálculo." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
+        </h3>
+        <div style="display:flex;background:var(--g100);border-radius:var(--r-md);padding:2px">
+          ${groupOptions.map(g => `
+            <button onclick="setMarginsGroupBy('${g.id}')"
+              style="padding:4px 10px;border:none;background:${_marginsGroupBy===g.id?'#fff':'transparent'};border-radius:var(--r-md);font-size:11px;font-weight:600;cursor:pointer;color:${_marginsGroupBy===g.id?'#001423':'var(--tm)'}">${g.label}</button>
+          `).join('')}
+        </div>
+      </div>
+      ${data.length === 0 ? '<p style="font-size:12px;color:var(--tm);text-align:center;padding:14px">Sem dados de margem disponíveis (necessita custo cadastrado nos PNs).</p>' : `
+        <div style="overflow-y:auto;max-height:350px">
+          ${data.map(m => {
+            const color = m.margin >= TARGET_M ? '#3A8C4C' : m.margin >= TARGET_M*0.75 ? '#E67E22' : '#C0392B';
+            const w = Math.min(100, Math.max(0, m.margin));
+            return `<div style="display:grid;grid-template-columns:1fr 2fr 100px;gap:10px;align-items:center;padding:5px 0;font-size:12px;border-bottom:1px solid var(--border-light)">
+              <span style="font-weight:600">${m.name}</span>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="flex:1;height:8px;background:var(--g100);border-radius:4px;position:relative">
+                  <div style="width:${w}%;height:100%;background:${color};border-radius:4px"></div>
+                  <div style="position:absolute;top:0;left:${TARGET_M}%;width:2px;height:100%;background:#888;opacity:.4"></div>
+                </div>
+                <span style="font-weight:700;color:${color};min-width:50px;text-align:right">${m.margin.toFixed(1)}%</span>
+              </div>
+              <span style="text-align:right;font-size:11px;color:var(--tm)">${fmt(m.revenue)}</span>
+            </div>`;
+          }).join('')}
+        </div>`}
+    </div>`;
+}
+
 
 // ═══════════════════════════════════════════════════════════
 // NETWORKS TAB
