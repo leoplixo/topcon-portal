@@ -1656,7 +1656,7 @@ function renderBacklogGrid(el, items, isAdmin){
         const sm=(s.ship_date||'').slice(0,7);
         return (!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);
       }))
-    : filtered.filter(i=>i.classification==='Shipped');
+    : filtered.filter(i=>(i.backlog_shipments||[]).length>0||(i.qty_shipped||0)>0);
   const shippedVal = rm
     ? shippedItems.reduce((s,i)=>{
         const q=(i.backlog_shipments||[])
@@ -2447,7 +2447,7 @@ function refreshBacklogKPIs(){
 
   const shippedItems=rm
     ?rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))))
-    :filtered.filter(i=>i.classification==='Shipped');
+    :filtered.filter(i=>(i.backlog_shipments||[]).length>0||(i.qty_shipped||0)>0);
 
   const openItems=isPastMonth
     ?rmBase.filter(i=>i.classification!=='Shipped'&&(i.rdd||'').slice(0,7)>=(rmFrom||'')&&(i.rdd||'').slice(0,7)<=(rmTo||rmFrom||'')&&!(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))))
