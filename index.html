@@ -1674,10 +1674,14 @@ function renderBacklogGrid(el, items, isAdmin){
         && !(i.backlog_shipments||[]).some(s=>{const sm=(s.ship_date||'').slice(0,7);return(!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);}))
     : [];
 
-  // For CURRENT/FUTURE: open = everything in rmBase not shipped in range
+  // For CURRENT/FUTURE: open = items with remaining qty (qty_shipped < qty_ordered) and not fully Shipped
+  // Partial items still have open qty — they belong here
+  const hasOpenQty=i=>Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))>0&&i.classification!=='Shipped';
   const openItems = isPastMonth
     ? pastNativeOpen
-    : rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>{const sm=(s.ship_date||'').slice(0,7);return(!rmFrom||sm>=rmFrom)&&(!rmTo||sm<=rmTo);}));
+    : rm
+      ? rmBase.filter(i=>hasOpenQty(i))
+      : filtered.filter(i=>hasOpenQty(i));
 
   // ── Mutually exclusive buckets — each item falls in exactly ONE ───────────
   // Priority: unclassified → own bucket regardless of signal
@@ -1715,13 +1719,13 @@ function renderBacklogGrid(el, items, isAdmin){
         ...(unclassifiedRm.length>0 ?[{icon:'⚠️',label:'Sem classificação',        count:unclassifiedRm.length, val:fmt(unclassifiedRmVal),color:'#C0392B', tip:'Itens sem classificação com RDD em '+rmLabel+'. Precisam ser classificados.'}]:[]),
       ]
     : [
-        {icon:'📋',label:'Em aberto '+(rm?rmShort:''),         count:openItems.length,     val:fmt(openVal),          color:'var(--blue)', tip:'Total de itens com RDD ≤ '+rmLabel+' ainda não shipped. É a soma de todos os outros cards (exceto Embarcado).'},
-        {icon:'🎯',label:'Previsto embarcar '+(rm?rmShort:''), count:forecastItems.length, val:fmt(forecastVal),      color:'#D97706',     tip:'Classificados e marcados ✅ Sim (ou 🔀 Parcial) no campo Embarca?. Serão faturados neste mês.'},
-        {icon:'✅',label:'Embarcado '+(rm?rmShort:''),          count:shippedItems.length,  val:fmt(shippedVal),       color:'#166534',     tip:'Já têm ship_date registrado em '+rmLabel+'. Foram faturados e saíram.'},
-        {icon:'❌',label:'Não embarca '+(rm?rmShort:''),        count:perdidoItems.length,  val:fmt(perdidoVal),       color:'#991B1B',     tip:'Classificados e marcados ❌ Não no campo Embarca?. Não serão faturados neste mês.'},
-        ...(semSinalItems.length>0  ?[{icon:'🔲',label:'Sem sinalização '+(rm?rmShort:''),count:semSinalItems.length, val:fmt(semSinalVal),      color:'#6B7280', tip:'Classificados mas sem sinalização no campo Embarca? (valor = —). Aguardam decisão do Sales Ops.'}]:[]),
-        ...(unclassifiedRm.length>0 ?[{icon:'⚠️',label:'Sem classificação',               count:unclassifiedRm.length,val:fmt(unclassifiedRmVal),color:'#C0392B', tip:'Sem classificação definida. Independente de sinalização, precisam ser classificados primeiro.'}]:[]),
-        ...(rm?[{icon:'💰',label:'Potencial fechamento',count:'',val:fmt(potencial),color:'#5B2D99',highlight:true,tip:'Embarcado + Previsto embarcar. Máximo realizável para '+rmLabel+' considerando o que já saiu e o que está sinalizado.'}]:[]),
+        {icon:'📋',label:'Em aberto '+(rm?rmShort:''),         count:openItems.length,     val:fmt(openVal),          color:'var(--blue)', kpi:'open',      kpiv:'value',       tip:'Total de itens com RDD ≤ '+rmLabel+' ainda não shipped. É a soma de todos os outros cards (exceto Embarcado).'},
+        {icon:'🎯',label:'Previsto embarcar '+(rm?rmShort:''), count:forecastItems.length, val:fmt(forecastVal),      color:'#D97706',     kpi:'ship',      kpiv:'forecast',    tip:'Classificados e marcados ✅ Sim no campo Embarca?. Serão faturados neste mês.'},
+        {icon:'✅',label:'Embarcado '+(rm?rmShort:''),          count:shippedItems.length,  val:fmt(shippedVal),       color:'#166534',     kpi:'shipped',   kpiv:'shippedval',  tip:'Já têm ship_date registrado. Foram faturados e saíram.'},
+        {icon:'❌',label:'Não embarca '+(rm?rmShort:''),        count:perdidoItems.length,  val:fmt(perdidoVal),       color:'#991B1B',     kpi:'lost',      kpiv:'lostval',     tip:'Classificados e marcados ❌ Não no campo Embarca?. Não serão faturados neste mês.'},
+        ...(semSinalItems.length>0  ?[{icon:'🔲',label:'Sem sinalização '+(rm?rmShort:''),count:semSinalItems.length, val:fmt(semSinalVal),      color:'#6B7280', kpi:'nosignal',  kpiv:'nosignalval', tip:'Classificados mas sem sinalização no campo Embarca? (valor = —). Aguardam decisão do Sales Ops.'}]:[]),
+        ...(unclassifiedRm.length>0 ?[{icon:'⚠️',label:'Sem classificação',               count:unclassifiedRm.length,val:fmt(unclassifiedRmVal),color:'#C0392B', kpi:'uncls',     kpiv:'unclsval',    tip:'Sem classificação definida. Independente de sinalização, precisam ser classificados primeiro.'}]:[]),
+        ...(rm?[{icon:'💰',label:'Potencial fechamento',count:'',val:fmt(potencial),color:'#5B2D99',kpi:'pot',kpiv:'potencial',highlight:true,tip:'Embarcado + Previsto embarcar. Máximo realizável para '+rmLabel+' considerando o que já saiu e o que está sinalizado.'}]:[]),
       ];
 
   el.innerHTML=
@@ -1739,10 +1743,10 @@ function renderBacklogGrid(el, items, isAdmin){
     +kpiCards.map(k=>'<div class="dash-card" title="'+(k.tip||'')+'" style="padding:12px 14px;margin-bottom:0;border-left:3px solid '+k.color+';cursor:default;position:relative;'+(k.highlight?'background:linear-gradient(135deg,#F3E8FF,#EDE9FE);':'')+'" onmouseenter="showKpiTip(this,\''+encodeURIComponent(k.tip||'')+'\',\''+k.color+'\')" onmouseleave="hideKpiTip()">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
       +'<div style="font-size:16px">'+k.icon+'</div>'
-      +(k.count!==''?'<span data-kpi="'+k.kpi+'" style="font-size:22px;font-weight:800;color:'+k.color+'">'+k.count+'</span>':'')
+      +(k.count!==''?'<span data-kpi="'+(k.kpi||'')+'" style="font-size:22px;font-weight:800;color:'+k.color+'">'+k.count+'</span>':'')
       +'</div>'
       +'<p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.04em;margin:5px 0 2px">'+k.label+'</p>'
-      +'<p data-kpi="'+k.kpiv+'" style="font-size:13px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
+      +'<p data-kpi="'+(k.kpiv||'')+'" style="font-size:13px;font-weight:700;color:'+k.color+'">'+k.val+'</p>'
       +'</div>'
     ).join('')
     +'</div>'
@@ -2449,10 +2453,11 @@ function refreshBacklogKPIs(){
     ?rmBase.filter(i=>(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))))
     :filtered.filter(i=>(i.backlog_shipments||[]).length>0||(i.qty_shipped||0)>0);
 
+  const hasOpenQty2=i=>Math.max(0,Number(i.qty_ordered||0)-Number(i.qty_shipped||0))>0&&i.classification!=='Shipped';
   const openItems=isPastMonth
     ?rmBase.filter(i=>i.classification!=='Shipped'&&(i.rdd||'').slice(0,7)>=(rmFrom||'')&&(i.rdd||'').slice(0,7)<=(rmTo||rmFrom||'')&&!(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))))
-    :rm?rmBase.filter(i=>i.classification!=='Shipped'&&!(i.backlog_shipments||[]).some(s=>inRange((s.ship_date||'').slice(0,7))))
-    :filtered.filter(i=>i.classification!=='Shipped');
+    :rm?rmBase.filter(i=>hasOpenQty2(i))
+    :filtered.filter(i=>hasOpenQty2(i));
 
   const classifiedOpen=openItems.filter(i=>i.classification&&i.classification!=='');
   const forecastItems=isPastMonth?[]:classifiedOpen.filter(i=>i.will_ship_month===true);
@@ -2481,6 +2486,8 @@ function refreshBacklogKPIs(){
     if(k==='shippedval')el.textContent=fmt(shippedVal);
     if(k==='lost')      el.textContent=perdidoItems.length;
     if(k==='lostval')   el.textContent=fmt(perdidoVal);
+    if(k==='pot')       el.textContent='';
+    if(k==='potencial') el.textContent=fmt(potencial);
     if(k==='nosignal')  el.textContent=semSinalItems.length;
     if(k==='nosignalval')el.textContent=fmt(semSinalVal);
     if(k==='uncls')     el.textContent=unclsItems.length;
