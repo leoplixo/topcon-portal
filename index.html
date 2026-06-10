@@ -5849,6 +5849,7 @@ function renderAdminDashV2Content(el){
     <div id="dash-manager-section"></div>
     <div id="dash-client-section"></div>
     <div id="dash-seg-country-section"></div>
+    <div id="dash-risk-matrix-section"></div>
     <div id="dash-bookings-section"></div>
     <div id="dash-margins-section"></div>
   `;
@@ -5859,6 +5860,7 @@ function renderAdminDashV2Content(el){
   renderManagerPerformance();
   renderClientPerformance();
   renderSegmentCountryBreakdown();
+  renderRiskClassificationMatrix();
   renderBookingsWeekly();
   renderMarginsAnalysis();
 }
@@ -6444,6 +6446,58 @@ function computeReportData(){
     dealers: d.dealerSet.size
   })).sort((a,b) => b.revenue - a.revenue);
 
+  // ═══ Risk Classification Matrix data (for export report) ═══
+  // Compute open items grouped by classification, then Top 10 by PN and by Dealer
+  const riskOpenItems = backlog.filter(item => {
+    if(!filteredClientIds.has(item.client_user_id)) return false;
+    const openQty = Math.max(0, Number(item.qty_ordered||0) - Number(item.qty_shipped||0));
+    if(openQty <= 0) return false;
+    if(item.classification === 'Shipped') return false;
+    const rddYm = (item.rdd||'').slice(0,7);
+    if(!rddYm) return true;
+    return inRange(rddYm);
+  });
+
+  const riskClassifications = ['PN Short','Ship Complete','Late Delivery','Sem classificação',
+                                'Incomplete Order','Missing Doc','Credit Hold','Pick up pending'];
+
+  const riskMatrixData = {};
+  riskClassifications.forEach(cls => {
+    const items = riskOpenItems.filter(i => {
+      if(cls === 'Sem classificação') return !i.classification;
+      return i.classification === cls;
+    });
+    const totalVal = items.reduce((s,i) => {
+      const openQty = Math.max(0, Number(i.qty_ordered||0) - Number(i.qty_shipped||0));
+      return s + openQty * Number(i.unit_price||0);
+    }, 0);
+
+    const byPN = {};
+    const byDealer = {};
+    items.forEach(i => {
+      const openQty = Math.max(0, Number(i.qty_ordered||0) - Number(i.qty_shipped||0));
+      const val = openQty * Number(i.unit_price||0);
+      const pn = i.pn || '—';
+      const dealer = i.client_name || '—';
+      if(!byPN[pn]) byPN[pn] = { val:0, count:0 };
+      byPN[pn].val += val;
+      byPN[pn].count += 1;
+      if(!byDealer[dealer]) byDealer[dealer] = { val:0, count:0 };
+      byDealer[dealer].val += val;
+      byDealer[dealer].count += 1;
+    });
+
+    const topPN = Object.entries(byPN).sort((a,b) => b[1].val - a[1].val).slice(0, 10)
+      .map(([id, x]) => ({ id, val: x.val, count: x.count }));
+    const topDealer = Object.entries(byDealer).sort((a,b) => b[1].val - a[1].val).slice(0, 10)
+      .map(([id, x]) => ({ id, val: x.val, count: x.count }));
+
+    // Use the user's current selection from window._riskMatrixView for export consistency
+    const mode = (window._riskMatrixView && window._riskMatrixView[cls]) || 'pn';
+
+    riskMatrixData[cls] = { totalVal, totalLines: items.length, topPN, topDealer, mode };
+  });
+
   return {
     fyStart,
     metaType: f.metaType,
@@ -6453,6 +6507,7 @@ function computeReportData(){
     monthData, managerData, dealerData,
     segmentData, countryData, productLineTotals, productLineMonthly,
     marginData, marginManagerData,
+    riskMatrixData,
     totalClients: filteredClients.length
   };
 }
@@ -7036,6 +7091,133 @@ function buildReportHTML(r, periodLabel, periodMode){
     </div>
   `;
 
+  // ═══ Risk Classification Slides (Slides 7A, 7B, 7C) ═══
+  const CLS_COLOR_MAP = {
+    'PN Short':         '#C0392B',
+    'Ship Complete':    '#5B2D99',
+    'Late Delivery':    '#B45309',
+    'Sem classificação':'#6B7280',
+    'Incomplete Order': '#92400E',
+    'Missing Doc':      '#C05000',
+    'Credit Hold':      '#7B1E1E',
+    'Pick up pending':  '#185FA5'
+  };
+  const CLS_ICON = {
+    'PN Short': '⏳', 'Ship Complete': '📦', 'Late Delivery': '📅',
+    'Sem classificação': '❓', 'Incomplete Order': '📝',
+    'Missing Doc': '📄', 'Credit Hold': '🔒', 'Pick up pending': '📦'
+  };
+
+  const buildRiskQuadrant = (clsKey, isCompact) => {
+    const data = r.riskMatrixData[clsKey];
+    if(!data) return '';
+    const color = CLS_COLOR_MAP[clsKey];
+    const icon = CLS_ICON[clsKey];
+    const list = data.mode === 'pn' ? data.topPN : data.topDealer;
+    const maxVal = Math.max(...list.map(x => x.val), 1);
+    const modeLabel = data.mode === 'pn' ? 'Top PNs' : 'Top Dealers';
+    const itemsToShow = isCompact ? list.slice(0,8) : list;
+
+    return `<div style="background:#fff;border:1px solid #E5E7EB;border-top:3px solid ${color};border-radius:6px;padding:10px;display:flex;flex-direction:column">
+      <div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span style="font-size:10px;font-weight:700;color:${color}">${icon} ${clsKey}</span>
+          <span style="font-size:8px;color:#6B7280;font-weight:600">${modeLabel}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:2px">
+          <p style="font-size:12px;font-weight:800;color:#001423">${fmt(data.totalVal)}</p>
+          <p style="font-size:8px;color:#6B7280">${data.totalLines} linha(s)</p>
+        </div>
+      </div>
+      <div style="flex:1">
+        ${itemsToShow.length === 0 ? '<p style="font-size:9px;color:#9CA3AF;text-align:center;padding:14px 0">Nada para mostrar</p>' :
+          itemsToShow.map(item => {
+            const w = Math.round(item.val/maxVal*100);
+            const label = data.mode === 'pn'
+              ? `<code style="font-size:8px;font-weight:700">${item.id}</code>`
+              : `<span style="font-size:9px;font-weight:600">${item.id.length > 22 ? item.id.slice(0,20)+'…' : item.id}</span>`;
+            return `<div style="margin-bottom:3px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1px">
+                ${label}
+                <span style="font-size:8px;color:#6B7280;font-weight:600">${fmtShort(item.val)}</span>
+              </div>
+              <div style="height:3px;background:#F1F5F9;border-radius:2px;overflow:hidden">
+                <div style="width:${w}%;height:100%;background:${color};border-radius:2px"></div>
+              </div>
+            </div>`;
+          }).join('')}
+      </div>
+    </div>`;
+  };
+
+  const slideRiskHigh = `
+    <div class="slide">
+      <div class="slide-header">
+        <div>
+          <p class="slide-sub">07 / Risk Analysis · High Impact</p>
+          <h2 class="slide-title">Open Items — High Impact Classifications</h2>
+        </div>
+        ${TOPCON_LOGO_LIGHT}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+        ${buildRiskQuadrant('PN Short', true)}
+        ${buildRiskQuadrant('Ship Complete', true)}
+        ${buildRiskQuadrant('Late Delivery', true)}
+        ${buildRiskQuadrant('Sem classificação', true)}
+      </div>
+      <div class="insight-box" style="margin-top:6px">
+        <strong>🔴 High Impact:</strong> These classifications directly delay or block shipment — PN Short (stock shortage), Ship Complete (held for full order), Late Delivery (will miss month) and Unclassified (no decision yet). Items shown reflect the current dashboard filters.
+      </div>
+      <div class="slide-footer">
+        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
+      </div>
+    </div>
+  `;
+
+  const slideRiskMedium = `
+    <div class="slide">
+      <div class="slide-header">
+        <div>
+          <p class="slide-sub">08 / Risk Analysis · Medium Impact</p>
+          <h2 class="slide-title">Open Items — Medium Impact Classifications</h2>
+        </div>
+        ${TOPCON_LOGO_LIGHT}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:10px">
+        ${buildRiskQuadrant('Incomplete Order', false)}
+        ${buildRiskQuadrant('Missing Doc', false)}
+        ${buildRiskQuadrant('Credit Hold', false)}
+      </div>
+      <div class="insight-box" style="margin-top:6px">
+        <strong>🟡 Medium Impact:</strong> Issues resolvable with internal action — Incomplete Order (data fixes), Missing Doc (documentation pending) and Credit Hold (financial approval). Generally faster to clear than High Impact items.
+      </div>
+      <div class="slide-footer">
+        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
+      </div>
+    </div>
+  `;
+
+  const slideRiskLow = `
+    <div class="slide">
+      <div class="slide-header">
+        <div>
+          <p class="slide-sub">09 / Risk Analysis · Low Impact</p>
+          <h2 class="slide-title">Open Items — Low Impact Classification</h2>
+        </div>
+        ${TOPCON_LOGO_LIGHT}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:10px;max-width:60%">
+        ${buildRiskQuadrant('Pick up pending', false)}
+      </div>
+      <div class="insight-box" style="margin-top:6px">
+        <strong>🟢 Low Impact:</strong> Goods are ready at Topcon — the only blocker is the client coming to pick them up. Minimal risk to revenue closing as the items are physically prepared.
+      </div>
+      <div class="slide-footer">
+        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
+      </div>
+    </div>
+  `;
+
   // Slide 8 — Margins by Dealer: Top 15 best + Top 5 worst
   // Only include dealers with meaningful revenue (already filtered in marginData)
   const allMargins = r.marginData; // already sorted desc by revenue
@@ -7189,6 +7371,9 @@ function buildReportHTML(r, periodLabel, periodMode){
   ${slideManager}
   ${slideDealers}
   ${slideGeo}
+  ${slideRiskHigh}
+  ${slideRiskMedium}
+  ${slideRiskLow}
   ${slideMargins}
   ${slideMarginsManager}
 </body>
@@ -7326,9 +7511,7 @@ function renderMonthlyExecutionChart(){
       bP+=d.budgetP; bN+=d.budgetN; shipped+=d.shipped; forecast+=d.forecast;
       lost+=d.lost; uncls+=d.uncls; networks+=d.networks;
     }
-    // exec = Shipped + Forecast confirmado + Networks (alinhado com o KPI "Atingimento Projetado")
-    // Programado (lost) e Sem sinalização (uncls) NÃO entram pois não estão confirmados
-    return { bP, bN, budget:bP+bN, shipped, forecast, lost, uncls, networks, exec:shipped+forecast+networks };
+    return { bP, bN, budget:bP+bN, shipped, forecast, lost, uncls, networks, exec:shipped+forecast+lost+uncls+networks };
   };
 
   const q1=sumRange(1,3), q2=sumRange(4,6), q3=sumRange(7,9), q4=sumRange(10,12);
@@ -7360,9 +7543,6 @@ function renderMonthlyExecutionChart(){
       <p><span style="display:inline-block;width:10px;height:10px;background:${COLORS.uncls};border-radius:2px;margin-right:6px;vertical-align:middle;background-image:repeating-linear-gradient(45deg,transparent,transparent 2px,rgba(0,0,0,.3) 2px,rgba(0,0,0,.3) 4px)"></span><strong>Sem sinalização</strong> — RDD futuro → mês do RDD · RDD passado/corrente → mês corrente</p>
       <p><span style="display:inline-block;width:10px;height:10px;background:${COLORS.networks};border-radius:2px;margin-right:6px;vertical-align:middle"></span><strong>Networks</strong> — Mês da compra do sinal</p>
       <p style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><span style="display:inline-block;width:10px;height:10px;background:${COLORS.budgetP};border-radius:2px;margin-right:6px;vertical-align:middle"></span><strong>Budget Produtos</strong> · <span style="display:inline-block;width:10px;height:10px;background:${COLORS.budgetN};border-radius:2px;margin-right:6px;margin-left:6px;vertical-align:middle"></span><strong>Budget Networks</strong></p>
-      <p style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);background:#FFF7ED;padding:8px;border-radius:6px"><strong style="color:#9A3412">📐 Cálculo de % nos cards (Q1, Q2, Semester, Ano Fiscal):</strong><br>
-      <span style="color:var(--tm)">% = (<strong style="color:#166534">Embarcado</strong> + <strong style="color:#D97706">Previsto</strong> + <strong style="color:#8B5CF6">Networks</strong>) ÷ Budget</span><br>
-      <span style="color:var(--tm);font-style:italic">Programado e Sem sinalização NÃO contam pois ainda não estão confirmados — alinhado com "% Atingimento Projetado" do KPI superior.</span></p>
     </div>`;
 
   container.innerHTML = `
@@ -8072,6 +8252,214 @@ function renderBookingsWeekly(){
       </div>
     </div>`;
 }
+
+// ═══ Section: Risk Classification Matrix (Em aberto por classificação · análise de risco) ═══
+// Show all 8 classifications grouped by impact: HIGH, MEDIUM, LOW
+// Each quadrant has a PN/Dealer toggle and Top 10 list
+// Respects dashboard filters (period, managers, segments, countries, client)
+
+// Persistent per-quadrant view selection
+if(!window._riskMatrixView) window._riskMatrixView = {
+  'PN Short':         'pn',
+  'Ship Complete':    'pn',
+  'Late Delivery':    'pn',
+  'Sem classificação':'pn',
+  'Incomplete Order': 'pn',
+  'Missing Doc':      'pn',
+  'Credit Hold':      'dealer',
+  'Pick up pending':  'dealer'
+};
+
+function setRiskMatrixView(classification, mode){
+  window._riskMatrixView[classification] = mode;
+  renderRiskClassificationMatrix();
+}
+
+function renderRiskClassificationMatrix(){
+  const d = window._adminDashData;
+  const f = window._adminDashFilters;
+  if(!d) return;
+  const { profiles, backlog, profileById, fyStart } = d;
+  const container = document.getElementById('dash-risk-matrix-section');
+  if(!container) return;
+
+  // Filter clients per current dashboard filters
+  const passClient = (id) => {
+    const p = profileById[id];
+    if(!p) return false;
+    if(f.client && !p.full_name.toLowerCase().includes(f.client.toLowerCase())) return false;
+    if(f.managers.length > 0 && !f.managers.includes(p.manager_name)) return false;
+    if(f.segments.length > 0 && !f.segments.includes(p.segment)) return false;
+    if(f.countries.length > 0 && !f.countries.includes(p.country)) return false;
+    return true;
+  };
+  const filteredClientIds = new Set(profiles.filter(p => passClient(p.id)).map(p => p.id));
+
+  // Filter backlog items: client passes + RDD in range + still open
+  const inRange = (ym) => (!f.monthFrom || ym >= f.monthFrom) && (!f.monthTo || ym <= f.monthTo);
+  const openItems = backlog.filter(item => {
+    if(!filteredClientIds.has(item.client_user_id)) return false;
+    const openQty = Math.max(0, Number(item.qty_ordered||0) - Number(item.qty_shipped||0));
+    if(openQty <= 0) return false;
+    if(item.classification === 'Shipped') return false;
+    const rddYm = (item.rdd||'').slice(0,7);
+    if(!rddYm) return true; // Items without RDD are always considered open
+    return inRange(rddYm);
+  });
+
+  // Classify each item — null/'' = "Sem classificação"
+  const CLASSIFICATIONS_BY_IMPACT = {
+    high: [
+      { key: 'PN Short',          icon: '⏳' },
+      { key: 'Ship Complete',     icon: '📦' },
+      { key: 'Late Delivery',     icon: '📅' },
+      { key: 'Sem classificação', icon: '❓' }
+    ],
+    medium: [
+      { key: 'Incomplete Order',  icon: '📝' },
+      { key: 'Missing Doc',       icon: '📄' },
+      { key: 'Credit Hold',       icon: '🔒' }
+    ],
+    low: [
+      { key: 'Pick up pending',   icon: '📦' }
+    ]
+  };
+
+  const CLS_COLOR_MAP = {
+    'PN Short':         '#C0392B',
+    'Ship Complete':    '#5B2D99',
+    'Late Delivery':    '#B45309',
+    'Sem classificação':'#6B7280',
+    'Incomplete Order': '#92400E',
+    'Missing Doc':      '#C05000',
+    'Credit Hold':      '#7B1E1E',
+    'Pick up pending':  '#185FA5'
+  };
+
+  const fmt = v => 'USD ' + Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+  const fmtShort = v => Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+
+  // Group items by classification, then aggregate by PN or by Dealer
+  const aggregateByClassification = (clsKey) => {
+    const items = openItems.filter(i => {
+      if(clsKey === 'Sem classificação') return !i.classification;
+      return i.classification === clsKey;
+    });
+    const totalVal = items.reduce((s,i) => {
+      const openQty = Math.max(0, Number(i.qty_ordered||0) - Number(i.qty_shipped||0));
+      return s + openQty * Number(i.unit_price||0);
+    }, 0);
+    const totalLines = items.length;
+
+    // Aggregate by PN
+    const byPN = {};
+    items.forEach(i => {
+      const pn = i.pn || '—';
+      const openQty = Math.max(0, Number(i.qty_ordered||0) - Number(i.qty_shipped||0));
+      const val = openQty * Number(i.unit_price||0);
+      if(!byPN[pn]) byPN[pn] = { val:0, count:0 };
+      byPN[pn].val += val;
+      byPN[pn].count += 1;
+    });
+    const topPN = Object.entries(byPN)
+      .sort((a,b) => b[1].val - a[1].val)
+      .slice(0, 10)
+      .map(([pn, d]) => ({ id: pn, val: d.val, count: d.count }));
+
+    // Aggregate by Dealer
+    const byDealer = {};
+    items.forEach(i => {
+      const dealer = i.client_name || '—';
+      const openQty = Math.max(0, Number(i.qty_ordered||0) - Number(i.qty_shipped||0));
+      const val = openQty * Number(i.unit_price||0);
+      if(!byDealer[dealer]) byDealer[dealer] = { val:0, count:0 };
+      byDealer[dealer].val += val;
+      byDealer[dealer].count += 1;
+    });
+    const topDealer = Object.entries(byDealer)
+      .sort((a,b) => b[1].val - a[1].val)
+      .slice(0, 10)
+      .map(([dealer, d]) => ({ id: dealer, val: d.val, count: d.count }));
+
+    return { totalVal, totalLines, topPN, topDealer };
+  };
+
+  // Build one quadrant
+  const buildQuadrant = (cls, color) => {
+    const agg = aggregateByClassification(cls.key);
+    const mode = window._riskMatrixView[cls.key] || 'pn';
+    const list = mode === 'pn' ? agg.topPN : agg.topDealer;
+    const maxVal = Math.max(...list.map(x => x.val), 1);
+
+    return `<div style="background:#fff;border:1px solid var(--border);border-top:3px solid ${color};border-radius:var(--r-md);padding:10px 12px;display:flex;flex-direction:column;min-height:280px">
+      <!-- Quadrant header -->
+      <div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:6px;margin-bottom:4px">
+          <span style="font-size:11px;font-weight:700;color:${color}">${cls.icon} ${cls.key}</span>
+          <!-- PN/Dealer toggle -->
+          <div style="display:flex;border:1px solid var(--border-md);border-radius:8px;overflow:hidden;flex-shrink:0">
+            <button onclick="setRiskMatrixView('${cls.key.replace(/'/g, "\\'")}','pn')"
+              style="padding:2px 8px;font-size:9px;font-weight:600;border:none;cursor:pointer;background:${mode==='pn'?color:'#fff'};color:${mode==='pn'?'#fff':'var(--tm)'}">PN</button>
+            <button onclick="setRiskMatrixView('${cls.key.replace(/'/g, "\\'")}','dealer')"
+              style="padding:2px 8px;font-size:9px;font-weight:600;border:none;cursor:pointer;background:${mode==='dealer'?color:'#fff'};color:${mode==='dealer'?'#fff':'var(--tm)'}">Dealer</button>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <p style="font-size:14px;font-weight:800;color:var(--t1)">${fmt(agg.totalVal)}</p>
+          <p style="font-size:9px;color:var(--tm)">${agg.totalLines} linha(s)</p>
+        </div>
+      </div>
+
+      <!-- Top 10 list -->
+      <div style="flex:1">
+        ${list.length === 0 ? '<p style="font-size:10px;color:var(--tm);text-align:center;padding:18px 0">Nada para mostrar</p>' :
+          list.map(item => {
+            const w = Math.round(item.val/maxVal*100);
+            const label = mode === 'pn'
+              ? `<code style="font-size:9px;font-weight:700">${item.id}</code>`
+              : `<span style="font-size:10px;font-weight:600">${item.id.length > 24 ? item.id.slice(0,22)+'…' : item.id}</span>`;
+            return `<div style="margin-bottom:4px" title="${item.id} · ${item.count} linha(s) · USD ${fmtShort(item.val)}">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1px;font-size:9px">
+                ${label}
+                <span style="color:var(--tm);font-weight:600">${fmtShort(item.val)}</span>
+              </div>
+              <div style="height:4px;background:#F3F4F6;border-radius:2px;overflow:hidden">
+                <div style="width:${w}%;height:100%;background:${color};border-radius:2px"></div>
+              </div>
+            </div>`;
+          }).join('')}
+      </div>
+    </div>`;
+  };
+
+  // Compose full HTML
+  const buildImpactRow = (label, classes, accentColor, bgAccent) => {
+    return `<div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="display:inline-block;width:6px;height:18px;background:${accentColor};border-radius:2px"></span>
+        <h4 style="font-size:11px;font-weight:700;color:${accentColor};text-transform:uppercase;letter-spacing:.05em;margin:0">${label}</h4>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(${classes.length},1fr);gap:10px">
+        ${classes.map(cls => buildQuadrant(cls, CLS_COLOR_MAP[cls.key])).join('')}
+      </div>
+    </div>`;
+  };
+
+  container.innerHTML = `
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:14px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h3 style="font-size:13px;font-weight:700">🎯 Análise de risco · Em aberto por classificação
+          <span class="dash-tip" title="Itens em aberto (com qty pendente de embarque) agrupados pela sua classificação atual, organizados por nível de impacto. Cada quadrante permite alternar entre TOP PN e TOP Dealer. Respeita filtros aplicados no dashboard." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
+        </h3>
+        <p style="font-size:10px;color:var(--tm)">Top 10 · Toggle PN/Dealer por quadrante</p>
+      </div>
+
+      ${buildImpactRow('🔴 High Impact',   CLASSIFICATIONS_BY_IMPACT.high,   '#C0392B', '#FDECEA')}
+      ${buildImpactRow('🟡 Medium Impact', CLASSIFICATIONS_BY_IMPACT.medium, '#D97706', '#FFF7ED')}
+      ${buildImpactRow('🟢 Low Impact',    CLASSIFICATIONS_BY_IMPACT.low,    '#3A8C4C', '#F0FFF4')}
+    </div>`;
+}
+
 
 // ═══ Section: Margins analysis ═══
 let _marginsGroupBy = 'dealer';
