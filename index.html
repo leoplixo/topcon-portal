@@ -7173,43 +7173,39 @@ function buildReportHTML(r, periodLabel, periodMode){
     </div>
   `;
 
-  const slideRiskMedium = `
+  const slideRiskMediumLow = `
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">08 / Risk Analysis · Medium Impact</p>
-          <h2 class="slide-title">Open Items — Medium Impact Classifications</h2>
+          <p class="slide-sub">08 / Risk Analysis · Medium & Low Impact</p>
+          <h2 class="slide-title">Open Items — Medium and Low Impact Classifications</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:10px">
-        ${buildRiskQuadrant('Incomplete Order', false)}
-        ${buildRiskQuadrant('Missing Doc', false)}
-        ${buildRiskQuadrant('Credit Hold', false)}
-      </div>
-      <div class="insight-box" style="margin-top:6px">
-        <strong>🟡 Medium Impact:</strong> Issues resolvable with internal action — Incomplete Order (data fixes), Missing Doc (documentation pending) and Credit Hold (financial approval). Generally faster to clear than High Impact items.
-      </div>
-      <div class="slide-footer">
-        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
-      </div>
-    </div>
-  `;
 
-  const slideRiskLow = `
-    <div class="slide">
-      <div class="slide-header">
-        <div>
-          <p class="slide-sub">09 / Risk Analysis · Low Impact</p>
-          <h2 class="slide-title">Open Items — Low Impact Classification</h2>
+      <!-- Header labels split: Medium (3 cols) + Low (1 col) -->
+      <div style="display:grid;grid-template-columns:3fr 1fr;gap:10px;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="display:inline-block;width:4px;height:14px;background:#D97706;border-radius:2px"></span>
+          <h4 style="font-size:10px;font-weight:700;color:#D97706;text-transform:uppercase;letter-spacing:.05em;margin:0">🟡 Medium Impact</h4>
         </div>
-        ${TOPCON_LOGO_LIGHT}
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="display:inline-block;width:4px;height:14px;background:#3A8C4C;border-radius:2px"></span>
+          <h4 style="font-size:10px;font-weight:700;color:#3A8C4C;text-transform:uppercase;letter-spacing:.05em;margin:0">🟢 Low Impact</h4>
+        </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:10px;max-width:60%">
-        ${buildRiskQuadrant('Pick up pending', false)}
+
+      <!-- 4 quadrants in one row: 3 medium + 1 low -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+        ${buildRiskQuadrant('Incomplete Order', true)}
+        ${buildRiskQuadrant('Missing Doc', true)}
+        ${buildRiskQuadrant('Credit Hold', true)}
+        ${buildRiskQuadrant('Pick up pending', true)}
       </div>
+
       <div class="insight-box" style="margin-top:6px">
-        <strong>🟢 Low Impact:</strong> Goods are ready at Topcon — the only blocker is the client coming to pick them up. Minimal risk to revenue closing as the items are physically prepared.
+        <strong>🟡 Medium Impact:</strong> Issues resolvable with internal action — Incomplete Order (data fixes), Missing Doc (documentation pending) and Credit Hold (financial approval).<br>
+        <strong>🟢 Low Impact:</strong> Pick up pending — goods are ready at Topcon, the only blocker is client collection. Minimal risk to revenue closing.
       </div>
       <div class="slide-footer">
         <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
@@ -7371,8 +7367,7 @@ function buildReportHTML(r, periodLabel, periodMode){
   ${slideDealers}
   ${slideGeo}
   ${slideRiskHigh}
-  ${slideRiskMedium}
-  ${slideRiskLow}
+  ${slideRiskMediumLow}
   ${slideMargins}
   ${slideMarginsManager}
 </body>
@@ -8449,6 +8444,29 @@ function renderRiskClassificationMatrix(){
     </div>`;
   };
 
+  // Combined row: Medium Impact (3 quadrants) + Low Impact (1 quadrant) = 4 quadrants
+  // Provides visual balance with the High Impact row (also 4 quadrants)
+  const buildMediumLowRow = () => {
+    const mediumClasses = CLASSIFICATIONS_BY_IMPACT.medium;
+    const lowClasses = CLASSIFICATIONS_BY_IMPACT.low;
+    return `<div style="margin-bottom:18px">
+      <div style="display:grid;grid-template-columns:3fr 1fr;gap:10px;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="display:inline-block;width:6px;height:20px;background:#D97706;border-radius:2px"></span>
+          <h4 style="font-size:13px;font-weight:700;color:#D97706;text-transform:uppercase;letter-spacing:.05em;margin:0">🟡 Medium Impact</h4>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="display:inline-block;width:6px;height:20px;background:#3A8C4C;border-radius:2px"></span>
+          <h4 style="font-size:13px;font-weight:700;color:#3A8C4C;text-transform:uppercase;letter-spacing:.05em;margin:0">🟢 Low Impact</h4>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+        ${mediumClasses.map(cls => buildQuadrant(cls, CLS_COLOR_MAP[cls.key])).join('')}
+        ${lowClasses.map(cls => buildQuadrant(cls, CLS_COLOR_MAP[cls.key])).join('')}
+      </div>
+    </div>`;
+  };
+
   container.innerHTML = `
     <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:14px;margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
@@ -8458,9 +8476,8 @@ function renderRiskClassificationMatrix(){
         <p style="font-size:10px;color:var(--tm)">Top 10 · Toggle PN/Dealer por quadrante</p>
       </div>
 
-      ${buildImpactRow('🔴 High Impact',   CLASSIFICATIONS_BY_IMPACT.high,   '#C0392B', '#FDECEA')}
-      ${buildImpactRow('🟡 Medium Impact', CLASSIFICATIONS_BY_IMPACT.medium, '#D97706', '#FFF7ED')}
-      ${buildImpactRow('🟢 Low Impact',    CLASSIFICATIONS_BY_IMPACT.low,    '#3A8C4C', '#F0FFF4')}
+      ${buildImpactRow('🔴 High Impact', CLASSIFICATIONS_BY_IMPACT.high, '#C0392B', '#FDECEA')}
+      ${buildMediumLowRow()}
     </div>`;
 }
 
