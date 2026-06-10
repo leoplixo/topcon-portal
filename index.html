@@ -5768,9 +5768,15 @@ function renderAdminDashV2Content(el){
   const curMetaLabel = metaTypeLabels[f.metaType];
 
   el.innerHTML = `
-    <div style="margin-bottom:14px">
-      <h1 class="page-title" style="margin-bottom:2px">📊 Dashboard de Gestão</h1>
-      <p style="font-size:12px;color:var(--tm)">FY${fyStart} (abr/${String(fyStart).slice(2)} a mar/${String(fyStart+1).slice(2)}) · Visualizando: <strong>${curMetaLabel}</strong></p>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div>
+        <h1 class="page-title" style="margin-bottom:2px">📊 Dashboard de Gestão</h1>
+        <p style="font-size:12px;color:var(--tm)">FY${fyStart} (abr/${String(fyStart).slice(2)} a mar/${String(fyStart+1).slice(2)}) · Visualizando: <strong>${curMetaLabel}</strong></p>
+      </div>
+      <button onclick="openExportReportModal()"
+        style="padding:8px 16px;background:linear-gradient(90deg,#001423,#0A2540);color:#fff;border:none;border-radius:var(--r-md);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;box-shadow:0 2px 6px rgba(0,0,0,.15)">
+        📄 Export Report
+      </button>
     </div>
 
     <!-- ── FILTROS STICKY ── -->
@@ -5919,6 +5925,1039 @@ function adminDashReset(){
   const el = document.getElementById('admin-content');
   if(el) renderAdminDashV2Content(el);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// EXPORT REPORT — Dashboard PDF/PPTX-friendly report
+// ═══════════════════════════════════════════════════════════════════
+
+function openExportReportModal(){
+  // Quick selector for which period to use
+  let modal=document.getElementById('export-report-modal');
+  if(modal) modal.remove();
+
+  modal=document.createElement('div');
+  modal.id='export-report-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML=`
+    <div style="background:#fff;border-radius:14px;max-width:520px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3 style="font-size:17px;font-weight:700">📄 Export Report</h3>
+        <button onclick="document.getElementById('export-report-modal').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--tm)">×</button>
+      </div>
+      <p style="font-size:12px;color:var(--tm);margin-bottom:16px">Choose the period to include in the report. The report will open in a new tab, ready to print as PDF (Ctrl+P / Cmd+P).</p>
+
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+        <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
+          <input type="radio" name="exp-period" value="filtered" checked/>
+          <div>
+            <p style="font-weight:600;font-size:13px">Filtered Period (current)</p>
+            <p style="font-size:11px;color:var(--tm)">Uses the period currently set in dashboard filters</p>
+          </div>
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
+          <input type="radio" name="exp-period" value="month"/>
+          <div>
+            <p style="font-weight:600;font-size:13px">Current Month Only</p>
+            <p style="font-size:11px;color:var(--tm)">Focus on the running month</p>
+          </div>
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
+          <input type="radio" name="exp-period" value="fy"/>
+          <div>
+            <p style="font-weight:600;font-size:13px">Full Fiscal Year</p>
+            <p style="font-size:11px;color:var(--tm)">From April to March (entire FY)</p>
+          </div>
+        </label>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button onclick="document.getElementById('export-report-modal').remove()"
+          style="padding:8px 16px;border:1px solid var(--border-md);border-radius:var(--r-md);background:#fff;cursor:pointer;font-size:13px">Cancel</button>
+        <button onclick="generateReportNow()"
+          style="padding:8px 20px;background:#001423;color:#fff;border:none;border-radius:var(--r-md);font-size:13px;font-weight:600;cursor:pointer">📄 Generate Report</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if(e.target===modal) modal.remove(); });
+}
+
+function generateReportNow(){
+  const selected=document.querySelector('input[name="exp-period"]:checked')?.value || 'filtered';
+  document.getElementById('export-report-modal')?.remove();
+  exportDashboardReport(selected);
+}
+
+// Main export function
+function exportDashboardReport(periodMode){
+  const d = window._adminDashData;
+  if(!d){ alert('Dashboard data not loaded.'); return; }
+
+  // Determine period range based on mode
+  const fyStart = d.fyStart;
+  const fyEndYear = fyStart + 1;
+  const now = new Date();
+  const curYm = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+
+  // Snapshot original filter, override for export
+  const originalFilter = JSON.parse(JSON.stringify(window._adminDashFilters));
+  let reportPeriodLabel = '';
+
+  if(periodMode === 'month'){
+    window._adminDashFilters.monthFrom = curYm;
+    window._adminDashFilters.monthTo = curYm;
+    reportPeriodLabel = `${monthNameEn(now.getMonth())} ${now.getFullYear()}`;
+  } else if(periodMode === 'fy'){
+    window._adminDashFilters.monthFrom = fyStart+'-04';
+    window._adminDashFilters.monthTo = fyEndYear+'-03';
+    reportPeriodLabel = `Full Fiscal Year ${fyStart} (Apr ${fyStart} – Mar ${fyEndYear})`;
+  } else {
+    // filtered
+    const f = window._adminDashFilters;
+    reportPeriodLabel = `${formatYmEn(f.monthFrom)} – ${formatYmEn(f.monthTo)}`;
+  }
+
+  // Now compute all the data needed for the report
+  const reportData = computeReportData();
+
+  // Build the HTML report
+  const html = buildReportHTML(reportData, reportPeriodLabel, periodMode);
+
+  // Restore original filters
+  window._adminDashFilters = originalFilter;
+
+  // Open in new tab
+  const win = window.open('', '_blank');
+  if(!win){
+    alert('Pop-up blocked. Please allow pop-ups for this site and try again.');
+    return;
+  }
+  win.document.write(html);
+  win.document.close();
+}
+
+function monthNameEn(idx){
+  return ['January','February','March','April','May','June','July','August','September','October','November','December'][idx];
+}
+
+function formatYmEn(ym){
+  if(!ym) return '—';
+  const [y,m] = ym.split('-').map(Number);
+  return `${monthNameEn(m-1)} ${y}`;
+}
+
+// ═══ Compute aggregated report data ═══
+function computeReportData(){
+  const d = window._adminDashData;
+  const f = window._adminDashFilters;
+  const { profiles, backlog, orders, nets, costMap, segMap, profileById, budgetByUser, fyStart } = d;
+
+  const passClient = (id) => {
+    if(!id) return false;
+    const p = profileById[id];
+    if(!p) return false;
+    if(f.client && !p.full_name.toLowerCase().includes(f.client.toLowerCase())) return false;
+    if(f.managers.length > 0 && !f.managers.includes(p.manager_name)) return false;
+    if(f.segments.length > 0 && !f.segments.includes(p.segment)) return false;
+    if(f.countries.length > 0 && !f.countries.includes(p.country)) return false;
+    return true;
+  };
+  const filteredClients = profiles.filter(p => passClient(p.id));
+  const filteredClientIds = new Set(filteredClients.map(p => p.id));
+
+  const inRange = (ym) => !!ym && (!f.monthFrom || ym >= f.monthFrom) && (!f.monthTo || ym <= f.monthTo);
+  const monthsInRange = [];
+  for(let m = 1; m <= 12; m++){
+    const ym = fyMonthToYM(fyStart, m);
+    if(inRange(ym)) monthsInRange.push({ m, ym });
+  }
+
+  // Compute KPIs
+  let budgetP=0, budgetN=0;
+  filteredClients.forEach(p => {
+    const userBudgets = budgetByUser[p.id] || {};
+    monthsInRange.forEach(({m}) => {
+      const b = userBudgets[m] || {p:0, n:0};
+      budgetP += b.p; budgetN += b.n;
+    });
+  });
+
+  let realizedP = 0, realizedN = 0;
+  backlog.forEach(item => {
+    if(!filteredClientIds.has(item.client_user_id)) return;
+    (item.backlog_shipments||[]).forEach(s => {
+      if(inRange((s.ship_date||'').slice(0,7))){
+        realizedP += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+      }
+    });
+  });
+  nets.forEach(n => {
+    if(!filteredClientIds.has(n.user_id)) return;
+    if(inRange(n.month)){
+      realizedN += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+    }
+  });
+
+  const now = new Date();
+  const curYm = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+
+  let forecastP_current = 0, forecastP_range = 0;
+  backlog.forEach(item => {
+    if(!filteredClientIds.has(item.client_user_id)) return;
+    if(item.classification === 'Shipped') return;
+    if(item.will_ship_month !== true) return;
+    const openQty = Math.max(0, Number(item.qty_ordered||0) - Number(item.qty_shipped||0));
+    if(openQty <= 0) return;
+    const value = openQty * Number(item.unit_price||0);
+    forecastP_current += value;
+    if(inRange(curYm)) forecastP_range += value;
+  });
+
+  let bookingsTotal = 0;
+  orders.forEach(o => {
+    if(!o.forwarded_at) return;
+    if(!inRange(o.forwarded_at.slice(0,7))) return;
+    if(!filteredClientIds.has(o.user_id)) return;
+    bookingsTotal += Number(o.final_total_usd || o.total_usd || 0);
+  });
+
+  let budget, realized, forecastInPeriod;
+  if(f.metaType === 'products'){ budget=budgetP; realized=realizedP; forecastInPeriod=forecastP_range; }
+  else if(f.metaType === 'networks'){ budget=budgetN; realized=realizedN; forecastInPeriod=0; }
+  else { budget=budgetP+budgetN; realized=realizedP+realizedN; forecastInPeriod=forecastP_range; }
+
+  const pct = budget > 0 ? Math.round(realized/budget*100) : 0;
+  const pctProjected = budget > 0 ? Math.round((realized+forecastInPeriod)/budget*100) : 0;
+  const gap = budget - realized;
+  const gapProjected = budget - (realized + forecastInPeriod);
+  const forecastTotal = realized + (f.metaType === 'networks' ? 0 : forecastP_current);
+
+  // Monthly breakdown (re-use the chart logic)
+  const todayStr = now.toISOString().slice(0,10);
+  const nextMonth = (ym) => {
+    const [y,m] = ym.split('-').map(Number);
+    const dt = new Date(y, m, 1);
+    return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0');
+  };
+  const allocateItem = (item) => {
+    const openQty = Math.max(0, Number(item.qty_ordered||0) - Number(item.qty_shipped||0));
+    if(openQty <= 0) return null;
+    if(item.classification === 'Shipped') return null;
+    const value = openQty * Number(item.unit_price||0);
+    const rddYm = (item.rdd||'').slice(0,7);
+    const availYm = (item.availability_date||'').slice(0,7);
+    if(item.will_ship_month === true) return { ym: curYm, kind:'forecast', value };
+    if(item.will_ship_month === false){
+      if(availYm && item.availability_date > todayStr) return { ym: availYm, kind:'lost', value };
+      return { ym: nextMonth(curYm), kind:'lost', value };
+    }
+    if(rddYm && rddYm > curYm) return { ym: rddYm, kind:'uncls', value };
+    return { ym: curYm, kind:'uncls', value };
+  };
+
+  const monthData = [];
+  for(let m = 1; m <= 12; m++){
+    const ym = fyMonthToYM(fyStart, m);
+    let bP=0, bN=0, shippedV=0, forecastV=0, lostV=0, unclsV=0, netsV=0;
+    filteredClients.forEach(p => {
+      const b = (budgetByUser[p.id]||{})[m];
+      if(b){ bP += b.p; bN += b.n; }
+    });
+    backlog.forEach(item => {
+      if(!filteredClientIds.has(item.client_user_id)) return;
+      (item.backlog_shipments||[]).forEach(s => {
+        if((s.ship_date||'').slice(0,7) === ym){
+          shippedV += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+        }
+      });
+      const a = allocateItem(item);
+      if(a && a.ym === ym){
+        if(a.kind==='forecast') forecastV += a.value;
+        else if(a.kind==='lost') lostV += a.value;
+        else if(a.kind==='uncls') unclsV += a.value;
+      }
+    });
+    nets.forEach(n => {
+      if(!filteredClientIds.has(n.user_id)) return;
+      if(n.month === ym){
+        netsV += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+      }
+    });
+    let mBudget, mShipped, mForecast, mLost, mUncls, mNetworks;
+    if(f.metaType === 'products'){
+      mBudget=bP; mShipped=shippedV; mForecast=forecastV; mLost=lostV; mUncls=unclsV; mNetworks=0;
+    } else if(f.metaType === 'networks'){
+      mBudget=bN; mShipped=0; mForecast=0; mLost=0; mUncls=0; mNetworks=netsV;
+    } else {
+      mBudget=bP+bN; mShipped=shippedV; mForecast=forecastV; mLost=lostV; mUncls=unclsV; mNetworks=netsV;
+    }
+    monthData.push({
+      m, ym, label:['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'][m-1],
+      budget:mBudget, shipped:mShipped, forecast:mForecast, lost:mLost, uncls:mUncls, networks:mNetworks,
+      totalExec: mShipped+mForecast+mLost+mUncls+mNetworks,
+      isCurrent: ym === curYm
+    });
+  }
+
+  // Manager performance
+  const mgrMap = {};
+  filteredClients.forEach(p => {
+    const mgr = p.manager_name || 'Unassigned';
+    if(!mgrMap[mgr]) mgrMap[mgr] = { clientIds:new Set(), budgetP:0, budgetN:0, realP:0, realN:0 };
+    mgrMap[mgr].clientIds.add(p.id);
+    monthsInRange.forEach(({m}) => {
+      const b = (budgetByUser[p.id]||{})[m];
+      if(b){ mgrMap[mgr].budgetP += b.p; mgrMap[mgr].budgetN += b.n; }
+    });
+  });
+  backlog.forEach(item => {
+    Object.keys(mgrMap).forEach(mgr => {
+      if(!mgrMap[mgr].clientIds.has(item.client_user_id)) return;
+      (item.backlog_shipments||[]).forEach(s => {
+        if(inRange((s.ship_date||'').slice(0,7))){
+          mgrMap[mgr].realP += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+        }
+      });
+    });
+  });
+  nets.forEach(n => {
+    Object.keys(mgrMap).forEach(mgr => {
+      if(!mgrMap[mgr].clientIds.has(n.user_id)) return;
+      if(inRange(n.month)){
+        mgrMap[mgr].realN += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+      }
+    });
+  });
+  const managerData = Object.entries(mgrMap).map(([name, data]) => {
+    let mb, mr;
+    if(f.metaType==='products'){ mb=data.budgetP; mr=data.realP; }
+    else if(f.metaType==='networks'){ mb=data.budgetN; mr=data.realN; }
+    else { mb=data.budgetP+data.budgetN; mr=data.realP+data.realN; }
+    return { name, budget:mb, realized:mr, clients:data.clientIds.size, pct: mb>0?Math.round(mr/mb*100):0 };
+  }).sort((a,b) => b.realized - a.realized);
+
+  // Top dealers
+  const dealerData = filteredClients.map(p => {
+    let bP=0, bN=0, rP=0, rN=0;
+    monthsInRange.forEach(({m}) => {
+      const b = (budgetByUser[p.id]||{})[m];
+      if(b){ bP+=b.p; bN+=b.n; }
+    });
+    backlog.forEach(item => {
+      if(item.client_user_id !== p.id) return;
+      (item.backlog_shipments||[]).forEach(s => {
+        if(inRange((s.ship_date||'').slice(0,7))){
+          rP += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+        }
+      });
+    });
+    nets.forEach(n => {
+      if(n.user_id !== p.id) return;
+      if(inRange(n.month)){
+        rN += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+      }
+    });
+    let mb, mr;
+    if(f.metaType==='products'){ mb=bP; mr=rP; }
+    else if(f.metaType==='networks'){ mb=bN; mr=rN; }
+    else { mb=bP+bN; mr=rP+rN; }
+    return {
+      name: p.full_name,
+      manager: p.manager_name || '—',
+      segment: p.segment || '—',
+      country: p.country || '—',
+      budget: mb, realized: mr,
+      pct: mb>0 ? Math.round(mr/mb*100) : (mr>0?999:0),
+      gap: mb - mr
+    };
+  }).filter(c => c.budget > 0 || c.realized > 0)
+    .sort((a,b) => b.realized - a.realized);
+
+  // Segment / Country / Product line breakdown
+  const buildBreakdown = (fieldName) => {
+    const map = {};
+    filteredClients.forEach(p => {
+      const key = p[fieldName] || '—';
+      if(!map[key]) map[key] = { clientIds:new Set(), budget:0, realized:0 };
+      map[key].clientIds.add(p.id);
+      monthsInRange.forEach(({m}) => {
+        const b = (budgetByUser[p.id]||{})[m];
+        if(b){
+          if(f.metaType==='products') map[key].budget += b.p;
+          else if(f.metaType==='networks') map[key].budget += b.n;
+          else map[key].budget += b.p + b.n;
+        }
+      });
+    });
+    backlog.forEach(item => {
+      Object.values(map).forEach(grp => {
+        if(!grp.clientIds.has(item.client_user_id)) return;
+        (item.backlog_shipments||[]).forEach(s => {
+          if(inRange((s.ship_date||'').slice(0,7)) && f.metaType !== 'networks'){
+            grp.realized += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+          }
+        });
+      });
+    });
+    nets.forEach(n => {
+      Object.values(map).forEach(grp => {
+        if(!grp.clientIds.has(n.user_id)) return;
+        if(inRange(n.month) && f.metaType !== 'products'){
+          grp.realized += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+        }
+      });
+    });
+    return Object.entries(map).map(([name, data]) => ({
+      name, budget:data.budget, realized:data.realized, clients:data.clientIds.size,
+      pct: data.budget>0 ? Math.round(data.realized/data.budget*100) : 0
+    })).sort((a,b) => b.realized - a.realized);
+  };
+
+  const segmentData = buildBreakdown('segment');
+  const countryData = buildBreakdown('country');
+
+  // Product line breakdown
+  const productLineTotals = {'AG':0,'FD':0,'SW-OAF':0,'NETWORKS':0};
+  backlog.forEach(item => {
+    if(!filteredClientIds.has(item.client_user_id)) return;
+    const seg = (segMap[item.pn] || 'AG');
+    const segKey = seg === 'NETWORKS' ? 'NETWORKS' : seg;
+    (item.backlog_shipments||[]).forEach(s => {
+      if(inRange((s.ship_date||'').slice(0,7))){
+        if(f.metaType !== 'networks'){
+          productLineTotals[segKey] = (productLineTotals[segKey]||0) + Number(s.qty_shipped||0) * Number(item.unit_price||0);
+        }
+      }
+    });
+    const a = allocateItem(item);
+    if(a && inRange(a.ym) && f.metaType !== 'networks'){
+      productLineTotals[segKey] = (productLineTotals[segKey]||0) + a.value;
+    }
+  });
+  nets.forEach(n => {
+    if(!filteredClientIds.has(n.user_id)) return;
+    if(inRange(n.month) && f.metaType !== 'products'){
+      productLineTotals['NETWORKS'] += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+    }
+  });
+
+  // Margins
+  const marginItems = orders.flatMap(o => {
+    if(!filteredClientIds.has(o.user_id)) return [];
+    if(!inRange((o.created_at||'').slice(0,7))) return [];
+    const p = profileById[o.user_id] || {};
+    return (o.order_items||[]).map(i => ({
+      fp: Number(i.unit_price) - Number(i.additional_discount||0),
+      cost: costMap[i.pn] || 0,
+      qty: Number(i.quantity||1),
+      dealer: p.full_name || '—'
+    }));
+  }).filter(i => i.cost > 0 && i.fp > 0);
+
+  const marginByDealer = {};
+  marginItems.forEach(i => {
+    if(!marginByDealer[i.dealer]) marginByDealer[i.dealer] = { items:[], revenue:0, cost:0 };
+    marginByDealer[i.dealer].items.push(i);
+    marginByDealer[i.dealer].revenue += i.fp * i.qty;
+    marginByDealer[i.dealer].cost += i.cost * i.qty;
+  });
+  const marginData = Object.entries(marginByDealer).map(([name, d]) => ({
+    name,
+    margin: d.revenue > 0 ? (d.revenue - d.cost)/d.revenue*100 : 0,
+    revenue: d.revenue
+  })).sort((a,b) => b.revenue - a.revenue);
+
+  return {
+    fyStart,
+    metaType: f.metaType,
+    filters: { managers:f.managers, segments:f.segments, countries:f.countries, client:f.client },
+    monthFrom: f.monthFrom, monthTo: f.monthTo,
+    kpis: { budget, realized, pct, pctProjected, gap, gapProjected, forecastTotal, bookingsTotal, forecastInPeriod },
+    monthData, managerData, dealerData,
+    segmentData, countryData, productLineTotals,
+    marginData,
+    totalClients: filteredClients.length
+  };
+}
+
+// ═══ Build HTML for the report (opens in new tab) ═══
+function buildReportHTML(r, periodLabel, periodMode){
+  const fmt = v => 'USD ' + Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+  const fmtShort = v => Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+  const metaLabels = { products:'Products', networks:'Networks', total:'Products + Networks' };
+  const today = new Date();
+  const todayStr = today.toLocaleDateString('en-US', { day:'2-digit', month:'short', year:'numeric' });
+
+  const filterChips = [];
+  if(r.filters.managers.length) filterChips.push(`Managers: ${r.filters.managers.join(', ')}`);
+  if(r.filters.segments.length) filterChips.push(`Segments: ${r.filters.segments.join(', ')}`);
+  if(r.filters.countries.length) filterChips.push(`Countries: ${r.filters.countries.join(', ')}`);
+  if(r.filters.client) filterChips.push(`Client: ${r.filters.client}`);
+  const filtersText = filterChips.length ? filterChips.join(' · ') : 'All clients';
+
+  // ── Automated insights helpers ──
+  const insight = {
+    achievement: (() => {
+      const pct = r.kpis.pct, proj = r.kpis.pctProjected;
+      if(pct >= 100) return `Achievement of ${pct}% is on or above target. The team is delivering against committed budget.`;
+      if(proj >= 100 && pct < 100) return `Current achievement of ${pct}% is below target, but projected closing of ${proj}% (including in-forecast items) indicates the period will likely be met if all forecasted items ship as planned.`;
+      if(pct >= 70) return `Achievement of ${pct}% indicates progress within reasonable range; projected closing at ${proj}% still requires attention.`;
+      return `Achievement of ${pct}% is significantly below target. Projected closing of ${proj}% confirms the gap will not be fully recovered without intervention.`;
+    })(),
+    gap: r.kpis.gap > 0
+      ? `Current gap of ${fmt(r.kpis.gap)} represents the volume still required to meet budget. Projected gap of ${fmt(r.kpis.gapProjected)} reflects the situation if all in-forecast items convert to shipments.`
+      : `Performance exceeds budget by ${fmt(-r.kpis.gap)}. Continued momentum can compound the surplus.`,
+    bookings: r.kpis.bookingsTotal > 0
+      ? `${fmt(r.kpis.bookingsTotal)} in bookings forwarded to Madrid/Fort Atkinson during the period — these are orders that have entered the pipeline.`
+      : `No bookings forwarded in the period. Consider reviewing order entry cadence.`,
+    forecast: r.kpis.forecastInPeriod > 0
+      ? `${fmt(r.kpis.forecastInPeriod)} marked as "Will ship this month" is pending shipment. Tracking this conversion is key to closing the period.`
+      : `No items currently flagged as confirmed forecast. The pipeline depends on items still requiring classification.`,
+    managers: (() => {
+      if(r.managerData.length === 0) return 'No manager data in the filtered scope.';
+      const top = r.managerData[0];
+      const bottom = [...r.managerData].filter(m => m.budget > 0).pop();
+      const aboveTarget = r.managerData.filter(m => m.pct >= 100).length;
+      const belowTarget = r.managerData.filter(m => m.budget > 0 && m.pct < 70).length;
+      let txt = `${top.name} leads with ${fmt(top.realized)} (${top.pct}% achievement). `;
+      if(aboveTarget) txt += `${aboveTarget} manager(s) at or above 100% achievement. `;
+      if(belowTarget) txt += `${belowTarget} manager(s) below 70% — likely requiring intervention. `;
+      if(bottom && bottom !== top) txt += `${bottom.name} is at ${bottom.pct}%, showing room for recovery.`;
+      return txt;
+    })(),
+    productMix: (() => {
+      const total = r.productLineTotals.AG + r.productLineTotals.FD + r.productLineTotals['SW-OAF'] + r.productLineTotals.NETWORKS;
+      if(total <= 0) return 'No product-line revenue in the period.';
+      const lines = [['AG',r.productLineTotals.AG],['FD',r.productLineTotals.FD],['SW-OAF',r.productLineTotals['SW-OAF']],['NETWORKS',r.productLineTotals.NETWORKS]];
+      lines.sort((a,b) => b[1]-a[1]);
+      const top = lines[0];
+      const topPct = Math.round(top[1]/total*100);
+      return `${top[0]} is the dominant line with ${topPct}% of total execution (${fmt(top[1])}). ${lines.filter(l => l[1] > 0).length} of 4 lines are active in this period.`;
+    })(),
+    country: (() => {
+      if(r.countryData.length === 0) return 'No country data.';
+      const top = r.countryData[0];
+      const above = r.countryData.filter(c => c.pct >= 100).length;
+      return `${top.name} leads with ${fmt(top.realized)} (${top.pct}% achievement). ${above} country(ies) at or above target.`;
+    })(),
+    segment: (() => {
+      if(r.segmentData.length === 0) return 'No segment data.';
+      const aft = r.segmentData.find(s => s.name === 'Aftermarket');
+      const oem = r.segmentData.filter(s => s.name.includes('OEM')).reduce((sum,s) => ({realized:sum.realized+s.realized, budget:sum.budget+s.budget}), {realized:0, budget:0});
+      const totalRealized = r.segmentData.reduce((s,x) => s+x.realized, 0);
+      if(totalRealized <= 0) return 'No segment revenue.';
+      const aftPct = aft ? Math.round(aft.realized/totalRealized*100) : 0;
+      const oemPct = totalRealized > 0 ? Math.round(oem.realized/totalRealized*100) : 0;
+      return `Aftermarket represents ${aftPct}% of total execution, OEM (regional + global) represents ${oemPct}%.`;
+    })(),
+    margins: (() => {
+      if(r.marginData.length === 0) return 'No margin data available (requires cost data per PN).';
+      const avgM = r.marginData.reduce((s,m) => s+m.margin, 0) / r.marginData.length;
+      const above40 = r.marginData.filter(m => m.margin >= 40).length;
+      const below30 = r.marginData.filter(m => m.margin < 30).length;
+      return `Average margin across ${r.marginData.length} dealer(s) is ${avgM.toFixed(1)}%. ${above40} dealer(s) at or above 40% target; ${below30} dealer(s) below 30%.`;
+    })()
+  };
+
+  // Logo SVG inline
+  const TOPCON_LOGO_DARK = `
+    <svg viewBox="0 0 600 180" xmlns="http://www.w3.org/2000/svg" style="height:48px">
+      <g transform="translate(20,40)">
+        <path fill="#0099FF" d="M0,40 Q15,0 50,15 Q80,30 110,10 L60,70 Q45,80 30,70 Q15,60 0,40 Z"/>
+      </g>
+      <text x="155" y="100" font-family="Arial,sans-serif" font-weight="900" font-size="78" fill="#ffffff" letter-spacing="-2">TOPCON</text>
+    </svg>`;
+  const TOPCON_LOGO_LIGHT = `
+    <svg viewBox="0 0 600 180" xmlns="http://www.w3.org/2000/svg" style="height:42px">
+      <g transform="translate(20,40)">
+        <path fill="#0099FF" d="M0,40 Q15,0 50,15 Q80,30 110,10 L60,70 Q45,80 30,70 Q15,60 0,40 Z"/>
+      </g>
+      <text x="155" y="100" font-family="Arial,sans-serif" font-weight="900" font-size="78" fill="#001423" letter-spacing="-2">TOPCON</text>
+    </svg>`;
+
+  // ── Slide builders ──
+  const SLIDE_STYLE = `
+    .slide {
+      width: 297mm; height: 210mm;
+      background: #fff;
+      page-break-after: always;
+      box-sizing: border-box;
+      padding: 14mm 18mm;
+      position: relative;
+      font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+      color: #001423;
+      overflow: hidden;
+    }
+    .slide:last-child { page-break-after: auto; }
+    .slide-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding-bottom: 10px; margin-bottom: 16px; border-bottom: 2px solid #001423;
+    }
+    .slide-title { font-size: 22px; font-weight: 800; letter-spacing: -.01em; }
+    .slide-sub { font-size: 11px; color: #6B7280; }
+    .slide-footer {
+      position: absolute; bottom: 8mm; left: 18mm; right: 18mm;
+      display: flex; justify-content: space-between; font-size: 9px; color: #9CA3AF;
+      border-top: 1px solid #E5E7EB; padding-top: 6px;
+    }
+    .insight-box {
+      background: #EEF6FF; border-left: 3px solid #0099FF;
+      padding: 10px 14px; border-radius: 6px; margin-top: 12px;
+      font-size: 12px; line-height: 1.5;
+    }
+    .insight-box strong { color: #001423; }
+    .kpi-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    }
+    .kpi-card {
+      background: #fff; border: 1px solid #E5E7EB; border-left: 3px solid var(--accent, #0099FF);
+      border-radius: 6px; padding: 12px 14px;
+    }
+    .kpi-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #6B7280; letter-spacing: .04em; }
+    .kpi-value { font-size: 20px; font-weight: 800; margin-top: 4px; color: var(--accent, #0099FF); }
+    .kpi-sub { font-size: 10px; color: #6B7280; margin-top: 3px; }
+    table.report-tbl { width: 100%; border-collapse: collapse; font-size: 10px; }
+    table.report-tbl th { background: #001423; color: #fff; padding: 6px 8px; text-align: left; font-weight: 600; font-size: 9px; letter-spacing: .02em; text-transform: uppercase; }
+    table.report-tbl td { padding: 5px 8px; border-bottom: 1px solid #F1F5F9; }
+    table.report-tbl tr:nth-child(even) td { background: #F9FAFB; }
+    .bar-bg { background: #F1F5F9; height: 8px; border-radius: 4px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 4px; }
+    .legend-row { display: flex; gap: 14px; font-size: 10px; color: #6B7280; flex-wrap: wrap; }
+    .legend-row .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+    @page { size: A4 landscape; margin: 0; }
+    @media print {
+      body { margin: 0; }
+      .no-print { display: none !important; }
+    }
+    .print-bar {
+      position: fixed; top: 0; left: 0; right: 0;
+      background: #001423; color: #fff; padding: 10px 20px;
+      display: flex; justify-content: space-between; align-items: center;
+      z-index: 1000;
+    }
+    .print-btn {
+      background: #0099FF; color: #fff; border: none; border-radius: 6px;
+      padding: 8px 18px; font-size: 13px; font-weight: 700; cursor: pointer;
+    }
+    .print-btn:hover { background: #007ACC; }
+    body { background: #E5E7EB; margin: 0; padding: 80px 0 20px; }
+    .print-bar + .slide:first-of-type { margin-top: 0; }
+    .slide { margin: 0 auto 20px; box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .slide { box-shadow: none; margin: 0; }
+    }
+  `;
+
+  // Slide 1 — Cover
+  const slideCover = `
+    <div class="slide" style="background: linear-gradient(135deg, #001423 0%, #002B4D 50%, #0099FF 150%); color: #fff; padding: 0; display: flex; flex-direction: column; justify-content: space-between;">
+      <div style="padding: 18mm 20mm 0;">
+        ${TOPCON_LOGO_DARK}
+      </div>
+      <div style="padding: 0 20mm; max-width: 75%;">
+        <p style="font-size: 14px; color: #99D6FF; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px">Management Report</p>
+        <h1 style="font-size: 48px; font-weight: 900; line-height: 1.05; letter-spacing: -.02em; margin-bottom: 12px">LATAM Performance<br>Report</h1>
+        <p style="font-size: 18px; color: #B3E0FF; font-weight: 500; margin-bottom: 24px">${periodLabel}</p>
+        <div style="display: inline-block; padding: 8px 16px; background: rgba(0,153,255,.2); border: 1px solid rgba(0,153,255,.5); border-radius: 20px; font-size: 12px; color: #fff;">
+          Viewing: <strong>${metaLabels[r.metaType]}</strong> · ${filtersText}
+        </div>
+      </div>
+      <div style="padding: 0 20mm 18mm; display: flex; justify-content: space-between; align-items: flex-end; font-size: 11px; color: #6B8FAB;">
+        <div>Topcon Agriculture & Feed LATAM</div>
+        <div>Generated ${todayStr}</div>
+      </div>
+    </div>
+  `;
+
+  // Slide 2 — Executive Summary
+  const slideExec = `
+    <div class="slide">
+      <div class="slide-header">
+        <div>
+          <p class="slide-sub">01 / Executive Summary</p>
+          <h2 class="slide-title">Key Performance Indicators</h2>
+        </div>
+        ${TOPCON_LOGO_LIGHT}
+      </div>
+
+      <div class="kpi-grid" style="grid-template-columns: repeat(3, 1fr); gap: 12px;">
+        <div class="kpi-card" style="--accent: #185FA5">
+          <p class="kpi-label">🎯 Budget</p>
+          <p class="kpi-value">${fmt(r.kpis.budget)}</p>
+          <p class="kpi-sub">Internal commitment for ${metaLabels[r.metaType]}</p>
+        </div>
+        <div class="kpi-card" style="--accent: #166534">
+          <p class="kpi-label">✅ Shipped</p>
+          <p class="kpi-value">${fmt(r.kpis.realized)}</p>
+          <p class="kpi-sub">Effectively shipped in period</p>
+        </div>
+        <div class="kpi-card" style="--accent: ${r.kpis.pct>=100?'#166534':r.kpis.pct>=70?'#D97706':'#C0392B'}">
+          <p class="kpi-label">📊 Achievement</p>
+          <p class="kpi-value">${r.kpis.pct}% <span style="font-size:12px;color:#6B7280;font-weight:600">→ ${r.kpis.pctProjected}% projected</span></p>
+          <p class="kpi-sub">Current vs projected closing</p>
+        </div>
+        <div class="kpi-card" style="--accent: #5B2D99">
+          <p class="kpi-label">📈 Month Forecast</p>
+          <p class="kpi-value">${fmt(r.kpis.forecastTotal)}</p>
+          <p class="kpi-sub">Shipped + confirmed will-ship</p>
+        </div>
+        <div class="kpi-card" style="--accent: #D97706">
+          <p class="kpi-label">📦 Bookings</p>
+          <p class="kpi-value">${fmt(r.kpis.bookingsTotal)}</p>
+          <p class="kpi-sub">Orders forwarded to Madrid/Fort Atkinson</p>
+        </div>
+        <div class="kpi-card" style="--accent: ${r.kpis.gap>0?'#C0392B':'#166534'}">
+          <p class="kpi-label">💰 Gap vs Budget</p>
+          <p class="kpi-value">${fmt(r.kpis.gap)} <span style="font-size:12px;color:#6B7280;font-weight:600">→ ${fmt(r.kpis.gapProjected)} projected</span></p>
+          <p class="kpi-sub">Difference current → if forecast converts</p>
+        </div>
+      </div>
+
+      <div class="insight-box">
+        <strong>📍 Achievement:</strong> ${insight.achievement}<br>
+        <strong>💰 Gap:</strong> ${insight.gap}<br>
+        <strong>📦 Bookings:</strong> ${insight.bookings}<br>
+        <strong>📈 Forecast:</strong> ${insight.forecast}
+      </div>
+
+      <div class="slide-footer">
+        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
+      </div>
+    </div>
+  `;
+
+  // Slide 3 — Monthly execution
+  const maxMonthly = Math.max(...r.monthData.map(d => Math.max(d.budget, d.totalExec)), 1);
+  const slideMonthly = `
+    <div class="slide">
+      <div class="slide-header">
+        <div>
+          <p class="slide-sub">02 / Monthly Execution</p>
+          <h2 class="slide-title">FY${r.fyStart} Performance by Month</h2>
+        </div>
+        ${TOPCON_LOGO_LIGHT}
+      </div>
+
+      <div class="legend-row" style="margin-bottom: 8px;">
+        <span><span class="swatch" style="background:#9CA3AF"></span>Budget</span>
+        <span><span class="swatch" style="background:#166534"></span>Shipped</span>
+        <span><span class="swatch" style="background:#F59E0B"></span>Forecast</span>
+        <span><span class="swatch" style="background:#3B82F6"></span>Programmed</span>
+        <span><span class="swatch" style="background:#9CA3AF;background-image:repeating-linear-gradient(45deg,transparent,transparent 2px,rgba(0,0,0,.3) 2px,rgba(0,0,0,.3) 4px)"></span>Unclassified</span>
+        <span><span class="swatch" style="background:#8B5CF6"></span>Networks</span>
+      </div>
+
+      <div style="font-size: 10px;">
+        ${r.monthData.map(d => {
+          const pct = d.budget > 0 ? Math.round(d.totalExec/d.budget*100) : 0;
+          const wB = (d.budget/maxMonthly*100);
+          const wS = (d.shipped/maxMonthly*100);
+          const wF = (d.forecast/maxMonthly*100);
+          const wL = (d.lost/maxMonthly*100);
+          const wU = (d.uncls/maxMonthly*100);
+          const wN = (d.networks/maxMonthly*100);
+          const pctColor = pct>=100?'#166534':pct>=70?'#D97706':d.budget>0?'#C0392B':'#888';
+          return `<div style="display:grid;grid-template-columns:36px 1fr 130px;gap:8px;align-items:center;margin-bottom:5px;${d.isCurrent?'background:#FFFBEB;padding:3px 6px;border-radius:4px':''}">
+            <span style="font-weight:700;color:${d.isCurrent?'#D97706':'#001423'}">${d.label}${d.isCurrent?' •':''}</span>
+            <div style="position:relative;height:18px">
+              <div style="position:absolute;top:0;left:0;height:7px;width:${wB}%;background:#9CA3AF;border-radius:2px"></div>
+              <div style="position:absolute;top:10px;left:0;display:flex;height:7px;width:100%">
+                ${d.shipped>0?`<div style="width:${wS}%;background:#166534"></div>`:''}
+                ${d.forecast>0?`<div style="width:${wF}%;background:#F59E0B"></div>`:''}
+                ${d.lost>0?`<div style="width:${wL}%;background:#3B82F6"></div>`:''}
+                ${d.uncls>0?`<div style="width:${wU}%;background:#9CA3AF;background-image:repeating-linear-gradient(45deg,transparent,transparent 2px,rgba(0,0,0,.3) 2px,rgba(0,0,0,.3) 4px)"></div>`:''}
+                ${d.networks>0?`<div style="width:${wN}%;background:#8B5CF6"></div>`:''}
+              </div>
+            </div>
+            <div style="text-align:right;font-size:9px">
+              <strong style="color:${pctColor};font-size:10px">${d.budget>0?pct+'%':'—'}</strong>
+              <span style="color:#6B7280">  ${fmtShort(d.totalExec)} / ${fmtShort(d.budget)}</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <div class="slide-footer">
+        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
+      </div>
+    </div>
+  `;
+
+  // Slide 4 — Product line composition
+  const totalPL = r.productLineTotals.AG + r.productLineTotals.FD + r.productLineTotals['SW-OAF'] + r.productLineTotals.NETWORKS;
+  const plColors = { 'AG':'#185FA5', 'FD':'#D97706', 'SW-OAF':'#0A7A8C', 'NETWORKS':'#8B5CF6' };
+  const buildPlDonut = () => {
+    if(totalPL <= 0) return '<p style="text-align:center;color:#9CA3AF;padding:30px">No data in period.</p>';
+    const lines = Object.entries(r.productLineTotals);
+    let cumPct = 0;
+    const cx = 50, cy = 50, ringR = 38, sw = 14;
+    const paths = lines.filter(([_,v]) => v > 0).map(([key,v]) => {
+      const pct = v/totalPL;
+      const a1 = cumPct * 2*Math.PI - Math.PI/2;
+      const a2 = (cumPct+pct) * 2*Math.PI - Math.PI/2;
+      cumPct += pct;
+      const large = pct > 0.5 ? 1 : 0;
+      const x1 = cx+ringR*Math.cos(a1), y1 = cy+ringR*Math.sin(a1);
+      const x2 = cx+ringR*Math.cos(a2), y2 = cy+ringR*Math.sin(a2);
+      return `<path d="M ${x1} ${y1} A ${ringR} ${ringR} 0 ${large} 1 ${x2} ${y2}" stroke="${plColors[key]}" stroke-width="${sw}" fill="none"/>`;
+    }).join('');
+    return `<svg viewBox="0 0 100 100" style="width:180px;height:180px">${paths}
+      <text x="50" y="48" text-anchor="middle" font-size="6" font-weight="700" fill="#6B7280">TOTAL</text>
+      <text x="50" y="56" text-anchor="middle" font-size="5" font-weight="700" fill="#001423">USD ${fmtShort(totalPL)}</text>
+    </svg>`;
+  };
+
+  const slideProduct = `
+    <div class="slide">
+      <div class="slide-header">
+        <div>
+          <p class="slide-sub">03 / Product Line</p>
+          <h2 class="slide-title">Execution by Product Line</h2>
+        </div>
+        ${TOPCON_LOGO_LIGHT}
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:center">
+        <div style="text-align:center">
+          ${buildPlDonut()}
+        </div>
+        <div>
+          <table class="report-tbl">
+            <thead>
+              <tr><th>Product Line</th><th style="text-align:right">Volume</th><th style="text-align:right">Share</th></tr>
+            </thead>
+            <tbody>
+              ${Object.entries(r.productLineTotals).map(([key,v]) => {
+                const pct = totalPL > 0 ? Math.round(v/totalPL*100) : 0;
+                return `<tr>
+                  <td><span style="display:inline-block;width:10px;height:10px;background:${plColors[key]};border-radius:2px;margin-right:6px;vertical-align:middle"></span><strong>${key}</strong></td>
+                  <td style="text-align:right">${fmt(v)}</td>
+                  <td style="text-align:right"><strong style="color:${plColors[key]}">${pct}%</strong></td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="insight-box">
+        <strong>📊 Product Mix:</strong> ${insight.productMix}
+      </div>
+
+      <div class="slide-footer">
+        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
+      </div>
+    </div>
+  `;
+
+  // Slide 5 — Manager Performance
+  const maxMgrR = Math.max(...r.managerData.map(m => m.realized), 1);
+  const slideManager = `
+    <div class="slide">
+      <div class="slide-header">
+        <div>
+          <p class="slide-sub">04 / Manager Performance</p>
+          <h2 class="slide-title">Performance by Manager</h2>
+        </div>
+        ${TOPCON_LOGO_LIGHT}
+      </div>
+
+      <div style="font-size: 11px;">
+        ${r.managerData.length === 0 ? '<p style="color:#9CA3AF;text-align:center;padding:30px">No data.</p>' :
+          r.managerData.map(m => {
+            const color = m.pct >= 100 ? '#166534' : m.pct >= 70 ? '#D97706' : m.budget > 0 ? '#C0392B' : '#888';
+            const w = Math.min(100, Math.round(m.realized/maxMgrR*100));
+            return `<div style="margin-bottom:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+                <span><strong>${m.name}</strong> <span style="color:#6B7280;font-size:9px">(${m.clients} dealers)</span></span>
+                <span><strong style="color:${color}">${fmt(m.realized)}</strong> <span style="color:#6B7280;font-size:10px">/ ${fmt(m.budget)} · ${m.budget>0?m.pct+'%':'—'}</span></span>
+              </div>
+              <div class="bar-bg" style="height:7px"><div class="bar-fill" style="width:${w}%;background:${color}"></div></div>
+            </div>`;
+          }).join('')}
+      </div>
+
+      <div class="insight-box">
+        <strong>👤 Manager Analysis:</strong> ${insight.managers}
+      </div>
+
+      <div class="slide-footer">
+        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
+      </div>
+    </div>
+  `;
+
+  // Slide 6 — Top Dealers
+  const topDealers = r.dealerData.slice(0, 15);
+  const slideDealers = `
+    <div class="slide">
+      <div class="slide-header">
+        <div>
+          <p class="slide-sub">05 / Top Dealers</p>
+          <h2 class="slide-title">Top 15 Dealers by Volume</h2>
+        </div>
+        ${TOPCON_LOGO_LIGHT}
+      </div>
+
+      <table class="report-tbl">
+        <thead>
+          <tr>
+            <th>#</th><th>Dealer</th><th>Manager</th><th>Segment</th><th>Country</th>
+            <th style="text-align:right">Budget</th><th style="text-align:right">Shipped</th><th style="text-align:right">Ach.</th><th style="text-align:right">Gap</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${topDealers.length === 0 ? '<tr><td colspan="9" style="text-align:center;color:#9CA3AF;padding:20px">No data.</td></tr>' :
+            topDealers.map((c,i) => {
+              const pctColor = c.pct >= 100 ? '#166534' : c.pct >= 70 ? '#D97706' : c.budget > 0 ? '#C0392B' : '#888';
+              return `<tr>
+                <td><strong>${i+1}</strong></td>
+                <td><strong>${c.name}</strong></td>
+                <td>${c.manager}</td>
+                <td style="font-size:9px">${c.segment}</td>
+                <td style="font-size:9px">${c.country}</td>
+                <td style="text-align:right;color:#6B7280">${fmt(c.budget)}</td>
+                <td style="text-align:right"><strong>${fmt(c.realized)}</strong></td>
+                <td style="text-align:right"><strong style="color:${pctColor}">${c.budget>0?c.pct+'%':'—'}</strong></td>
+                <td style="text-align:right;color:${c.gap>0?'#C0392B':'#166534'}">${fmt(c.gap)}</td>
+              </tr>`;
+            }).join('')}
+        </tbody>
+      </table>
+
+      <p style="font-size:10px;color:#6B7280;margin-top:10px">Showing top 15 of ${r.dealerData.length} dealer(s) with activity in the period. Sorted by shipped volume.</p>
+
+      <div class="slide-footer">
+        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
+      </div>
+    </div>
+  `;
+
+  // Slide 7 — Geo & Segment
+  const slideGeo = `
+    <div class="slide">
+      <div class="slide-header">
+        <div>
+          <p class="slide-sub">06 / Geography & Segments</p>
+          <h2 class="slide-title">Performance by Commercial Segment and Country</h2>
+        </div>
+        ${TOPCON_LOGO_LIGHT}
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <h3 style="font-size:13px;font-weight:700;margin-bottom:8px">🎯 By Commercial Segment</h3>
+          ${r.segmentData.length === 0 ? '<p style="color:#9CA3AF;text-align:center;padding:20px;font-size:10px">No data</p>' :
+            r.segmentData.map(s => {
+              const maxR = Math.max(...r.segmentData.map(x => x.realized), 1);
+              const w = Math.round(s.realized/maxR*100);
+              const color = s.pct >= 100 ? '#166534' : s.pct >= 70 ? '#D97706' : s.budget > 0 ? '#C0392B' : '#185FA5';
+              return `<div style="margin-bottom:8px;font-size:10px">
+                <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+                  <span><strong>${s.name}</strong> <span style="color:#6B7280;font-size:9px">(${s.clients})</span></span>
+                  <span><strong style="color:${color}">${fmt(s.realized)}</strong> <span style="color:#6B7280;font-size:9px">/ ${fmt(s.budget)}${s.budget>0?` · ${s.pct}%`:''}</span></span>
+                </div>
+                <div class="bar-bg" style="height:5px"><div class="bar-fill" style="width:${w}%;background:${color}"></div></div>
+              </div>`;
+            }).join('')}
+        </div>
+        <div>
+          <h3 style="font-size:13px;font-weight:700;margin-bottom:8px">🌎 By Country</h3>
+          ${r.countryData.length === 0 ? '<p style="color:#9CA3AF;text-align:center;padding:20px;font-size:10px">No data</p>' :
+            r.countryData.slice(0, 14).map(c => {
+              const maxR = Math.max(...r.countryData.map(x => x.realized), 1);
+              const w = Math.round(c.realized/maxR*100);
+              const color = c.pct >= 100 ? '#166534' : c.pct >= 70 ? '#D97706' : c.budget > 0 ? '#C0392B' : '#185FA5';
+              return `<div style="margin-bottom:7px;font-size:10px">
+                <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+                  <span><strong>${c.name}</strong> <span style="color:#6B7280;font-size:9px">(${c.clients})</span></span>
+                  <span><strong style="color:${color}">${fmt(c.realized)}</strong> <span style="color:#6B7280;font-size:9px">${c.budget>0?` · ${c.pct}%`:''}</span></span>
+                </div>
+                <div class="bar-bg" style="height:5px"><div class="bar-fill" style="width:${w}%;background:${color}"></div></div>
+              </div>`;
+            }).join('')}
+        </div>
+      </div>
+
+      <div class="insight-box" style="margin-top:10px">
+        <strong>🎯 Segment Mix:</strong> ${insight.segment}<br>
+        <strong>🌎 Geography:</strong> ${insight.country}
+      </div>
+
+      <div class="slide-footer">
+        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
+      </div>
+    </div>
+  `;
+
+  // Slide 8 — Margins
+  const topMargins = r.marginData.slice(0, 12);
+  const slideMargins = `
+    <div class="slide">
+      <div class="slide-header">
+        <div>
+          <p class="slide-sub">07 / Margins</p>
+          <h2 class="slide-title">Margin Analysis (Top 12 by Revenue)</h2>
+        </div>
+        ${TOPCON_LOGO_LIGHT}
+      </div>
+
+      <div style="font-size: 11px;">
+        ${topMargins.length === 0 ? '<p style="color:#9CA3AF;text-align:center;padding:30px">No margin data available (requires cost data per PN).</p>' :
+          topMargins.map(m => {
+            const color = m.margin >= 40 ? '#166534' : m.margin >= 30 ? '#D97706' : '#C0392B';
+            const w = Math.min(100, Math.max(0, m.margin));
+            return `<div style="display:grid;grid-template-columns:1.5fr 2fr 100px;gap:10px;align-items:center;margin-bottom:7px;padding-bottom:5px;border-bottom:1px solid #F1F5F9">
+              <span><strong>${m.name}</strong></span>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="flex:1;height:7px;background:#F1F5F9;border-radius:3px;position:relative">
+                  <div style="width:${w}%;height:100%;background:${color};border-radius:3px"></div>
+                  <div style="position:absolute;top:0;left:40%;width:1px;height:100%;background:#9CA3AF;opacity:.6"></div>
+                </div>
+                <strong style="color:${color};min-width:46px;text-align:right">${m.margin.toFixed(1)}%</strong>
+              </div>
+              <span style="text-align:right;font-size:10px;color:#6B7280">${fmt(m.revenue)}</span>
+            </div>`;
+          }).join('')}
+      </div>
+
+      <p style="font-size:9px;color:#9CA3AF;margin-top:6px">Dashed line at 40% indicates target margin. Margin = (Revenue - Cost) / Revenue, weighted by line revenue.</p>
+
+      <div class="insight-box">
+        <strong>💎 Margins:</strong> ${insight.margins}
+      </div>
+
+      <div class="slide-footer">
+        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
+      </div>
+    </div>
+  `;
+
+  // Final HTML
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LATAM Performance Report — ${periodLabel}</title>
+  <style>${SLIDE_STYLE}</style>
+</head>
+<body>
+  <div class="print-bar no-print">
+    <span style="font-size:13px">📄 Report ready · ${r.totalClients} client(s) included · ${periodLabel}</span>
+    <button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+  </div>
+  ${slideCover}
+  ${slideExec}
+  ${slideMonthly}
+  ${slideProduct}
+  ${slideManager}
+  ${slideDealers}
+  ${slideGeo}
+  ${slideMargins}
+</body>
+</html>`;
+}
+
 
 // ═══ Section: Monthly execution chart ═══
 function renderMonthlyExecutionChart(){
