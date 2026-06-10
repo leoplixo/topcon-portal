@@ -5559,10 +5559,10 @@ async function renderAdminDashboardV2(el){
     sb.from('user_profiles').select('id,full_name,manager_name,segment,country,client_groups(label)').eq('is_admin',false).neq('role','salesops'),
     sb.from('targets').select('user_id,target_usd,target_networks_usd,year').eq('year', fyStart),
     sb.from('monthly_budgets').select('*').eq('fiscal_year', fyStart),
-    sb.from('backlog_items').select('id,client_user_id,client_name,manager_name,classification,will_ship_month,unit_price,qty_ordered,qty_shipped,destination,rdd,backlog_shipments(ship_date,qty_shipped)'),
+    sb.from('backlog_items').select('id,client_user_id,client_name,manager_name,classification,will_ship_month,unit_price,qty_ordered,qty_shipped,destination,rdd,availability_date,pn,backlog_shipments(ship_date,qty_shipped)'),
     sb.from('orders').select('id,user_id,total_usd,final_total_usd,status,forwarded_at,created_at,user_profiles(full_name,manager_name,segment,country),order_items(pn,unit_price,quantity,additional_discount)').gte('created_at', FY_START_DATE).lte('created_at', FY_END_DATE+'T23:59:59'),
     sb.from('network_purchases').select('*').eq('fiscal_year', fyStart).then(r => r.error ? sb.from('network_purchases').select('*') : r),
-    sb.from('parts').select('pn,cost').not('cost','is',null).gt('cost',0)
+    sb.from('parts').select('pn,seg,cost')
   ]);
 
   const profiles = profilesRes.data || [];
@@ -5576,7 +5576,11 @@ async function renderAdminDashboardV2(el){
     return m >= (fyStart+'-04') && m <= (fyEnd+'-03');
   });
   const costMap = {};
-  (partsRes.data||[]).forEach(p => costMap[p.pn] = Number(p.cost));
+  const segMap = {};
+  (partsRes.data||[]).forEach(p => {
+    if(p.cost > 0) costMap[p.pn] = Number(p.cost);
+    if(p.seg) segMap[p.pn] = p.seg;
+  });
 
   // Build profile lookup
   const profileById = {};
@@ -5600,7 +5604,7 @@ async function renderAdminDashboardV2(el){
   });
 
   // Store all data globally for re-renders
-  window._adminDashData = { profiles, targets, budgets, backlog, orders, nets, costMap, profileById, budgetByUser, targetByUser, fyStart };
+  window._adminDashData = { profiles, targets, budgets, backlog, orders, nets, costMap, segMap, profileById, budgetByUser, targetByUser, fyStart };
 
   renderAdminDashV2Content(el);
 }
@@ -5669,18 +5673,24 @@ function renderAdminDashV2Content(el){
     }
   });
 
-  // Forecast (Previsto embarcar) in range — only open items with will_ship_month=true with RDD in range or past
-  let forecastP = 0;
+  // Forecast (Previsto embarcar) — only for CURRENT month, open items with will_ship_month=true
+  // openQty already accounts for partial shipments (qty_ordered - qty_shipped)
+  let forecastP_current = 0; // current month only — used in "Previsão do mês" card
+  let forecastP_range = 0;   // entire filtered period — used for projected attainment
+  const nowDate = new Date();
+  const curYmCalc = nowDate.getFullYear()+'-'+String(nowDate.getMonth()+1).padStart(2,'0');
+
   backlog.forEach(item => {
     if(!filteredClientIds.has(item.client_user_id)) return;
     if(item.classification === 'Shipped') return;
     if(item.will_ship_month !== true) return;
     const openQty = Math.max(0, Number(item.qty_ordered||0) - Number(item.qty_shipped||0));
     if(openQty <= 0) return;
-    // Check RDD is in range (or earlier, since it's pending)
-    const rddYm = (item.rdd||'').slice(0,7);
-    if(!rddYm || rddYm <= f.monthTo){
-      forecastP += openQty * Number(item.unit_price||0);
+    const value = openQty * Number(item.unit_price||0);
+    // Forecast always goes to current month per business rules
+    forecastP_current += value;
+    if(inRange(curYmCalc)){
+      forecastP_range += value;
     }
   });
 
@@ -5696,14 +5706,17 @@ function renderAdminDashV2Content(el){
   });
 
   // Pick budget/realized based on metaType
-  let budget, realized;
-  if(f.metaType === 'products'){ budget = budgetP; realized = realizedP; }
-  else if(f.metaType === 'networks'){ budget = budgetN; realized = realizedN; }
-  else { budget = budgetP + budgetN; realized = realizedP + realizedN; }
+  let budget, realized, forecastInPeriod;
+  if(f.metaType === 'products'){ budget = budgetP; realized = realizedP; forecastInPeriod = forecastP_range; }
+  else if(f.metaType === 'networks'){ budget = budgetN; realized = realizedN; forecastInPeriod = 0; }
+  else { budget = budgetP + budgetN; realized = realizedP + realizedN; forecastInPeriod = forecastP_range; }
 
   const pct = budget > 0 ? Math.round(realized/budget*100) : 0;
+  const pctProjected = budget > 0 ? Math.round((realized + forecastInPeriod)/budget*100) : 0;
   const gap = budget - realized;
-  const forecastTotal = f.metaType === 'networks' ? realizedN : (f.metaType === 'products' ? realizedP + forecastP : realizedP + forecastP + realizedN);
+  const gapProjected = budget - (realized + forecastInPeriod);
+  // Forecast "Previsão do mês" = Realized + Open forecast (current month) — only relevant when current month is in range
+  const forecastTotal = realized + (f.metaType === 'networks' ? 0 : forecastP_current);
 
   // Check if current month is in range for "Previsão"
   const now = new Date();
@@ -5729,6 +5742,26 @@ function renderAdminDashV2Content(el){
       <p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:3px">${label}</p>
       <p style="font-size:18px;font-weight:800;color:${color}">${value}</p>
       ${sub ? `<p style="font-size:11px;color:var(--tm);margin-top:2px">${sub}</p>` : ''}
+    </div>`;
+
+  // Dual-value card: shows current + projected values side by side
+  const kpiCardDual = (icon, label, valueCur, colorCur, valueProj, colorProj, tipText) => `
+    <div style="background:#fff;border:1px solid var(--border);border-left:3px solid ${colorCur};border-radius:var(--r-md);padding:14px 16px">
+      <div style="display:flex;align-items:center;margin-bottom:6px">
+        <span style="font-size:18px">${icon}</span>
+        ${tipText ? tip(tipText) : ''}
+      </div>
+      <p style="font-size:10px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:5px">${label}</p>
+      <div style="display:flex;gap:12px;align-items:baseline">
+        <div>
+          <p style="font-size:9px;color:var(--tm);font-weight:600;text-transform:uppercase">Atual</p>
+          <p style="font-size:17px;font-weight:800;color:${colorCur};line-height:1">${valueCur}</p>
+        </div>
+        <div style="border-left:1px solid var(--border);padding-left:12px">
+          <p style="font-size:9px;color:var(--tm);font-weight:600;text-transform:uppercase">Projetado</p>
+          <p style="font-size:17px;font-weight:800;color:${colorProj};line-height:1">${valueProj}</p>
+        </div>
+      </div>
     </div>`;
 
   const metaTypeLabels = { products: 'Produtos', networks: 'Networks', total: 'Produtos + Networks' };
@@ -5785,24 +5818,28 @@ function renderAdminDashV2Content(el){
     </div>
 
     <!-- ── KPI CARDS ── -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;margin-bottom:18px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:18px">
       ${kpiCard('🎯', 'Budget '+curMetaLabel, fmt(budget), '#185FA5',
         'Soma do budget interno mensal cadastrado para os clientes filtrados no período. Este é o valor real comprometido com a empresa — diferente da meta que o cliente vê.')}
       ${kpiCard('✅', 'Realizado', fmt(realized), '#166534',
         'Para produtos: soma do que foi efetivamente shipped no período. Para networks: soma das compras de sinais registradas no período.')}
-      ${kpiCard('📊', '% Atingimento', pct+'%', pct>=100?'#166534':pct>=70?'#D97706':'#C0392B',
-        'Realizado / Budget × 100. ≥100% = meta batida (verde), 70-99% = atenção (laranja), <70% = abaixo (vermelho).',
-        budget>0 ? (realized>=budget ? `Superou em ${fmt(realized-budget)}` : `Faltam ${fmt(gap)}`) : 'Sem budget cadastrado')}
+      ${kpiCardDual('📊', '% Atingimento',
+        pct+'%', pct>=100?'#166534':pct>=70?'#D97706':'#C0392B',
+        pctProjected+'%', pctProjected>=100?'#166534':pctProjected>=70?'#D97706':'#C0392B',
+        'ATUAL: Realizado / Budget. PROJETADO: (Realizado + Previsto a embarcar em aberto no período) / Budget. ≥100% = meta batida (verde), 70-99% = atenção (laranja), <70% = abaixo (vermelho).')}
       ${showForecastCard ? kpiCard('📈', 'Previsão do mês', fmt(forecastTotal), '#5B2D99',
-        'Realizado + Previsto Embarcar (itens marcados ✅ Sim no backlog). Estimativa de fechamento do mês atual.') : ''}
+        'Realizado no período + Previsto a Embarcar em aberto (itens marcados ✅ Sim no backlog, descontando quantidades já embarcadas parcialmente). Estimativa de fechamento do mês atual.') : ''}
       ${kpiCard('📦', 'Bookings no período', fmt(bookingsTotal), '#D97706',
         'Soma dos pedidos forwarded a Madrid/Fort Atkinson no período. Mostra entrada de pedidos.')}
-      ${kpiCard('💰', 'Gap vs Budget', fmt(gap), gap>0?'#C0392B':'#166534',
-        'Diferença Budget - Realizado. Negativo = superou a meta. Positivo = ainda falta atingir.')}
+      ${kpiCardDual('💰', 'Gap vs Budget',
+        fmt(gap), gap>0?'#C0392B':'#166534',
+        fmt(gapProjected), gapProjected>0?'#C0392B':'#166534',
+        'ATUAL: Budget - Realizado. PROJETADO: Budget - (Realizado + Previsto a Embarcar). Negativo = superou a meta. Positivo = ainda falta atingir.')}
     </div>
 
     <!-- ── Sections placeholders ── -->
     <div id="dash-monthly-section"></div>
+    <div id="dash-product-monthly-section"></div>
     <div id="dash-manager-section"></div>
     <div id="dash-client-section"></div>
     <div id="dash-seg-country-section"></div>
@@ -5812,6 +5849,7 @@ function renderAdminDashV2Content(el){
 
   // Render each section
   renderMonthlyExecutionChart();
+  renderProductLineMonthly();
   renderManagerPerformance();
   renderClientPerformance();
   renderSegmentCountryBreakdown();
@@ -6356,6 +6394,188 @@ function renderClientPerformance(){
 }
 
 // ═══ Section: Segment & Country breakdown ═══
+// ═══ Helper: compute product line breakdown using same allocation rules as monthly chart ═══
+// Returns: { byMonth: { 'YYYY-MM': {AG, FD, 'SW-OAF', NETWORKS} }, totals: {AG, FD, 'SW-OAF', NETWORKS}, monthsList: [...] }
+function computeProductLineBreakdown(){
+  const d = window._adminDashData;
+  const f = window._adminDashFilters;
+  const { profiles, backlog, nets, profileById, budgetByUser, segMap, fyStart } = d;
+
+  const passClient = (id) => {
+    const p = profileById[id];
+    if(!p) return false;
+    if(f.client && !p.full_name.toLowerCase().includes(f.client.toLowerCase())) return false;
+    if(f.managers.length > 0 && !f.managers.includes(p.manager_name)) return false;
+    if(f.segments.length > 0 && !f.segments.includes(p.segment)) return false;
+    if(f.countries.length > 0 && !f.countries.includes(p.country)) return false;
+    return true;
+  };
+  const filteredIds = new Set(profiles.filter(p => passClient(p.id)).map(p => p.id));
+
+  const now = new Date();
+  const currentYm = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  const todayStr = now.toISOString().slice(0,10);
+  const nextMonth = (ym) => {
+    const [y,m] = ym.split('-').map(Number);
+    const dt = new Date(y, m, 1);
+    return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0');
+  };
+
+  // Allocation rules — same as renderMonthlyExecutionChart
+  const allocateItem = (item) => {
+    const openQty = Math.max(0, Number(item.qty_ordered||0) - Number(item.qty_shipped||0));
+    if(openQty <= 0) return null;
+    if(item.classification === 'Shipped') return null;
+    const value = openQty * Number(item.unit_price||0);
+    const rddYm = (item.rdd||'').slice(0,7);
+    const availYm = (item.availability_date||'').slice(0,7);
+
+    if(item.will_ship_month === true){
+      return { ym: currentYm, value };
+    }
+    if(item.will_ship_month === false){
+      if(availYm && item.availability_date > todayStr){
+        return { ym: availYm, value };
+      }
+      return { ym: nextMonth(currentYm), value };
+    }
+    if(rddYm && rddYm > currentYm){
+      return { ym: rddYm, value };
+    }
+    return { ym: currentYm, value };
+  };
+
+  const getSeg = (pn) => {
+    const s = segMap[pn];
+    if(!s) return 'AG'; // fallback
+    if(s === 'NETWORKS') return 'NETWORKS';
+    return s; // AG, FD, SW-OAF
+  };
+
+  // Init monthly buckets
+  const byMonth = {};
+  const monthsList = [];
+  for(let m = 1; m <= 12; m++){
+    const ym = fyMonthToYM(fyStart, m);
+    monthsList.push({ m, ym, label: ['Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez','Jan','Fev','Mar'][m-1] });
+    byMonth[ym] = {'AG':0,'FD':0,'SW-OAF':0,'NETWORKS':0};
+  }
+
+  // Shipped portions — by ship_date month
+  backlog.forEach(item => {
+    if(!filteredIds.has(item.client_user_id)) return;
+    const seg = getSeg(item.pn);
+    (item.backlog_shipments||[]).forEach(s => {
+      const ym = (s.ship_date||'').slice(0,7);
+      if(!byMonth[ym]) return;
+      byMonth[ym][seg] += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+    });
+  });
+
+  // Open backlog allocated per business rules
+  backlog.forEach(item => {
+    if(!filteredIds.has(item.client_user_id)) return;
+    const a = allocateItem(item);
+    if(!a || !byMonth[a.ym]) return;
+    const seg = getSeg(item.pn);
+    byMonth[a.ym][seg] += a.value;
+  });
+
+  // Networks
+  nets.forEach(n => {
+    if(!filteredIds.has(n.user_id)) return;
+    if(!byMonth[n.month]) return;
+    byMonth[n.month]['NETWORKS'] += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+  });
+
+  // Apply metaType filter — if products only, zero out NETWORKS; if networks only, zero out AG/FD/SW-OAF
+  if(f.metaType === 'products'){
+    Object.keys(byMonth).forEach(ym => { byMonth[ym]['NETWORKS'] = 0; });
+  } else if(f.metaType === 'networks'){
+    Object.keys(byMonth).forEach(ym => { byMonth[ym]['AG'] = 0; byMonth[ym]['FD'] = 0; byMonth[ym]['SW-OAF'] = 0; });
+  }
+
+  // Compute totals (respecting filtered period)
+  const inRange = (ym) => (!f.monthFrom || ym >= f.monthFrom) && (!f.monthTo || ym <= f.monthTo);
+  const totals = {'AG':0,'FD':0,'SW-OAF':0,'NETWORKS':0};
+  Object.entries(byMonth).forEach(([ym, vals]) => {
+    if(!inRange(ym)) return;
+    totals['AG'] += vals['AG'];
+    totals['FD'] += vals['FD'];
+    totals['SW-OAF'] += vals['SW-OAF'];
+    totals['NETWORKS'] += vals['NETWORKS'];
+  });
+
+  return { byMonth, totals, monthsList };
+}
+
+// ═══ Section: Product line monthly composition (stacked bars) ═══
+function renderProductLineMonthly(){
+  const container = document.getElementById('dash-product-monthly-section');
+  if(!container) return;
+
+  const { byMonth, monthsList } = computeProductLineBreakdown();
+  const fmt = v => Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+
+  const COLORS = {
+    'AG': '#185FA5',
+    'FD': '#D97706',
+    'SW-OAF': '#0A7A8C',
+    'NETWORKS': '#8B5CF6'
+  };
+
+  // Build data with totals per month
+  const monthData = monthsList.map(m => {
+    const v = byMonth[m.ym];
+    const total = v['AG'] + v['FD'] + v['SW-OAF'] + v['NETWORKS'];
+    return { ...m, ...v, total };
+  });
+
+  const maxVal = Math.max(...monthData.map(d => d.total), 1);
+
+  // Current month
+  const now = new Date();
+  const currentYm = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+
+  container.innerHTML = `
+    <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h3 style="font-size:13px;font-weight:700">🧩 Composição por linha de produto · FY mês a mês
+          <span class="dash-tip" title="Como a execução total se distribui entre as linhas de produto (AG, FD, SW-OAF) e Networks em cada mês. Usa as mesmas regras de alocação do gráfico de Execução Mensal (Embarcado + Previsto + Programado + Sem class. + Networks)." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
+        </h3>
+        <div style="display:flex;gap:10px;font-size:10px;color:var(--tm);align-items:center;flex-wrap:wrap">
+          <span><span style="display:inline-block;width:9px;height:9px;background:${COLORS['AG']};border-radius:2px;margin-right:3px;vertical-align:middle"></span>AG</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:${COLORS['FD']};border-radius:2px;margin-right:3px;vertical-align:middle"></span>FD</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:${COLORS['SW-OAF']};border-radius:2px;margin-right:3px;vertical-align:middle"></span>SW-OAF</span>
+          <span><span style="display:inline-block;width:9px;height:9px;background:${COLORS['NETWORKS']};border-radius:2px;margin-right:3px;vertical-align:middle"></span>NETWORKS</span>
+        </div>
+      </div>
+      <div>
+        ${monthData.map(d => {
+          const wAG = (d['AG']/maxVal*100);
+          const wFD = (d['FD']/maxVal*100);
+          const wSW = (d['SW-OAF']/maxVal*100);
+          const wNT = (d['NETWORKS']/maxVal*100);
+          const isCurrent = d.ym === currentYm;
+          const curBg = isCurrent ? 'background:#FFFBEB;border-radius:6px;padding:4px 8px;margin:0 -8px 4px;' : 'margin-bottom:6px;';
+          return `<div style="display:grid;grid-template-columns:42px 1fr 130px;gap:10px;align-items:center;font-size:11px;${curBg}"
+            title="AG: USD ${fmt(d['AG'])}&#10;FD: USD ${fmt(d['FD'])}&#10;SW-OAF: USD ${fmt(d['SW-OAF'])}&#10;NETWORKS: USD ${fmt(d['NETWORKS'])}&#10;Total: USD ${fmt(d.total)}">
+            <span style="font-weight:700;color:${isCurrent?'#D97706':'var(--t2)'}">${d.label}${isCurrent?' •':''}</span>
+            <div style="position:relative;height:14px;display:flex">
+              ${d['AG']>0?`<div style="width:${wAG}%;background:${COLORS['AG']}"></div>`:''}
+              ${d['FD']>0?`<div style="width:${wFD}%;background:${COLORS['FD']}"></div>`:''}
+              ${d['SW-OAF']>0?`<div style="width:${wSW}%;background:${COLORS['SW-OAF']}"></div>`:''}
+              ${d['NETWORKS']>0?`<div style="width:${wNT}%;background:${COLORS['NETWORKS']}"></div>`:''}
+            </div>
+            <div style="text-align:right">
+              <span style="font-weight:700">USD ${fmt(d.total)}</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
 function renderSegmentCountryBreakdown(){
   const d = window._adminDashData;
   const f = window._adminDashFilters;
@@ -6426,6 +6646,58 @@ function renderSegmentCountryBreakdown(){
   const fmt = v => 'USD ' + Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
   const COLORS = ['#185FA5','#3A8C4C','#D97706','#991B1B','#5B2D99','#0A7A8C','#854F0B','#1F2937'];
 
+  // Product line breakdown for the trio middle card
+  const { totals: prodTotals } = computeProductLineBreakdown();
+  const prodColors = { 'AG':'#185FA5', 'FD':'#D97706', 'SW-OAF':'#0A7A8C', 'NETWORKS':'#8B5CF6' };
+  const grandTotal = prodTotals['AG'] + prodTotals['FD'] + prodTotals['SW-OAF'] + prodTotals['NETWORKS'];
+
+  // Build SVG donut for product lines
+  const buildProductDonut = () => {
+    if(grandTotal <= 0){
+      return `<div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:14px">
+        <h3 style="font-size:12px;font-weight:700;margin-bottom:10px">🧩 Por linha de produto
+          <span class="dash-tip" title="Distribuição da execução entre AG, FD, SW-OAF e Networks no período. Usa as mesmas regras do gráfico de Execução Mensal." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
+        </h3>
+        <p style="font-size:11px;color:var(--tm);text-align:center;padding:20px 8px">Sem dados no período.</p>
+      </div>`;
+    }
+    const lines = [['AG',prodTotals['AG']],['FD',prodTotals['FD']],['SW-OAF',prodTotals['SW-OAF']],['NETWORKS',prodTotals['NETWORKS']]];
+    let cumPct = 0;
+    const cx = 50, cy = 50, r = 38, sw = 14;
+    const paths = lines.filter(([_,v]) => v > 0).map(([key,v]) => {
+      const pct = v/grandTotal;
+      const startAngle = cumPct * 2 * Math.PI - Math.PI/2;
+      const endAngle = (cumPct + pct) * 2 * Math.PI - Math.PI/2;
+      cumPct += pct;
+      const largeArc = pct > 0.5 ? 1 : 0;
+      const x1 = cx + r*Math.cos(startAngle);
+      const y1 = cy + r*Math.sin(startAngle);
+      const x2 = cx + r*Math.cos(endAngle);
+      const y2 = cy + r*Math.sin(endAngle);
+      return `<path d="M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}" stroke="${prodColors[key]}" stroke-width="${sw}" fill="none"/>`;
+    }).join('');
+    return `<div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:14px">
+      <h3 style="font-size:12px;font-weight:700;margin-bottom:10px">🧩 Por linha de produto
+        <span class="dash-tip" title="Distribuição da execução entre AG, FD, SW-OAF e Networks no período. Usa as mesmas regras do gráfico de Execução Mensal." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
+      </h3>
+      <div style="display:flex;align-items:center;gap:12px">
+        <svg viewBox="0 0 100 100" style="width:90px;height:90px;flex-shrink:0">${paths}
+          <text x="50" y="48" text-anchor="middle" font-size="9" font-weight="700" fill="#001423">Total</text>
+          <text x="50" y="58" text-anchor="middle" font-size="7" fill="#737373">USD ${Number(grandTotal).toLocaleString('en-US',{maximumFractionDigits:0})}</text>
+        </svg>
+        <div style="flex:1;font-size:11px">
+          ${lines.map(([key,v]) => {
+            const pct = grandTotal > 0 ? Math.round(v/grandTotal*100) : 0;
+            return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;padding-bottom:4px;border-bottom:1px solid var(--border-light)">
+              <span><span style="display:inline-block;width:8px;height:8px;background:${prodColors[key]};border-radius:2px;margin-right:5px;vertical-align:middle"></span><strong>${key}</strong></span>
+              <span style="color:var(--tm);font-size:10px">${fmt(v).replace('USD ','')} · <strong style="color:${prodColors[key]}">${pct}%</strong></span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>`;
+  };
+
   const buildList = (data, title, tipText) => `
     <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:14px">
       <h3 style="font-size:12px;font-weight:700;margin-bottom:10px">${title}
@@ -6449,8 +6721,9 @@ function renderSegmentCountryBreakdown(){
     </div>`;
 
   container.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
       ${buildList(segData, '🎯 Por segmento comercial', 'Breakdown da carteira filtrada por segmento (Aftermarket, Regional OEM, Global OEM).')}
+      ${buildProductDonut()}
       ${buildList(ctryData, '🌎 Por país', 'Breakdown da carteira filtrada por país. Ranking por realizado.')}
     </div>`;
 }
