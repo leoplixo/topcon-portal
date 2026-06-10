@@ -5933,7 +5933,7 @@ function adminDashReset(){
 // ═══════════════════════════════════════════════════════════════════
 
 function openExportReportModal(){
-  // Quick selector for which period to use
+  // Quick selector for which period to use + which slides to include
   let modal=document.getElementById('export-report-modal');
   if(modal) modal.remove();
 
@@ -5941,34 +5941,107 @@ function openExportReportModal(){
   modal.id='export-report-modal';
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
   modal.innerHTML=`
-    <div style="background:#fff;border-radius:14px;max-width:520px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+    <div style="background:#fff;border-radius:14px;max-width:680px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25);max-height:90vh;overflow-y:auto">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
         <h3 style="font-size:17px;font-weight:700">📄 Export Report</h3>
         <button onclick="document.getElementById('export-report-modal').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--tm)">×</button>
       </div>
-      <p style="font-size:12px;color:var(--tm);margin-bottom:16px">Choose the period to include in the report. The report will open in a new tab, ready to print as PDF (Ctrl+P / Cmd+P).</p>
+      <p style="font-size:12px;color:var(--tm);margin-bottom:14px">Choose the period and which slides to include. The report will open in a new tab, ready to print as PDF (Ctrl+P / Cmd+P).</p>
 
-      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
-        <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
+      <!-- ── Period selection ── -->
+      <p style="font-size:11px;font-weight:700;color:var(--t1);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">📅 Period</p>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:18px">
+        <label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
           <input type="radio" name="exp-period" value="filtered" checked/>
           <div>
             <p style="font-weight:600;font-size:13px">Filtered Period (current)</p>
             <p style="font-size:11px;color:var(--tm)">Uses the period currently set in dashboard filters</p>
           </div>
         </label>
-        <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
+        <label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
           <input type="radio" name="exp-period" value="month"/>
           <div>
             <p style="font-weight:600;font-size:13px">Current Month Only</p>
             <p style="font-size:11px;color:var(--tm)">Focus on the running month</p>
           </div>
         </label>
-        <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
+        <label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border-md);border-radius:var(--r-md);cursor:pointer" onmouseover="this.style.background='#F8FAFC'" onmouseout="this.style.background=''">
           <input type="radio" name="exp-period" value="fy"/>
           <div>
             <p style="font-weight:600;font-size:13px">Full Fiscal Year</p>
             <p style="font-size:11px;color:var(--tm)">From April to March (entire FY)</p>
           </div>
+        </label>
+      </div>
+
+      <!-- ── Slide selection ── -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <p style="font-size:11px;font-weight:700;color:var(--t1);text-transform:uppercase;letter-spacing:.05em">📑 Slides to include</p>
+        <div style="display:flex;gap:6px">
+          <button onclick="toggleAllSlides(true)" style="padding:3px 9px;font-size:10px;border:1px solid var(--border-md);background:#fff;border-radius:6px;cursor:pointer;color:var(--t1);font-weight:600">Select all</button>
+          <button onclick="toggleAllSlides(false)" style="padding:3px 9px;font-size:10px;border:1px solid var(--border-md);background:#fff;border-radius:6px;cursor:pointer;color:var(--tm)">Select none</button>
+        </div>
+      </div>
+
+      <div style="border:1px solid var(--border-md);border-radius:var(--r-md);padding:12px;margin-bottom:18px;background:#FAFBFC">
+
+        <!-- Group: Cover & Executive Summary -->
+        <p style="font-size:10px;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">🟦 Cover & Executive Summary</p>
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;color:var(--tm);cursor:not-allowed;opacity:.7">
+          <input type="checkbox" checked disabled/>
+          <span>Cover (always included)</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;cursor:pointer" onmouseover="this.style.background='#F1F5F9'" onmouseout="this.style.background=''">
+          <input type="checkbox" class="exp-slide" data-slide="exec" checked/>
+          <span>Executive Summary <span style="color:var(--tm);font-size:10px">(KPIs + automated insights)</span></span>
+        </label>
+
+        <!-- Group: Performance -->
+        <p style="font-size:10px;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">📊 Performance</p>
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;cursor:pointer" onmouseover="this.style.background='#F1F5F9'" onmouseout="this.style.background=''">
+          <input type="checkbox" class="exp-slide" data-slide="monthly" checked/>
+          <span>Monthly Execution <span style="color:var(--tm);font-size:10px">(stacked bars + quarter cards)</span></span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;cursor:pointer" onmouseover="this.style.background='#F1F5F9'" onmouseout="this.style.background=''">
+          <input type="checkbox" class="exp-slide" data-slide="product" checked/>
+          <span>Product Line Composition <span style="color:var(--tm);font-size:10px">(donut + monthly stacked)</span></span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;cursor:pointer" onmouseover="this.style.background='#F1F5F9'" onmouseout="this.style.background=''">
+          <input type="checkbox" class="exp-slide" data-slide="manager" checked/>
+          <span>Manager Performance <span style="color:var(--tm);font-size:10px">(achievement by manager)</span></span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;cursor:pointer" onmouseover="this.style.background='#F1F5F9'" onmouseout="this.style.background=''">
+          <input type="checkbox" class="exp-slide" data-slide="dealers" checked/>
+          <span>Dealers — Action Focus <span style="color:var(--tm);font-size:10px">(top 10 best + worst by %)</span></span>
+        </label>
+
+        <!-- Group: Breakdown -->
+        <p style="font-size:10px;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">🌍 Breakdown</p>
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;cursor:pointer" onmouseover="this.style.background='#F1F5F9'" onmouseout="this.style.background=''">
+          <input type="checkbox" class="exp-slide" data-slide="geo" checked/>
+          <span>Geography & Segments <span style="color:var(--tm);font-size:10px">(by country and segment)</span></span>
+        </label>
+
+        <!-- Group: Risk Analysis -->
+        <p style="font-size:10px;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">🎯 Risk Analysis</p>
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;cursor:pointer" onmouseover="this.style.background='#F1F5F9'" onmouseout="this.style.background=''">
+          <input type="checkbox" class="exp-slide" data-slide="riskHigh" checked/>
+          <span>🔴 High Impact <span style="color:var(--tm);font-size:10px">(PN Short, Ship Complete, Late Delivery, Unclassified)</span></span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;cursor:pointer" onmouseover="this.style.background='#F1F5F9'" onmouseout="this.style.background=''">
+          <input type="checkbox" class="exp-slide" data-slide="riskMedLow" checked/>
+          <span>🟡🟢 Medium &amp; Low Impact <span style="color:var(--tm);font-size:10px">(Incomplete, Missing Doc, Credit Hold, Pick-up)</span></span>
+        </label>
+
+        <!-- Group: Margins -->
+        <p style="font-size:10px;font-weight:700;color:var(--tm);text-transform:uppercase;letter-spacing:.04em;margin:12px 0 6px">💎 Margins</p>
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;cursor:pointer" onmouseover="this.style.background='#F1F5F9'" onmouseout="this.style.background=''">
+          <input type="checkbox" class="exp-slide" data-slide="margins" checked/>
+          <span>Margins by Dealer <span style="color:var(--tm);font-size:10px">(top 15 best + 5 worst)</span></span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;cursor:pointer" onmouseover="this.style.background='#F1F5F9'" onmouseout="this.style.background=''">
+          <input type="checkbox" class="exp-slide" data-slide="marginsManager" checked/>
+          <span>Margins by Manager <span style="color:var(--tm);font-size:10px">(grouped by account manager)</span></span>
         </label>
       </div>
 
@@ -5983,16 +6056,32 @@ function openExportReportModal(){
   modal.addEventListener('click', e => { if(e.target===modal) modal.remove(); });
 }
 
+function toggleAllSlides(checked){
+  document.querySelectorAll('#export-report-modal .exp-slide').forEach(cb => cb.checked = checked);
+}
+
 function generateReportNow(){
   const selected=document.querySelector('input[name="exp-period"]:checked')?.value || 'filtered';
+  // Build set of enabled slide keys (cover is always in)
+  const enabledSlides = { cover: true };
+  document.querySelectorAll('#export-report-modal .exp-slide').forEach(cb => {
+    enabledSlides[cb.dataset.slide] = cb.checked;
+  });
   document.getElementById('export-report-modal')?.remove();
-  exportDashboardReport(selected);
+  exportDashboardReport(selected, enabledSlides);
 }
 
 // Main export function
-function exportDashboardReport(periodMode){
+function exportDashboardReport(periodMode, enabledSlides){
   const d = window._adminDashData;
   if(!d){ alert('Dashboard data not loaded.'); return; }
+
+  // Default: include all slides (used when called without explicit selection)
+  if(!enabledSlides) enabledSlides = {
+    cover: true, exec: true, monthly: true, product: true, manager: true,
+    dealers: true, geo: true, riskHigh: true, riskMedLow: true,
+    margins: true, marginsManager: true
+  };
 
   // Determine period range based on mode
   const fyStart = d.fyStart;
@@ -6022,7 +6111,7 @@ function exportDashboardReport(periodMode){
   const reportData = computeReportData();
 
   // Build the HTML report
-  const html = buildReportHTML(reportData, reportPeriodLabel, periodMode);
+  const html = buildReportHTML(reportData, reportPeriodLabel, periodMode, enabledSlides);
 
   // Restore original filters
   window._adminDashFilters = originalFilter;
@@ -6512,7 +6601,13 @@ function computeReportData(){
 }
 
 // ═══ Build HTML for the report (opens in new tab) ═══
-function buildReportHTML(r, periodLabel, periodMode){
+function buildReportHTML(r, periodLabel, periodMode, enabledSlides){
+  // Default: all slides on if not explicitly provided
+  if(!enabledSlides) enabledSlides = {
+    cover: true, exec: true, monthly: true, product: true, manager: true,
+    dealers: true, geo: true, riskHigh: true, riskMedLow: true,
+    margins: true, marginsManager: true
+  };
   const fmt = v => 'USD ' + Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
   const fmtShort = v => Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
   const metaLabels = { products:'Products', networks:'Networks', total:'Products + Networks' };
@@ -6706,7 +6801,7 @@ function buildReportHTML(r, periodLabel, periodMode){
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">01 / Executive Summary</p>
+          <p class="slide-sub">[[SLIDE]] / Executive Summary</p>
           <h2 class="slide-title">Key Performance Indicators</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
@@ -6764,7 +6859,7 @@ function buildReportHTML(r, periodLabel, periodMode){
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">02 / Monthly Execution</p>
+          <p class="slide-sub">[[SLIDE]] / Monthly Execution</p>
           <h2 class="slide-title">FY${r.fyStart} Performance by Month</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
@@ -6843,7 +6938,7 @@ function buildReportHTML(r, periodLabel, periodMode){
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">03 / Product Line</p>
+          <p class="slide-sub">[[SLIDE]] / Product Line</p>
           <h2 class="slide-title">Execution by Product Line</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
@@ -6923,7 +7018,7 @@ function buildReportHTML(r, periodLabel, periodMode){
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">04 / Manager Performance</p>
+          <p class="slide-sub">[[SLIDE]] / Manager Performance</p>
           <h2 class="slide-title">Performance by Manager</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
@@ -6989,7 +7084,7 @@ function buildReportHTML(r, periodLabel, periodMode){
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">05 / Dealers — Action Focus</p>
+          <p class="slide-sub">[[SLIDE]] / Dealers — Action Focus</p>
           <h2 class="slide-title">Dealers Requiring Attention vs. Top Performers</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
@@ -7038,7 +7133,7 @@ function buildReportHTML(r, periodLabel, periodMode){
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">06 / Geography & Segments</p>
+          <p class="slide-sub">[[SLIDE]] / Geography & Segments</p>
           <h2 class="slide-title">Performance by Commercial Segment and Country</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
@@ -7153,7 +7248,7 @@ function buildReportHTML(r, periodLabel, periodMode){
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">07 / Risk Analysis · High Impact</p>
+          <p class="slide-sub">[[SLIDE]] / Risk Analysis · High Impact</p>
           <h2 class="slide-title">Open Items — High Impact Classifications</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
@@ -7177,7 +7272,7 @@ function buildReportHTML(r, periodLabel, periodMode){
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">08 / Risk Analysis · Medium & Low Impact</p>
+          <p class="slide-sub">[[SLIDE]] / Risk Analysis · Medium & Low Impact</p>
           <h2 class="slide-title">Open Items — Medium and Low Impact Classifications</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
@@ -7240,7 +7335,7 @@ function buildReportHTML(r, periodLabel, periodMode){
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">07 / Margins by Dealer</p>
+          <p class="slide-sub">[[SLIDE]] / Margins by Dealer</p>
           <h2 class="slide-title">Dealer Margin Analysis — Best & Worst</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
@@ -7281,7 +7376,7 @@ function buildReportHTML(r, periodLabel, periodMode){
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">08 / Margins by Manager</p>
+          <p class="slide-sub">[[SLIDE]] / Margins by Manager</p>
           <h2 class="slide-title">Margin Analysis by Manager</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
@@ -7346,6 +7441,32 @@ function buildReportHTML(r, periodLabel, periodMode){
     </div>
   `;
 
+  // Map slide keys to their rendered HTML (cover always first; others controlled by enabledSlides)
+  const slidesByKey = {
+    exec: slideExec,
+    monthly: slideMonthly,
+    product: slideProduct,
+    manager: slideManager,
+    dealers: slideDealers,
+    geo: slideGeo,
+    riskHigh: slideRiskHigh,
+    riskMedLow: slideRiskMediumLow,
+    margins: slideMargins,
+    marginsManager: slideMarginsManager
+  };
+
+  // Build list of enabled slides in fixed order
+  const slideOrder = ['exec','monthly','product','manager','dealers','geo','riskHigh','riskMedLow','margins','marginsManager'];
+  const includedSlides = slideOrder.filter(k => enabledSlides[k]).map(k => slidesByKey[k]);
+
+  // Replace [[SLIDE]] placeholders with running numbers based on what's included
+  let counter = 0;
+  const numberedSlides = includedSlides.map(html =>
+    html.replace(/\[\[SLIDE\]\]/g, () => String(++counter).padStart(2,'0'))
+  ).join('\n');
+
+  const totalSlides = counter + 1; // +1 for cover
+
   // Final HTML
   return `<!DOCTYPE html>
 <html lang="en">
@@ -7356,20 +7477,11 @@ function buildReportHTML(r, periodLabel, periodMode){
 </head>
 <body>
   <div class="print-bar no-print">
-    <span style="font-size:13px">📄 Report ready · ${r.totalClients} client(s) included · ${periodLabel}</span>
+    <span style="font-size:13px">📄 Report ready · ${r.totalClients} client(s) included · ${periodLabel} · ${totalSlides} slide(s)</span>
     <button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
   </div>
   ${slideCover}
-  ${slideExec}
-  ${slideMonthly}
-  ${slideProduct}
-  ${slideManager}
-  ${slideDealers}
-  ${slideGeo}
-  ${slideRiskHigh}
-  ${slideRiskMediumLow}
-  ${slideMargins}
-  ${slideMarginsManager}
+  ${numberedSlides}
 </body>
 </html>`;
 }
