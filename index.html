@@ -6366,6 +6366,84 @@ function computeReportData(){
     revenue: d.revenue
   })).sort((a,b) => b.revenue - a.revenue);
 
+  // Product line breakdown — monthly (for stacked chart in report)
+  const productLineMonthly = [];
+  const allocateItemForPL = (item) => {
+    const openQty = Math.max(0, Number(item.qty_ordered||0) - Number(item.qty_shipped||0));
+    if(openQty <= 0) return null;
+    if(item.classification === 'Shipped') return null;
+    const value = openQty * Number(item.unit_price||0);
+    const rddYm = (item.rdd||'').slice(0,7);
+    const availYm = (item.availability_date||'').slice(0,7);
+    if(item.will_ship_month === true) return { ym: curYm, value };
+    if(item.will_ship_month === false){
+      if(availYm && item.availability_date > todayStr) return { ym: availYm, value };
+      return { ym: nextMonth(curYm), value };
+    }
+    if(rddYm && rddYm > curYm) return { ym: rddYm, value };
+    return { ym: curYm, value };
+  };
+  for(let m = 1; m <= 12; m++){
+    const ym = fyMonthToYM(fyStart, m);
+    const buckets = {'AG':0,'FD':0,'SW-OAF':0,'NETWORKS':0};
+    backlog.forEach(item => {
+      if(!filteredClientIds.has(item.client_user_id)) return;
+      const seg = (segMap[item.pn] || 'AG');
+      const segKey = seg === 'NETWORKS' ? 'NETWORKS' : seg;
+      (item.backlog_shipments||[]).forEach(s => {
+        if((s.ship_date||'').slice(0,7) === ym){
+          buckets[segKey] = (buckets[segKey]||0) + Number(s.qty_shipped||0) * Number(item.unit_price||0);
+        }
+      });
+      const a = allocateItemForPL(item);
+      if(a && a.ym === ym){
+        buckets[segKey] = (buckets[segKey]||0) + a.value;
+      }
+    });
+    nets.forEach(n => {
+      if(!filteredClientIds.has(n.user_id)) return;
+      if(n.month === ym){
+        buckets['NETWORKS'] += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+      }
+    });
+    // Apply metaType filter
+    if(f.metaType === 'products'){ buckets['NETWORKS'] = 0; }
+    else if(f.metaType === 'networks'){ buckets['AG'] = 0; buckets['FD'] = 0; buckets['SW-OAF'] = 0; }
+    productLineMonthly.push({
+      m, ym,
+      label: ['Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar'][m-1],
+      AG: buckets['AG'], FD: buckets['FD'], 'SW-OAF': buckets['SW-OAF'], NETWORKS: buckets['NETWORKS'],
+      total: buckets['AG']+buckets['FD']+buckets['SW-OAF']+buckets['NETWORKS'],
+      isCurrent: ym === curYm
+    });
+  }
+
+  // Margins by manager
+  const marginByManager = {};
+  orders.forEach(o => {
+    if(!filteredClientIds.has(o.user_id)) return;
+    if(!inRange((o.created_at||'').slice(0,7))) return;
+    const p = profileById[o.user_id];
+    if(!p) return;
+    const mgr = p.manager_name || 'Unassigned';
+    (o.order_items||[]).forEach(i => {
+      const fp = Number(i.unit_price) - Number(i.additional_discount||0);
+      const cost = costMap[i.pn] || 0;
+      const qty = Number(i.quantity||1);
+      if(cost <= 0 || fp <= 0) return;
+      if(!marginByManager[mgr]) marginByManager[mgr] = { revenue:0, cost:0, dealerSet:new Set() };
+      marginByManager[mgr].revenue += fp * qty;
+      marginByManager[mgr].cost += cost * qty;
+      marginByManager[mgr].dealerSet.add(p.full_name);
+    });
+  });
+  const marginManagerData = Object.entries(marginByManager).map(([name, d]) => ({
+    name,
+    margin: d.revenue > 0 ? (d.revenue - d.cost)/d.revenue*100 : 0,
+    revenue: d.revenue,
+    dealers: d.dealerSet.size
+  })).sort((a,b) => b.revenue - a.revenue);
+
   return {
     fyStart,
     metaType: f.metaType,
@@ -6373,8 +6451,8 @@ function computeReportData(){
     monthFrom: f.monthFrom, monthTo: f.monthTo,
     kpis: { budget, realized, pct, pctProjected, gap, gapProjected, forecastTotal, bookingsTotal, forecastInPeriod },
     monthData, managerData, dealerData,
-    segmentData, countryData, productLineTotals,
-    marginData,
+    segmentData, countryData, productLineTotals, productLineMonthly,
+    marginData, marginManagerData,
     totalClients: filteredClients.length
   };
 }
@@ -6717,7 +6795,8 @@ function buildReportHTML(r, periodLabel, periodMode){
         ${TOPCON_LOGO_LIGHT}
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:center">
+      <!-- Top section: donut + table side by side -->
+      <div style="display:grid;grid-template-columns:0.9fr 1.4fr;gap:16px;align-items:center;margin-bottom:14px">
         <div style="text-align:center">
           ${buildPlDonut()}
         </div>
@@ -6740,7 +6819,41 @@ function buildReportHTML(r, periodLabel, periodMode){
         </div>
       </div>
 
-      <div class="insight-box">
+      <!-- Monthly stacked chart -->
+      <div style="border-top:1px solid #E5E7EB;padding-top:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <h3 style="font-size:11px;font-weight:700;color:#001423">Monthly Composition · FY${r.fyStart}</h3>
+          <div class="legend-row" style="font-size:9px">
+            <span><span class="swatch" style="background:${plColors['AG']}"></span>AG</span>
+            <span><span class="swatch" style="background:${plColors['FD']}"></span>FD</span>
+            <span><span class="swatch" style="background:${plColors['SW-OAF']}"></span>SW-OAF</span>
+            <span><span class="swatch" style="background:${plColors['NETWORKS']}"></span>NETWORKS</span>
+          </div>
+        </div>
+        ${(() => {
+          const maxMonthPL = Math.max(...r.productLineMonthly.map(d => d.total), 1);
+          return r.productLineMonthly.map(d => {
+            const wAG = (d['AG']/maxMonthPL*100);
+            const wFD = (d['FD']/maxMonthPL*100);
+            const wSW = (d['SW-OAF']/maxMonthPL*100);
+            const wNT = (d['NETWORKS']/maxMonthPL*100);
+            return `<div style="display:grid;grid-template-columns:32px 1fr 100px;gap:8px;align-items:center;font-size:9px;${d.isCurrent?'background:#FFFBEB;padding:2px 5px;border-radius:3px;margin-bottom:2px':'margin-bottom:3px'}">
+              <span style="font-weight:700;color:${d.isCurrent?'#D97706':'#001423'}">${d.label}${d.isCurrent?' •':''}</span>
+              <div style="position:relative;height:10px;display:flex">
+                ${d['AG']>0?`<div style="width:${wAG}%;background:${plColors['AG']}"></div>`:''}
+                ${d['FD']>0?`<div style="width:${wFD}%;background:${plColors['FD']}"></div>`:''}
+                ${d['SW-OAF']>0?`<div style="width:${wSW}%;background:${plColors['SW-OAF']}"></div>`:''}
+                ${d['NETWORKS']>0?`<div style="width:${wNT}%;background:${plColors['NETWORKS']}"></div>`:''}
+              </div>
+              <div style="text-align:right">
+                <strong>USD ${fmtShort(d.total)}</strong>
+              </div>
+            </div>`;
+          }).join('');
+        })()}
+      </div>
+
+      <div class="insight-box" style="margin-top:8px;padding:8px 12px;font-size:11px">
         <strong>📊 Product Mix:</strong> ${insight.productMix}
       </div>
 
@@ -6787,18 +6900,56 @@ function buildReportHTML(r, periodLabel, periodMode){
     </div>
   `;
 
-  // Slide 6 — Top Dealers
-  const topDealers = r.dealerData.slice(0, 15);
+  // Slide 6 — Dealers split: 10 worst gap (needs attention) + 10 best gap
+  // Only consider dealers with budget > 0 (others not really comparable)
+  const dealersWithBudget = r.dealerData.filter(d => d.budget > 0);
+  const sortedByGapDesc = [...dealersWithBudget].sort((a,b) => b.gap - a.gap); // largest positive gap first
+  const sortedByGapAsc = [...dealersWithBudget].sort((a,b) => a.gap - b.gap);   // smallest (most negative) first
+  const worstGapDealers = sortedByGapDesc.slice(0, 10);
+  const bestGapDealers = sortedByGapAsc.slice(0, 10);
+
+  const dealerRow = (c, i) => {
+    const pctColor = c.pct >= 100 ? '#166534' : c.pct >= 70 ? '#D97706' : c.budget > 0 ? '#C0392B' : '#888';
+    return `<tr>
+      <td><strong>${i+1}</strong></td>
+      <td><strong>${c.name}</strong></td>
+      <td>${c.manager}</td>
+      <td style="font-size:9px">${c.segment}</td>
+      <td style="font-size:9px">${c.country}</td>
+      <td style="text-align:right;color:#6B7280">${fmt(c.budget)}</td>
+      <td style="text-align:right"><strong>${fmt(c.realized)}</strong></td>
+      <td style="text-align:right"><strong style="color:${pctColor}">${c.budget>0?c.pct+'%':'—'}</strong></td>
+      <td style="text-align:right;color:${c.gap>0?'#C0392B':'#166534'};font-weight:700">${fmt(c.gap)}</td>
+    </tr>`;
+  };
+
   const slideDealers = `
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">05 / Top Dealers</p>
-          <h2 class="slide-title">Top 15 Dealers by Volume</h2>
+          <p class="slide-sub">05 / Dealers — Action Focus</p>
+          <h2 class="slide-title">Dealers Requiring Attention vs. Top Performers</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
       </div>
 
+      <!-- 10 worst (largest gap = needs most attention) -->
+      <h3 style="font-size:11px;font-weight:700;color:#C0392B;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">⚠️ Top 10 — Largest Gap (Most Attention Needed)</h3>
+      <table class="report-tbl" style="margin-bottom:14px">
+        <thead>
+          <tr>
+            <th>#</th><th>Dealer</th><th>Manager</th><th>Segment</th><th>Country</th>
+            <th style="text-align:right">Budget</th><th style="text-align:right">Shipped</th><th style="text-align:right">Ach.</th><th style="text-align:right">Gap</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${worstGapDealers.length === 0 ? '<tr><td colspan="9" style="text-align:center;color:#9CA3AF;padding:14px">No dealers with budget in period.</td></tr>' :
+            worstGapDealers.map((c,i) => dealerRow(c, i)).join('')}
+        </tbody>
+      </table>
+
+      <!-- 10 best (smallest/negative gap = top performers) -->
+      <h3 style="font-size:11px;font-weight:700;color:#166534;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">⭐ Top 10 — Best Performance (Lowest Gap / Above Target)</h3>
       <table class="report-tbl">
         <thead>
           <tr>
@@ -6807,25 +6958,12 @@ function buildReportHTML(r, periodLabel, periodMode){
           </tr>
         </thead>
         <tbody>
-          ${topDealers.length === 0 ? '<tr><td colspan="9" style="text-align:center;color:#9CA3AF;padding:20px">No data.</td></tr>' :
-            topDealers.map((c,i) => {
-              const pctColor = c.pct >= 100 ? '#166534' : c.pct >= 70 ? '#D97706' : c.budget > 0 ? '#C0392B' : '#888';
-              return `<tr>
-                <td><strong>${i+1}</strong></td>
-                <td><strong>${c.name}</strong></td>
-                <td>${c.manager}</td>
-                <td style="font-size:9px">${c.segment}</td>
-                <td style="font-size:9px">${c.country}</td>
-                <td style="text-align:right;color:#6B7280">${fmt(c.budget)}</td>
-                <td style="text-align:right"><strong>${fmt(c.realized)}</strong></td>
-                <td style="text-align:right"><strong style="color:${pctColor}">${c.budget>0?c.pct+'%':'—'}</strong></td>
-                <td style="text-align:right;color:${c.gap>0?'#C0392B':'#166534'}">${fmt(c.gap)}</td>
-              </tr>`;
-            }).join('')}
+          ${bestGapDealers.length === 0 ? '<tr><td colspan="9" style="text-align:center;color:#9CA3AF;padding:14px">No dealers with budget in period.</td></tr>' :
+            bestGapDealers.map((c,i) => dealerRow(c, i)).join('')}
         </tbody>
       </table>
 
-      <p style="font-size:10px;color:#6B7280;margin-top:10px">Showing top 15 of ${r.dealerData.length} dealer(s) with activity in the period. Sorted by shipped volume.</p>
+      <p style="font-size:10px;color:#6B7280;margin-top:8px">${dealersWithBudget.length} dealer(s) with budget in period. Top 10 worst sorted by largest positive gap (most below target), Top 10 best by smallest/most negative gap (above target).</p>
 
       <div class="slide-footer">
         <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
@@ -6890,42 +7028,132 @@ function buildReportHTML(r, periodLabel, periodMode){
     </div>
   `;
 
-  // Slide 8 — Margins
-  const topMargins = r.marginData.slice(0, 12);
+  // Slide 8 — Margins by Dealer: Top 15 best + Top 5 worst
+  // Only include dealers with meaningful revenue (already filtered in marginData)
+  const allMargins = r.marginData; // already sorted desc by revenue
+  const sortedByMargin = [...allMargins].sort((a,b) => b.margin - a.margin);
+  const top15Best = sortedByMargin.slice(0, 15);
+  const top5Worst = sortedByMargin.slice(-5).reverse(); // last 5 (worst), reversed so worst is first
+
+  const marginRow = (m) => {
+    const color = m.margin >= 40 ? '#166534' : m.margin >= 30 ? '#D97706' : '#C0392B';
+    const w = Math.min(100, Math.max(0, m.margin));
+    return `<div style="display:grid;grid-template-columns:1.5fr 2fr 90px;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid #F1F5F9;font-size:10px">
+      <span><strong>${m.name}</strong></span>
+      <div style="display:flex;align-items:center;gap:6px">
+        <div style="flex:1;height:6px;background:#F1F5F9;border-radius:3px;position:relative">
+          <div style="width:${w}%;height:100%;background:${color};border-radius:3px"></div>
+          <div style="position:absolute;top:0;left:40%;width:1px;height:100%;background:#9CA3AF;opacity:.6"></div>
+        </div>
+        <strong style="color:${color};min-width:42px;text-align:right;font-size:10px">${m.margin.toFixed(1)}%</strong>
+      </div>
+      <span style="text-align:right;font-size:9px;color:#6B7280">${fmt(m.revenue)}</span>
+    </div>`;
+  };
+
   const slideMargins = `
     <div class="slide">
       <div class="slide-header">
         <div>
-          <p class="slide-sub">07 / Margins</p>
-          <h2 class="slide-title">Margin Analysis (Top 12 by Revenue)</h2>
+          <p class="slide-sub">07 / Margins by Dealer</p>
+          <h2 class="slide-title">Dealer Margin Analysis — Best & Worst</h2>
         </div>
         ${TOPCON_LOGO_LIGHT}
       </div>
 
-      <div style="font-size: 11px;">
-        ${topMargins.length === 0 ? '<p style="color:#9CA3AF;text-align:center;padding:30px">No margin data available (requires cost data per PN).</p>' :
-          topMargins.map(m => {
-            const color = m.margin >= 40 ? '#166534' : m.margin >= 30 ? '#D97706' : '#C0392B';
-            const w = Math.min(100, Math.max(0, m.margin));
-            return `<div style="display:grid;grid-template-columns:1.5fr 2fr 100px;gap:10px;align-items:center;margin-bottom:7px;padding-bottom:5px;border-bottom:1px solid #F1F5F9">
-              <span><strong>${m.name}</strong></span>
-              <div style="display:flex;align-items:center;gap:8px">
-                <div style="flex:1;height:7px;background:#F1F5F9;border-radius:3px;position:relative">
-                  <div style="width:${w}%;height:100%;background:${color};border-radius:3px"></div>
-                  <div style="position:absolute;top:0;left:40%;width:1px;height:100%;background:#9CA3AF;opacity:.6"></div>
-                </div>
-                <strong style="color:${color};min-width:46px;text-align:right">${m.margin.toFixed(1)}%</strong>
-              </div>
-              <span style="text-align:right;font-size:10px;color:#6B7280">${fmt(m.revenue)}</span>
-            </div>`;
-          }).join('')}
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px">
+
+        <!-- Top 15 best margins -->
+        <div>
+          <h3 style="font-size:11px;font-weight:700;color:#166534;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">⭐ Top 15 — Best Margins</h3>
+          ${top15Best.length === 0 ? '<p style="color:#9CA3AF;text-align:center;padding:14px;font-size:10px">No margin data available.</p>' :
+            top15Best.map(m => marginRow(m)).join('')}
+        </div>
+
+        <!-- Worst 5 margins -->
+        <div>
+          <h3 style="font-size:11px;font-weight:700;color:#C0392B;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">⚠️ Top 5 — Worst Margins</h3>
+          ${top5Worst.length === 0 ? '<p style="color:#9CA3AF;text-align:center;padding:14px;font-size:10px">No margin data available.</p>' :
+            top5Worst.map(m => marginRow(m)).join('')}
+          <p style="font-size:9px;color:#9CA3AF;margin-top:10px;line-height:1.4">Dashed line at 40% indicates target margin. Margin = (Revenue − Cost) / Revenue, weighted by line revenue. Total dealers analyzed: ${allMargins.length}.</p>
+        </div>
       </div>
 
-      <p style="font-size:9px;color:#9CA3AF;margin-top:6px">Dashed line at 40% indicates target margin. Margin = (Revenue - Cost) / Revenue, weighted by line revenue.</p>
-
-      <div class="insight-box">
-        <strong>💎 Margins:</strong> ${insight.margins}
+      <div class="insight-box" style="margin-top:10px">
+        <strong>💎 Dealer Margins:</strong> ${insight.margins}
       </div>
+
+      <div class="slide-footer">
+        <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
+      </div>
+    </div>
+  `;
+
+  // Slide 9 — Margins by Manager
+  const mgrMarginsSorted = [...r.marginManagerData].sort((a,b) => b.margin - a.margin);
+
+  const slideMarginsManager = `
+    <div class="slide">
+      <div class="slide-header">
+        <div>
+          <p class="slide-sub">08 / Margins by Manager</p>
+          <h2 class="slide-title">Margin Analysis by Manager</h2>
+        </div>
+        ${TOPCON_LOGO_LIGHT}
+      </div>
+
+      <p style="font-size:11px;color:#6B7280;margin-bottom:10px">
+        Weighted average margin per manager portfolio. Calculated as total (Revenue − Cost) / total Revenue across all their dealers' orders in the period.
+      </p>
+
+      <table class="report-tbl" style="margin-bottom:12px">
+        <thead>
+          <tr>
+            <th>#</th><th>Manager</th><th>Dealers</th>
+            <th style="text-align:right">Revenue (Period)</th>
+            <th style="text-align:right">Margin %</th>
+            <th>Performance vs 40% Target</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${mgrMarginsSorted.length === 0 ? '<tr><td colspan="6" style="text-align:center;color:#9CA3AF;padding:18px">No margin data available (requires cost data per PN).</td></tr>' :
+            mgrMarginsSorted.map((m,i) => {
+              const color = m.margin >= 40 ? '#166534' : m.margin >= 30 ? '#D97706' : '#C0392B';
+              const w = Math.min(100, Math.max(0, m.margin));
+              return `<tr>
+                <td><strong>${i+1}</strong></td>
+                <td><strong>${m.name}</strong></td>
+                <td>${m.dealers}</td>
+                <td style="text-align:right">${fmt(m.revenue)}</td>
+                <td style="text-align:right"><strong style="color:${color};font-size:13px">${m.margin.toFixed(1)}%</strong></td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <div style="flex:1;height:7px;background:#F1F5F9;border-radius:3px;position:relative">
+                      <div style="width:${w}%;height:100%;background:${color};border-radius:3px"></div>
+                      <div style="position:absolute;top:0;left:40%;width:1px;height:100%;background:#9CA3AF;opacity:.6"></div>
+                    </div>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
+        </tbody>
+      </table>
+
+      ${(() => {
+        if(mgrMarginsSorted.length === 0) return '';
+        const top = mgrMarginsSorted[0];
+        const bottom = mgrMarginsSorted[mgrMarginsSorted.length-1];
+        const above40 = mgrMarginsSorted.filter(m => m.margin >= 40).length;
+        const below30 = mgrMarginsSorted.filter(m => m.margin < 30).length;
+        return `<div class="insight-box">
+          <strong>👤 Manager Margin Analysis:</strong>
+          ${top.name} leads with ${top.margin.toFixed(1)}% margin across ${top.dealers} dealer(s) and ${fmt(top.revenue)} in revenue.
+          ${mgrMarginsSorted.length > 1 ? `${bottom.name} has the lowest at ${bottom.margin.toFixed(1)}%.` : ''}
+          ${above40} manager(s) at or above 40% target;
+          ${below30} manager(s) below 30%.
+          Use this view to identify which manager portfolios are healthier in pricing discipline.
+        </div>`;
+      })()}
 
       <div class="slide-footer">
         <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
@@ -6954,6 +7182,7 @@ function buildReportHTML(r, periodLabel, periodMode){
   ${slideDealers}
   ${slideGeo}
   ${slideMargins}
+  ${slideMarginsManager}
 </body>
 </html>`;
 }
