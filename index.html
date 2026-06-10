@@ -6492,7 +6492,6 @@ function computeReportData(){
     const topDealer = Object.entries(byDealer).sort((a,b) => b[1].val - a[1].val).slice(0, 10)
       .map(([id, x]) => ({ id, val: x.val, count: x.count }));
 
-    // Use the user's current selection from window._riskMatrixView for export consistency
     const mode = (window._riskMatrixView && window._riskMatrixView[cls]) || 'pn';
 
     riskMatrixData[cls] = { totalVal, totalLines: items.length, topPN, topDealer, mode };
@@ -7511,7 +7510,9 @@ function renderMonthlyExecutionChart(){
       bP+=d.budgetP; bN+=d.budgetN; shipped+=d.shipped; forecast+=d.forecast;
       lost+=d.lost; uncls+=d.uncls; networks+=d.networks;
     }
-    return { bP, bN, budget:bP+bN, shipped, forecast, lost, uncls, networks, exec:shipped+forecast+lost+uncls+networks };
+    // exec = Shipped + Forecast confirmado + Networks (alinhado com o KPI "Atingimento Projetado")
+    // Programado (lost) e Sem sinalização (uncls) NÃO entram pois não estão confirmados
+    return { bP, bN, budget:bP+bN, shipped, forecast, lost, uncls, networks, exec:shipped+forecast+networks };
   };
 
   const q1=sumRange(1,3), q2=sumRange(4,6), q3=sumRange(7,9), q4=sumRange(10,12);
@@ -7543,6 +7544,9 @@ function renderMonthlyExecutionChart(){
       <p><span style="display:inline-block;width:10px;height:10px;background:${COLORS.uncls};border-radius:2px;margin-right:6px;vertical-align:middle;background-image:repeating-linear-gradient(45deg,transparent,transparent 2px,rgba(0,0,0,.3) 2px,rgba(0,0,0,.3) 4px)"></span><strong>Sem sinalização</strong> — RDD futuro → mês do RDD · RDD passado/corrente → mês corrente</p>
       <p><span style="display:inline-block;width:10px;height:10px;background:${COLORS.networks};border-radius:2px;margin-right:6px;vertical-align:middle"></span><strong>Networks</strong> — Mês da compra do sinal</p>
       <p style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><span style="display:inline-block;width:10px;height:10px;background:${COLORS.budgetP};border-radius:2px;margin-right:6px;vertical-align:middle"></span><strong>Budget Produtos</strong> · <span style="display:inline-block;width:10px;height:10px;background:${COLORS.budgetN};border-radius:2px;margin-right:6px;margin-left:6px;vertical-align:middle"></span><strong>Budget Networks</strong></p>
+      <p style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);background:#FFF7ED;padding:8px;border-radius:6px"><strong style="color:#9A3412">📐 Cálculo de % nos cards (Q1, Q2, Semester, Ano Fiscal):</strong><br>
+      <span style="color:var(--tm)">% = (<strong style="color:#166534">Embarcado</strong> + <strong style="color:#D97706">Previsto</strong> + <strong style="color:#8B5CF6">Networks</strong>) ÷ Budget</span><br>
+      <span style="color:var(--tm);font-style:italic">Programado e Sem sinalização NÃO contam pois ainda não estão confirmados — alinhado com "% Atingimento Projetado" do KPI superior.</span></p>
     </div>`;
 
   container.innerHTML = `
