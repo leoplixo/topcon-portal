@@ -6676,21 +6676,27 @@ function renderSegmentCountryBreakdown(){
       const y2 = cy + r*Math.sin(endAngle);
       return `<path d="M ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}" stroke="${prodColors[key]}" stroke-width="${sw}" fill="none"/>`;
     }).join('');
-    return `<div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:14px">
-      <h3 style="font-size:12px;font-weight:700;margin-bottom:10px">🧩 Por linha de produto
+    return `<div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:14px;display:flex;flex-direction:column">
+      <h3 style="font-size:12px;font-weight:700;margin-bottom:14px">🧩 Por linha de produto
         <span class="dash-tip" title="Distribuição da execução entre AG, FD, SW-OAF e Networks no período. Usa as mesmas regras do gráfico de Execução Mensal." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
       </h3>
-      <div style="display:flex;align-items:center;gap:12px">
-        <svg viewBox="0 0 100 100" style="width:90px;height:90px;flex-shrink:0">${paths}
-          <text x="50" y="48" text-anchor="middle" font-size="9" font-weight="700" fill="#001423">Total</text>
-          <text x="50" y="58" text-anchor="middle" font-size="7" fill="#737373">USD ${Number(grandTotal).toLocaleString('en-US',{maximumFractionDigits:0})}</text>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px">
+        <svg viewBox="0 0 100 100" style="width:200px;height:200px;flex-shrink:0">${paths}
+          <text x="50" y="46" text-anchor="middle" font-size="7" font-weight="600" fill="#737373">TOTAL</text>
+          <text x="50" y="56" text-anchor="middle" font-size="6.5" font-weight="700" fill="#001423">USD ${Number(grandTotal).toLocaleString('en-US',{maximumFractionDigits:0})}</text>
         </svg>
-        <div style="flex:1;font-size:11px">
+        <div style="width:100%;font-size:12px">
           ${lines.map(([key,v]) => {
             const pct = grandTotal > 0 ? Math.round(v/grandTotal*100) : 0;
-            return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;padding-bottom:4px;border-bottom:1px solid var(--border-light)">
-              <span><span style="display:inline-block;width:8px;height:8px;background:${prodColors[key]};border-radius:2px;margin-right:5px;vertical-align:middle"></span><strong>${key}</strong></span>
-              <span style="color:var(--tm);font-size:10px">${fmt(v).replace('USD ','')} · <strong style="color:${prodColors[key]}">${pct}%</strong></span>
+            return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;padding-bottom:6px;border-bottom:1px solid var(--border-light)">
+              <span style="display:flex;align-items:center;gap:7px">
+                <span style="display:inline-block;width:11px;height:11px;background:${prodColors[key]};border-radius:3px"></span>
+                <strong style="font-size:12px">${key}</strong>
+              </span>
+              <span style="text-align:right">
+                <span style="font-weight:700;color:${prodColors[key]};font-size:13px">${pct}%</span>
+                <span style="display:block;color:var(--tm);font-size:10px;margin-top:1px">${fmt(v)}</span>
+              </span>
             </div>`;
           }).join('')}
         </div>
