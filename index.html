@@ -6537,20 +6537,16 @@ function buildReportHTML(r, periodLabel, periodMode){
   };
 
   // Logo SVG inline
+  // Official Topcon logo embedded as base64 (provided by user)
+  const TOPCON_LOGO_URL = 'data:image/webp;base64,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VGgT/OyleupWrVq1atWrVq1atWkdAqvT1XbU9nzp06dOnTp06dOnTp0dIm0Q2glOokTUkk5qs9nzp06dOnTp06dOnTp06dPlt69evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr169evXr13gAP7zE4AAAAAAAAAAAAAAAADE0f24IaWGtvqKPjVWC6eT9X/oc6yY5NhYMFvddzWr6/V8jXE2aTJRp1SnPBULsFcvwRaLt6AYtBvuQ/LY+aJEqzvTZeIYvotkyL5QEBztv8DqNrsW22gB6w6GjcG2YQF2+3mH+/YEftoCb7wUeJjfjSNt4F/wkhyR3TCYZC3WZDfni/9nEpifxcBOuV6ROgqZE+Rybdp8hPw2m/+SXl1MZSoRzCR+Ifhh622l/7Yf1ifZF2w4IitTkGuUtZNF/751aSpIoYxsejkwBD7yn/LgXnc/i6Pn/KlIjTWc0/+KnmAi2kzlEiZpO4ua+gxYkYnSHstU3syYl51WLmROYI2g+Hrkm34gMGxge7Q7911Y16WQU1ZFQHlWNT5KAOzKxMjdeBoTz6tOs+IuIFKq/zRJgGtAH4DXoxISDtMHmmmFukgJHoa25UPoofBhdfRHM9xhGpwEfHZCtWMbeHgIdo0qwWtKHP6YLgLdYuFU4QDlM05CNPWyze7ntprqov2nU5sRmKmhmbVoZ4XTkEwFg6nRF+PmvL0uOhreqoRU78lGbLVadxi9BF/BG2Ga8bawPOY4tEXjkuIT2o0Q3aXtHYqqvUtPfCAiqM0nPEBclOd8u4oQ5qym90013g1eb7BRjAwpN1C5F0BIQwAhBpI441JZArreS8NgsDH7GCMhGZcP/5lAS9DS+KhfDYI2gH191PGcB3pwdt6+15f/dBt/8kMQCzIsqR1snLGsDhdXl7G0BhTrJyaXpirorbi41NyJ/UTBjSvDDXrcEaRcip/hC6F4r5BJQYxT5cwfoROt9c0tosGeoAR6MkGVRxDQqGomG5Yh0kD8Wu+Q/adWyxRXqngFcb0oXEUJOIDg91GQwfJdNLXsixyHEhl1PemyO6IScrzorEAkb/yWNJscqzAsaRPcF1oMQc5j3rfdiNUK4yuNZA47eGw3VkzukkUx0VtxYaLXqUn3qNBUKneJSU02G5shZBiSk/f3lCUU8ROQOKp/T5cP//fbB6Rk9f8juuGq8/FMQ9afE2oj/D6K1D7ARMtSx3lxM+gTVkm+g4DUvjVE9eqhXcwqAe+ebQ0djvY77H2f//vnvv75dOz3RtGp04ImyxfTcnu1R7qKf3XVjarHk/4rFnvFMH/j47//3s9c4UGiX64HkjdK3QaIrVGprfwE2ZoTQICmLEs97aqbrPuCgCwFXRFsL5BdwMIwpYZm6KbtRS4xZulCsnGpM89fJYZ/xi+7yCtGYsdQioAAfbJ3mZOpgAAAAAAAAAAAAAAAAAAAAA==';
+  // Dark variant: white container + inverted-color logo on dark backgrounds (the logo's own black text reads on light)
+  // We display the official logo on a white pill on dark bg, or directly on white slide headers.
   const TOPCON_LOGO_DARK = `
-    <svg viewBox="0 0 600 180" xmlns="http://www.w3.org/2000/svg" style="height:48px">
-      <g transform="translate(20,40)">
-        <path fill="#0099FF" d="M0,40 Q15,0 50,15 Q80,30 110,10 L60,70 Q45,80 30,70 Q15,60 0,40 Z"/>
-      </g>
-      <text x="155" y="100" font-family="Arial,sans-serif" font-weight="900" font-size="78" fill="#ffffff" letter-spacing="-2">TOPCON</text>
-    </svg>`;
+    <div style="background:#ffffff;border-radius:6px;padding:8px 14px;display:inline-block">
+      <img src="${TOPCON_LOGO_URL}" alt="TOPCON" style="height:36px;display:block"/>
+    </div>`;
   const TOPCON_LOGO_LIGHT = `
-    <svg viewBox="0 0 600 180" xmlns="http://www.w3.org/2000/svg" style="height:42px">
-      <g transform="translate(20,40)">
-        <path fill="#0099FF" d="M0,40 Q15,0 50,15 Q80,30 110,10 L60,70 Q45,80 30,70 Q15,60 0,40 Z"/>
-      </g>
-      <text x="155" y="100" font-family="Arial,sans-serif" font-weight="900" font-size="78" fill="#001423" letter-spacing="-2">TOPCON</text>
-    </svg>`;
+    <img src="${TOPCON_LOGO_URL}" alt="TOPCON" style="height:36px"/>`;
 
   // ── Slide builders ──
   const SLIDE_STYLE = `
@@ -6900,13 +6896,21 @@ function buildReportHTML(r, periodLabel, periodMode){
     </div>
   `;
 
-  // Slide 6 — Dealers split: 10 worst gap (needs attention) + 10 best gap
+  // Slide 6 — Dealers split: 10 worst by achievement % + 10 best by achievement %
   // Only consider dealers with budget > 0 (others not really comparable)
   const dealersWithBudget = r.dealerData.filter(d => d.budget > 0);
-  const sortedByGapDesc = [...dealersWithBudget].sort((a,b) => b.gap - a.gap); // largest positive gap first
-  const sortedByGapAsc = [...dealersWithBudget].sort((a,b) => a.gap - b.gap);   // smallest (most negative) first
-  const worstGapDealers = sortedByGapDesc.slice(0, 10);
-  const bestGapDealers = sortedByGapAsc.slice(0, 10);
+  // Worst = lowest achievement first (revenue tiebreaker — bigger dealers ranked first when tied)
+  const sortedByPctAsc = [...dealersWithBudget].sort((a,b) => {
+    if(a.pct !== b.pct) return a.pct - b.pct;
+    return b.budget - a.budget; // larger budget first when tied (more material gap)
+  });
+  // Best = highest achievement first (revenue tiebreaker — bigger dealers ranked first when tied)
+  const sortedByPctDesc = [...dealersWithBudget].sort((a,b) => {
+    if(b.pct !== a.pct) return b.pct - a.pct;
+    return b.budget - a.budget;
+  });
+  const worstGapDealers = sortedByPctAsc.slice(0, 10);
+  const bestGapDealers = sortedByPctDesc.slice(0, 10);
 
   const dealerRow = (c, i) => {
     const pctColor = c.pct >= 100 ? '#166534' : c.pct >= 70 ? '#D97706' : c.budget > 0 ? '#C0392B' : '#888';
@@ -6934,7 +6938,7 @@ function buildReportHTML(r, periodLabel, periodMode){
       </div>
 
       <!-- 10 worst (largest gap = needs most attention) -->
-      <h3 style="font-size:11px;font-weight:700;color:#C0392B;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">⚠️ Top 10 — Largest Gap (Most Attention Needed)</h3>
+      <h3 style="font-size:11px;font-weight:700;color:#C0392B;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">⚠️ Top 10 — Lowest Achievement % (Most Attention Needed)</h3>
       <table class="report-tbl" style="margin-bottom:14px">
         <thead>
           <tr>
@@ -6949,7 +6953,7 @@ function buildReportHTML(r, periodLabel, periodMode){
       </table>
 
       <!-- 10 best (smallest/negative gap = top performers) -->
-      <h3 style="font-size:11px;font-weight:700;color:#166534;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">⭐ Top 10 — Best Performance (Lowest Gap / Above Target)</h3>
+      <h3 style="font-size:11px;font-weight:700;color:#166534;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">⭐ Top 10 — Highest Achievement % (Top Performers)</h3>
       <table class="report-tbl">
         <thead>
           <tr>
@@ -6963,7 +6967,7 @@ function buildReportHTML(r, periodLabel, periodMode){
         </tbody>
       </table>
 
-      <p style="font-size:10px;color:#6B7280;margin-top:8px">${dealersWithBudget.length} dealer(s) with budget in period. Top 10 worst sorted by largest positive gap (most below target), Top 10 best by smallest/most negative gap (above target).</p>
+      <p style="font-size:10px;color:#6B7280;margin-top:8px">${dealersWithBudget.length} dealer(s) with budget in period. Sorted by achievement % (Shipped ÷ Budget). When tied, larger budget ranks first to highlight more material accounts.</p>
 
       <div class="slide-footer">
         <span>${periodLabel}</span><span>Topcon LATAM · Management Report · ${todayStr}</span>
