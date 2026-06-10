@@ -5901,71 +5901,216 @@ function renderMonthlyExecutionChart(){
   };
   const filteredIds = new Set(profiles.filter(p => passClient(p.id)).map(p => p.id));
 
-  // Compute budget, realized per FY month (1..12)
+  // Reference points
+  const now = new Date();
+  const currentYm = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  const todayStr = now.toISOString().slice(0,10);
+
+  // Compute next month after a given YYYY-MM
+  const nextMonth = (ym) => {
+    const [y,m] = ym.split('-').map(Number);
+    const d = new Date(y, m, 1); // m is next month index in JS (0-based)
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  };
+
+  // Allocate each backlog item to a YM based on the rules
+  // Returns { ym, kind } where kind is 'shipped'|'forecast'|'lost'|'uncls'
+  const allocateItem = (item) => {
+    // qty_shipped already counted via backlog_shipments — only return for OPEN qty
+    const openQty = Math.max(0, Number(item.qty_ordered||0) - Number(item.qty_shipped||0));
+    if(openQty <= 0) return null;
+    if(item.classification === 'Shipped') return null;
+
+    const value = openQty * Number(item.unit_price||0);
+    const rddYm = (item.rdd||'').slice(0,7);
+    const availYm = (item.availability_date||'').slice(0,7);
+
+    // Embarca? = Sim → mês corrente (mesmo com RDD futuro, antecipação)
+    if(item.will_ship_month === true){
+      return { ym: currentYm, kind: 'forecast', value };
+    }
+
+    // Embarca? = Não → tem availability_date futura, vai pra lá. Senão, mês seguinte
+    if(item.will_ship_month === false){
+      if(availYm && item.availability_date > todayStr){
+        return { ym: availYm, kind: 'lost', value };
+      }
+      return { ym: nextMonth(currentYm), kind: 'lost', value };
+    }
+
+    // Sem sinalização (null/undefined)
+    // Se RDD futuro: vai para o mês do RDD
+    // Se RDD passado/corrente ou sem RDD: vai para o mês corrente como pendente
+    if(rddYm && rddYm > currentYm){
+      return { ym: rddYm, kind: 'uncls', value };
+    }
+    return { ym: currentYm, kind: 'uncls', value };
+  };
+
+  // Compute totals per FY month
   const monthData = [];
   for(let m = 1; m <= 12; m++){
     const ym = fyMonthToYM(fyStart, m);
-    let bP = 0, bN = 0, rP = 0, rN = 0;
+    let bP = 0, bN = 0;
+    let shippedV = 0, forecastV = 0, lostV = 0, unclsV = 0, netsV = 0;
 
+    // Budget
     profiles.forEach(p => {
       if(!filteredIds.has(p.id)) return;
       const b = (budgetByUser[p.id]||{})[m];
       if(b){ bP += b.p; bN += b.n; }
     });
 
+    // Shipped (realized) — based on ship_date
     backlog.forEach(item => {
       if(!filteredIds.has(item.client_user_id)) return;
       (item.backlog_shipments||[]).forEach(s => {
         if((s.ship_date||'').slice(0,7) === ym){
-          rP += Number(s.qty_shipped||0) * Number(item.unit_price||0);
+          shippedV += Number(s.qty_shipped||0) * Number(item.unit_price||0);
         }
       });
     });
 
+    // Open backlog allocated by rules
+    backlog.forEach(item => {
+      if(!filteredIds.has(item.client_user_id)) return;
+      const a = allocateItem(item);
+      if(!a || a.ym !== ym) return;
+      if(a.kind === 'forecast') forecastV += a.value;
+      else if(a.kind === 'lost') lostV += a.value;
+      else if(a.kind === 'uncls') unclsV += a.value;
+    });
+
+    // Networks
     nets.forEach(n => {
       if(!filteredIds.has(n.user_id)) return;
       if(n.month === ym){
-        rN += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
+        netsV += Number(n.total_value || (Number(n.qty||0) * Number(n.unit_price||0)));
       }
     });
 
-    let budget, realized;
-    if(f.metaType === 'products'){ budget = bP; realized = rP; }
-    else if(f.metaType === 'networks'){ budget = bN; realized = rN; }
-    else { budget = bP+bN; realized = rP+rN; }
+    // Apply metaType filter
+    let budgetTotal, shipped, forecast, lost, uncls, networks;
+    if(f.metaType === 'products'){
+      budgetTotal = bP;
+      shipped = shippedV; forecast = forecastV; lost = lostV; uncls = unclsV; networks = 0;
+    } else if(f.metaType === 'networks'){
+      budgetTotal = bN;
+      shipped = 0; forecast = 0; lost = 0; uncls = 0; networks = netsV;
+    } else {
+      budgetTotal = bP + bN;
+      shipped = shippedV; forecast = forecastV; lost = lostV; uncls = unclsV; networks = netsV;
+    }
 
-    monthData.push({ m, ym, budget, realized, label: ['Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez','Jan','Fev','Mar'][m-1] });
+    const totalExec = shipped + forecast + lost + uncls + networks;
+
+    monthData.push({
+      m, ym,
+      label: ['Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez','Jan','Fev','Mar'][m-1],
+      budgetP: f.metaType === 'networks' ? 0 : bP,
+      budgetN: f.metaType === 'products' ? 0 : bN,
+      budgetTotal,
+      shipped, forecast, lost, uncls, networks,
+      totalExec,
+      isCurrent: ym === currentYm
+    });
   }
 
-  const maxVal = Math.max(...monthData.map(d => Math.max(d.budget, d.realized)), 1);
+  const maxVal = Math.max(...monthData.map(d => Math.max(d.budgetTotal, d.totalExec)), 1);
   const fmt = v => Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+
+  const COLORS = {
+    budgetP: '#9CA3AF',      // gray
+    budgetN: '#6B7280',      // dark gray
+    shipped: '#166534',      // green
+    forecast: '#F59E0B',     // amber
+    lost: '#3B82F6',         // blue
+    uncls: '#9CA3AF',        // gray (striped via pattern would be ideal, but we use solid)
+    networks: '#8B5CF6'      // purple
+  };
+
+  // Build legend / rules tooltip
+  const rulesHtml = `
+    <div style="font-size:11px;line-height:1.7;text-align:left">
+      <p style="font-weight:700;margin-bottom:6px">📊 Regras de classificação por mês:</p>
+      <p><span style="display:inline-block;width:10px;height:10px;background:${COLORS.shipped};border-radius:2px;margin-right:6px;vertical-align:middle"></span><strong>Embarcado</strong> — tem ship_date no mês</p>
+      <p><span style="display:inline-block;width:10px;height:10px;background:${COLORS.forecast};border-radius:2px;margin-right:6px;vertical-align:middle"></span><strong>Previsto Embarcar</strong> — Embarca? = Sim → vai pro mês corrente (mesmo se RDD futuro)</p>
+      <p><span style="display:inline-block;width:10px;height:10px;background:${COLORS.lost};border-radius:2px;margin-right:6px;vertical-align:middle"></span><strong>Programado/Atrasado</strong> — Embarca? = Não → vai pro mês da prev. de prontidão (se futura) ou mês seguinte</p>
+      <p><span style="display:inline-block;width:10px;height:10px;background:${COLORS.uncls};border-radius:2px;margin-right:6px;vertical-align:middle;border:1px dashed #6B7280"></span><strong>Sem sinalização</strong> — RDD futuro → mês do RDD · RDD passado/corrente → mês corrente</p>
+      <p><span style="display:inline-block;width:10px;height:10px;background:${COLORS.networks};border-radius:2px;margin-right:6px;vertical-align:middle"></span><strong>Networks</strong> — Mês da compra do sinal</p>
+      <p style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><span style="display:inline-block;width:10px;height:10px;background:${COLORS.budgetP};border-radius:2px;margin-right:6px;vertical-align:middle"></span><strong>Budget Produtos</strong> · <span style="display:inline-block;width:10px;height:10px;background:${COLORS.budgetN};border-radius:2px;margin-right:6px;margin-left:6px;vertical-align:middle"></span><strong>Budget Networks</strong></p>
+    </div>`;
 
   container.innerHTML = `
     <div style="background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:16px;margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
         <h3 style="font-size:13px;font-weight:700">📅 Execução mensal · FY${fyStart}
-          <span class="dash-tip" title="Comparação budget vs realizado mês a mês ao longo do ano fiscal. % atingimento por mês na ponta direita." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
+          <span class="dash-tip" title="Cada mês mostra duas barras: superior = Budget (cinza claro produtos + cinza escuro networks), inferior = Execução real + previsão (cores empilhadas). Clique no botão de regras para entender cada cor." style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--g100);color:var(--tm);font-size:10px;text-align:center;line-height:14px;cursor:help;margin-left:4px;font-weight:600">?</span>
         </h3>
-        <span style="font-size:11px;color:var(--tm)">Cinza = Budget · Verde = Realizado</span>
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+          <div style="display:flex;gap:10px;font-size:10px;color:var(--tm);align-items:center">
+            <span><span style="display:inline-block;width:9px;height:9px;background:${COLORS.shipped};border-radius:2px;margin-right:3px;vertical-align:middle"></span>Embarcado</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:${COLORS.forecast};border-radius:2px;margin-right:3px;vertical-align:middle"></span>Previsto</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:${COLORS.lost};border-radius:2px;margin-right:3px;vertical-align:middle"></span>Programado</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:${COLORS.uncls};border:1px dashed #6B7280;border-radius:2px;margin-right:3px;vertical-align:middle"></span>Sem class.</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:${COLORS.networks};border-radius:2px;margin-right:3px;vertical-align:middle"></span>Networks</span>
+          </div>
+          <button onclick="document.getElementById('exec-rules-modal').style.display='flex'"
+            style="padding:4px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:11px;background:#fff;cursor:pointer;color:var(--t2)">📖 Regras</button>
+        </div>
       </div>
       <div>
         ${monthData.map(d => {
-          const pct = d.budget > 0 ? Math.round(d.realized/d.budget*100) : 0;
-          const wB = Math.round(d.budget/maxVal*100);
-          const wR = Math.round(d.realized/maxVal*100);
-          const pctColor = pct>=100?'#166534':pct>=70?'#D97706':d.budget>0?'#C0392B':'#888';
-          return `<div style="display:grid;grid-template-columns:40px 1fr 80px;gap:10px;align-items:center;margin-bottom:6px;font-size:11px">
-            <span style="font-weight:600;color:var(--t2)">${d.label}</span>
-            <div style="position:relative;height:18px">
-              <div style="position:absolute;top:0;left:0;height:8px;width:${wB}%;background:#D1D5DB;border-radius:3px"></div>
-              <div style="position:absolute;top:10px;left:0;height:8px;width:${wR}%;background:#3A8C4C;border-radius:3px"></div>
+          const pct = d.budgetTotal > 0 ? Math.round(d.totalExec/d.budgetTotal*100) : 0;
+          const wBP = Math.round(d.budgetP/maxVal*100);
+          const wBN = Math.round(d.budgetN/maxVal*100);
+          const wShipped  = Math.round(d.shipped/maxVal*100);
+          const wForecast = Math.round(d.forecast/maxVal*100);
+          const wLost     = Math.round(d.lost/maxVal*100);
+          const wUncls    = Math.round(d.uncls/maxVal*100);
+          const wNetworks = Math.round(d.networks/maxVal*100);
+          const pctColor = pct>=100?'#166534':pct>=70?'#D97706':d.budgetTotal>0?'#C0392B':'#888';
+          const curBg = d.isCurrent ? 'background:#FFFBEB;border-radius:6px;padding:5px 8px;margin:0 -8px 6px;' : 'margin-bottom:8px;';
+          return `<div style="display:grid;grid-template-columns:46px 1fr 110px;gap:10px;align-items:center;font-size:11px;${curBg}">
+            <span style="font-weight:700;color:${d.isCurrent?'#D97706':'var(--t2)'}">${d.label}${d.isCurrent?' •':''}</span>
+            <div style="position:relative;height:22px"
+              title="Budget: USD ${fmt(d.budgetTotal)} | Embarcado USD ${fmt(d.shipped)} · Previsto USD ${fmt(d.forecast)} · Programado USD ${fmt(d.lost)} · Sem class. USD ${fmt(d.uncls)} · Networks USD ${fmt(d.networks)}">
+              <!-- Budget bar (top) -->
+              <div style="position:absolute;top:0;left:0;display:flex;height:9px">
+                ${d.budgetP>0?`<div style="width:${wBP*maxVal/100*100/maxVal}%;background:${COLORS.budgetP};border-radius:2px 0 0 2px"></div>`:''}
+                ${d.budgetN>0?`<div style="width:${wBN*maxVal/100*100/maxVal}%;background:${COLORS.budgetN};border-radius:${d.budgetP>0?'0':'2px 0 0 2px'} 2px 2px ${d.budgetP>0?'0':'2px'}"></div>`:''}
+              </div>
+              <!-- Execution bar (bottom, stacked) -->
+              <div style="position:absolute;top:12px;left:0;display:flex;height:9px;width:100%">
+                ${d.shipped>0?`<div style="width:${wShipped}%;background:${COLORS.shipped}"></div>`:''}
+                ${d.forecast>0?`<div style="width:${wForecast}%;background:${COLORS.forecast}"></div>`:''}
+                ${d.lost>0?`<div style="width:${wLost}%;background:${COLORS.lost}"></div>`:''}
+                ${d.uncls>0?`<div style="width:${wUncls}%;background:${COLORS.uncls};background-image:repeating-linear-gradient(45deg,transparent,transparent 3px,rgba(0,0,0,.15) 3px,rgba(0,0,0,.15) 6px)"></div>`:''}
+                ${d.networks>0?`<div style="width:${wNetworks}%;background:${COLORS.networks}"></div>`:''}
+              </div>
             </div>
             <div style="text-align:right">
-              <span style="font-weight:700;color:${pctColor}">${d.budget>0?pct+'%':'—'}</span>
-              <span style="font-size:10px;color:var(--tm);display:block">USD ${fmt(d.realized)} / ${fmt(d.budget)}</span>
+              <span style="font-weight:700;color:${pctColor}">${d.budgetTotal>0?pct+'%':'—'}</span>
+              <span style="font-size:9px;color:var(--tm);display:block">USD ${fmt(d.totalExec)} / ${fmt(d.budgetTotal)}</span>
             </div>
           </div>`;
         }).join('')}
+      </div>
+    </div>
+
+    <!-- Rules modal -->
+    <div id="exec-rules-modal" style="display:none;position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;align-items:center;justify-content:center;padding:20px"
+      onclick="if(event.target===this)this.style.display='none'">
+      <div style="background:#fff;border-radius:14px;max-width:550px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <h3 style="font-size:16px;font-weight:700">📖 Regras de classificação mensal</h3>
+          <button onclick="document.getElementById('exec-rules-modal').style.display='none'" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--tm)">×</button>
+        </div>
+        ${rulesHtml}
+        <p style="font-size:10px;color:var(--tm);margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">
+          A barra superior mostra Budget. A barra inferior mostra a execução total empilhada (real + previsões).<br>
+          Mês corrente destacado em amarelo claro •
+        </p>
       </div>
     </div>`;
 }
