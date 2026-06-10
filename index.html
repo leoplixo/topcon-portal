@@ -457,6 +457,13 @@ async function sendForwardedEmail(order, destination){
 }
 
 let cUser=null, cProfile=null, cGroup=null;
+
+// Returns the effective client user ID for queries.
+// When admin is impersonating a client, returns the client's profile ID.
+// Otherwise returns the auth user ID (which equals profile ID for regular clients).
+function getClientId(){
+  return cProfile?._adminImpersonating ? cProfile.id : (cUser?.id || null);
+}
 let clientEligibility=null;
 let LANG='pt'; // 'pt' | 'es' | 'en'
 try{LANG=localStorage.getItem('topcon_lang')||'pt';}catch(e){}
@@ -1048,7 +1055,7 @@ async function renderMyBacklog(){
   el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando…</div></div>';
 
   // Fetch all orders for this user (all statuses, including forwarded)
-  const{data:orders}=await sb.from('orders').select('id,reference,requested_delivery_date').eq('user_id',cUser.id);
+  const{data:orders}=await sb.from('orders').select('id,reference,requested_delivery_date').eq('user_id',getClientId());
   const orderIds=(orders||[]).map(o=>o.id);
   if(!orderIds.length){
     el.innerHTML='<h1 class="page-title" style="margin-bottom:16px">'+t('myOrdersStatus')+'</h1>'
@@ -1181,10 +1188,10 @@ async function renderDashboard(){
 
   // Fetch in parallel
   const[targetRes,windowsRes,ordersRes]=await Promise.all([
-    sb.from('targets').select('target_usd,target_networks_usd').eq('user_id',cUser.id).eq('year',FISCAL_YEAR).single(),
+    sb.from('targets').select('target_usd,target_networks_usd').eq('user_id',getClientId()).eq('year',FISCAL_YEAR).single(),
     sb.from('windows').select('*').eq('year',FISCAL_YEAR).order('window_number'),
     sb.from('orders').select('id,reference,total_usd,final_total_usd,price_type,created_at,requested_delivery_date,status,order_items(pn,description,unit_price,quantity)')
-      .eq('user_id',cUser.id).gte('created_at',FISCAL_START.toISOString()).order('created_at',{ascending:false})
+      .eq('user_id',getClientId()).gte('created_at',FISCAL_START.toISOString()).order('created_at',{ascending:false})
   ]);
 
   const annualTarget=targetRes.data?.target_usd||0;
@@ -1195,7 +1202,7 @@ async function renderDashboard(){
   const purchased=orders.filter(o=>o.status!=='cancelled'&&(o.order_items?.length||0)>0).reduce((s,o)=>s+Number(o.final_total_usd||o.total_usd||0),0);
 
   // Fetch networks purchases for this dealer
-  const{data:netPurchases}=await sb.from('network_purchases').select('qty,unit_price,total_value,month').eq('user_id',cUser.id);
+  const{data:netPurchases}=await sb.from('network_purchases').select('qty,unit_price,total_value,month').eq('user_id',getClientId());
   const networksTotal=(netPurchases||[]).reduce((s,p)=>s+Number(p.total_value||p.qty*p.unit_price||0),0);
   const netPct=annualNetworks>0?Math.min(100,Math.round(networksTotal/annualNetworks*100)):0;
 
@@ -1444,8 +1451,8 @@ async function checkClientEligibility(){
   const FISCAL_START='2026-04-01';
   const[winRes,targetRes,ordersRes]=await Promise.all([
     sb.from('windows').select('*').order('window_number'),
-    sb.from('targets').select('target_usd').eq('user_id',cUser.id).eq('year',2026).single(),
-    sb.from('orders').select('total_usd,final_total_usd,status').eq('user_id',cUser.id)
+    sb.from('targets').select('target_usd').eq('user_id',getClientId()).eq('year',2026).single(),
+    sb.from('orders').select('total_usd,final_total_usd,status').eq('user_id',getClientId())
       .gte('created_at',FISCAL_START).neq('status','cancelled')
   ]);
   const windows=winRes.data||[];
@@ -2852,7 +2859,7 @@ async function saveCutoff(userId){
 
 async function doLogout(){
   await sb.auth.signOut();
-  cart={};cUser=null;cProfile=null;cGroup=null;catalog=[];
+  cart={};priceOverrides={};cUser=null;cProfile=null;cGroup=null;catalog=[];
   document.getElementById('login-email').value='';
   document.getElementById('login-pass').value='';
   document.getElementById('login-err').style.display='none';
@@ -2979,11 +2986,30 @@ function updBadge(){
   const b=document.getElementById('cart-badge');
   if(b){b.style.display=n>0?'flex':'none';b.textContent=n;}
 }
+// Price overrides during admin impersonation (only used when cProfile._adminImpersonating is true)
+let priceOverrides = {};
+
+function setItemPriceOverride(pn, value){
+  const v=parseFloat(value);
+  if(isNaN(v)||v<0){
+    alert('Preço inválido');
+    renderQuote();
+    return;
+  }
+  priceOverrides[pn]=v;
+  renderQuote();
+}
+
 const getItems=()=>Object.entries(cart).map(([pn,qty])=>{
   const p=catalog.find(x=>x.pn===pn);
-  const price=priceType==='scheduled'?p.scheduled_price:p.spot_price;
+  if(!p) return null;
+  let price = priceType==='scheduled'?p.scheduled_price:p.spot_price;
+  // Apply admin price override if impersonating and override exists
+  if(cProfile?._adminImpersonating && priceOverrides[pn]!=null){
+    price = priceOverrides[pn];
+  }
   return{...p,qty,price,total:price*qty};
-});
+}).filter(Boolean);
 const getTotal=()=>getItems().reduce((s,i)=>s+i.total,0);
 
 // VIEWS
@@ -3061,7 +3087,19 @@ function renderQuote(){
       <th style="text-align:left">PN#</th><th style="text-align:left">Descrição</th>
       <th style="text-align:center">Qtd</th><th style="text-align:right">Preço unit.</th>
       <th style="text-align:right">Total</th><th></th>
-    </tr></thead><tbody>${items.map(i=>`<tr>
+    </tr></thead><tbody>${items.map(i=>{
+      const isImpersonating = cProfile?._adminImpersonating;
+      const priceCell = isImpersonating
+        ? `<td style="text-align:right">
+            <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px">
+              <span style="font-size:10px;color:#D97706;font-weight:700">USD</span>
+              <input type="number" step="0.01" min="0" value="${Number(i.price).toFixed(2)}"
+                onchange="setItemPriceOverride('${i.pn}',this.value)"
+                style="width:90px;text-align:right;font-weight:600;font-size:12px;border:1px solid #F59E0B;border-radius:5px;padding:3px 6px;background:#FFFBEB;font-family:inherit"/>
+            </div>
+          </td>`
+        : `<td style="text-align:right;color:var(--t2)">${fmt(i.price)}</td>`;
+      return `<tr>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${i.pn}</td>
       <td>${i.description}</td>
       <td style="text-align:center"><div class="qty-ctrl" style="justify-content:center">
@@ -3071,10 +3109,11 @@ function renderQuote(){
           style="width:52px;text-align:center;font-weight:600;font-size:13px;border:1px solid var(--border-md);border-radius:6px;padding:3px 4px;font-family:inherit"/>
         <button class="qty-btn" onclick="changeQty('${i.pn}',1)">+</button>
       </div></td>
-      <td style="text-align:right;color:var(--t2)">${fmt(i.price)}</td>
+      ${priceCell}
       <td style="text-align:right;font-weight:700">${fmt(i.total)}</td>
       <td><button class="rm-btn" onclick="changeQty('${i.pn}',-999)">×</button></td>
-    </tr>`).join('')}</tbody></table></div>
+    </tr>`;
+    }).join('')}</tbody></table></div>
     <div class="sum-box">
       <div class="sum-row"><span>${items.length} item(s)</span><span>${fmt(total)}</span></div>
       <div class="sum-row"><span>Frete</span><span>A consultar</span></div>
@@ -3170,8 +3209,10 @@ async function sendOrder(){
   const items=getItems();const total=getTotal();
   const ref='TOP-'+Date.now().toString().slice(-7);
   const deliveryDate=document.getElementById('delivery-date')?.value||null;
+  // When admin is impersonating, save order under client's user_id (cProfile.id) not admin's auth id
+  const effectiveUserId = cProfile?._adminImpersonating ? cProfile.id : cUser.id;
   const {data:order,error:oErr}=await sb.from('orders').insert({
-    reference:ref,user_id:cUser.id,group_id:cGroup.id,price_type:priceType,
+    reference:ref,user_id:effectiveUserId,group_id:cGroup.id,price_type:priceType,
     total_usd:total,requested_delivery_date:deliveryDate,
     packaging_pref:packaging||null,shipping_pref:shippingPref||null,order_comments:orderComments||null
   }).select().single();
@@ -3184,7 +3225,7 @@ async function sendOrder(){
     if(btn){btn.disabled=false;btn.innerHTML='Enviar pedido →';}
     return;
   }
-  cart={};
+  cart={};priceOverrides={};
   document.getElementById('confirm-ref').textContent='Referência: '+ref;
   // Send email notification
   await sendOrderEmail(order, items, cProfile.full_name, cGroup?.label||'', deliveryDate);
@@ -3669,6 +3710,7 @@ async function renderAdminTab(tab){
           <th></th>
           <th>Gerente</th>
           <th>Budget mensal<br><span style="font-size:9px;font-weight:400;color:var(--tm)">interno</span></th>
+          <th>Acessar</th>
           <th>Status</th>
         </tr></thead>
         <tbody>${filteredClients.map(cl=>`<tr>
@@ -3728,6 +3770,10 @@ async function renderAdminTab(tab){
           <td>
             <button onclick="openBudgetModal('${cl.id}',this.dataset.name)" data-name="${cl.full_name.replace(/'/g,'&#39;').replace(/"/g,'&quot;')}"
               style="padding:5px 10px;background:#001423;color:#fff;border:none;border-radius:var(--r-md);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">💰 Editar</button>
+          </td>
+          <td>
+            <button onclick="impersonateClient('${cl.id}')" title="Acessar o portal como este cliente (admin)"
+              style="padding:5px 10px;background:#F59E0B;color:#fff;border:none;border-radius:var(--r-md);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">🎭 Acessar</button>
           </td>
           <td><span style="font-size:11px;color:#166534;font-weight:600">● ${cl.active?'Ativo':'Inativo'}</span></td>
         </tr>`).join('')}
@@ -4309,6 +4355,161 @@ function toggleOrderEdit(orderId){
   const el=document.getElementById('order-edit-'+orderId);
   if(el)el.style.display=el.style.display==='none'?'block':'none';
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// ADMIN IMPERSONATION — "Acessar como cliente"
+// ═══════════════════════════════════════════════════════════════════
+async function impersonateClient(clientId){
+  // Verify we're admin
+  if(!cProfile?.is_admin){
+    alert('Apenas administradores podem usar este recurso.');
+    return;
+  }
+
+  // Fetch the client profile
+  const{data:targetProfile,error}=await sb.from('user_profiles')
+    .select('*, client_groups(id,slug,label,segment)')
+    .eq('id',clientId).single();
+  if(error||!targetProfile){
+    alert('Cliente não encontrado: '+(error?.message||''));
+    return;
+  }
+
+  // Save the original admin context to localStorage for restoration
+  const adminCtx={
+    profile: cProfile,
+    group: cGroup,
+    userId: cUser.id,
+    userEmail: cUser.email,
+    timestamp: Date.now()
+  };
+  try{
+    localStorage.setItem('_adminImpersonateCtx', JSON.stringify(adminCtx));
+  }catch(e){
+    alert('Erro ao salvar contexto admin: '+e.message);
+    return;
+  }
+
+  // Save the impersonation flag and target id
+  localStorage.setItem('_impersonatingClientId', clientId);
+
+  // Replace cProfile / cGroup with target
+  // cUser stays the same (admin's auth user) — but cProfile reflects the client
+  cProfile = targetProfile;
+  cGroup = targetProfile.client_groups;
+
+  // Set a special admin-impersonating flag on profile to allow special features (price edit)
+  cProfile._adminImpersonating = true;
+
+  // Show client screen with impersonation banner
+  showImpersonationBanner(targetProfile.full_name);
+
+  // Set client UI elements
+  const av=document.getElementById('u-av'); if(av) av.textContent=targetProfile.full_name[0].toUpperCase();
+  const nm=document.getElementById('u-nm'); if(nm) nm.textContent=targetProfile.full_name;
+  const grp=document.getElementById('u-grp'); if(grp) grp.textContent='· '+(cGroup?.label||'');
+
+  // Clear cart from any previous session
+  cart={};priceOverrides={};
+  catalog=[];
+  updBadge();
+
+  showScreen('client');
+  showView('dashboard');
+
+  // Load client data
+  await Promise.all([checkClientEligibility(), renderDashboard(), loadCatalog()]);
+}
+
+function showImpersonationBanner(clientName){
+  // Remove existing banner if any
+  const existing=document.getElementById('impersonate-banner');
+  if(existing) existing.remove();
+
+  const banner=document.createElement('div');
+  banner.id='impersonate-banner';
+  banner.style.cssText='position:fixed;top:0;left:0;right:0;background:linear-gradient(90deg,#F59E0B,#D97706);color:#fff;padding:8px 16px;z-index:99998;display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.15)';
+  banner.innerHTML=`
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:18px">🎭</span>
+      <span>Você está navegando como <strong>${clientName}</strong> (modo Admin)</span>
+      <span style="font-size:11px;background:rgba(0,0,0,.2);padding:2px 8px;border-radius:10px">Preços editáveis no carrinho</span>
+    </div>
+    <button onclick="exitImpersonation()" style="background:#fff;color:#D97706;border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:700;cursor:pointer">← Voltar ao Admin</button>
+  `;
+  document.body.appendChild(banner);
+
+  // Push down the rest of the page to not be hidden by banner
+  document.body.style.paddingTop='42px';
+}
+
+async function exitImpersonation(){
+  // Restore admin context
+  const ctxStr=localStorage.getItem('_adminImpersonateCtx');
+  if(!ctxStr){
+    alert('Contexto admin não encontrado. Faça login novamente.');
+    await sb.auth.signOut();
+    location.reload();
+    return;
+  }
+
+  // Clear impersonation flags
+  localStorage.removeItem('_adminImpersonateCtx');
+  localStorage.removeItem('_impersonatingClientId');
+
+  // Remove banner
+  const banner=document.getElementById('impersonate-banner');
+  if(banner) banner.remove();
+  document.body.style.paddingTop='';
+
+  // Re-fetch full admin profile fresh from DB (safer than restoring from localStorage)
+  const{data:adminProfile,error}=await sb.from('user_profiles')
+    .select('*, client_groups(id,slug,label,segment)')
+    .eq('id',cUser.id).single();
+  if(error||!adminProfile){
+    alert('Erro ao restaurar perfil admin: '+(error?.message||''));
+    await sb.auth.signOut();
+    location.reload();
+    return;
+  }
+
+  cProfile=adminProfile;
+  cGroup=adminProfile.client_groups;
+
+  // Clear cart
+  cart={};priceOverrides={};
+  catalog=[];
+
+  // Show admin screen and go to Clients tab
+  showScreen('admin');
+  // Trigger click on Clientes tab
+  const tabs=document.querySelectorAll('#admin-page-wrap .atab');
+  let clientsTabBtn=null;
+  tabs.forEach(b=>{ if(b.textContent.trim().toLowerCase().includes('clientes')) clientsTabBtn=b; });
+  if(clientsTabBtn){
+    clientsTabBtn.click();
+  } else {
+    renderAdminTab('clients');
+  }
+}
+
+// On page load, check if we're returning from a refresh during impersonation
+(function restoreImpersonationOnReload(){
+  document.addEventListener('DOMContentLoaded', async ()=>{
+    const ctxStr=localStorage.getItem('_adminImpersonateCtx');
+    const targetId=localStorage.getItem('_impersonatingClientId');
+    // The auth listener will trigger afterLogin which will check this; we handle the banner display there
+    if(ctxStr && targetId){
+      // Wait for auth to settle, then re-impersonate
+      setTimeout(async ()=>{
+        if(cProfile?.is_admin && !cProfile._adminImpersonating){
+          // We just logged in as admin but there's an impersonation context — re-impersonate
+          await impersonateClient(targetId);
+        }
+      }, 500);
+    }
+  });
+})();
 
 async function saveMgrName(clientId, name){
   // 1. Update user profile
@@ -5705,7 +5906,6 @@ function renderMonthlyExecutionChart(){
   const currentYm = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
   const todayStr = now.toISOString().slice(0,10);
 
-  // Compute next month after a given YYYY-MM
   const nextMonth = (ym) => {
     const [y,m] = ym.split('-').map(Number);
     const dt = new Date(y, m, 1);
@@ -5804,8 +6004,7 @@ function renderMonthlyExecutionChart(){
     shipped: '#166534', forecast: '#F59E0B', lost: '#3B82F6', uncls: '#9CA3AF', networks: '#8B5CF6'
   };
 
-  // Aggregates: Q1 (Abr-Jun), Q2 (Jul-Set), Q3 (Out-Dez), Q4 (Jan-Mar)
-  // H1 (Q1+Q2), H2 (Q3+Q4), Full Year
+  // Aggregates by period
   const sumRange = (from, to) => {
     let bP=0, bN=0, shipped=0, forecast=0, lost=0, uncls=0, networks=0;
     for(let i=from; i<=to; i++){
@@ -5866,10 +6065,8 @@ function renderMonthlyExecutionChart(){
         </div>
       </div>
 
-      <!-- Main layout: chart on left, period cards on right -->
       <div style="display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start">
 
-        <!-- Monthly chart -->
         <div>
           ${monthData.map(d => {
             const pct = d.budgetTotal > 0 ? Math.round(d.totalExec/d.budgetTotal*100) : 0;
@@ -5886,12 +6083,10 @@ function renderMonthlyExecutionChart(){
               title="Budget: USD ${fmt(d.budgetTotal)} (P: ${fmt(d.budgetP)} · N: ${fmt(d.budgetN)})&#10;Execução: USD ${fmt(d.totalExec)}&#10;Embarcado USD ${fmt(d.shipped)} · Previsto USD ${fmt(d.forecast)} · Programado USD ${fmt(d.lost)} · Sem class. USD ${fmt(d.uncls)} · Networks USD ${fmt(d.networks)}">
               <span style="font-weight:700;color:${d.isCurrent?'#D97706':'var(--t2)'}">${d.label}${d.isCurrent?' •':''}</span>
               <div style="position:relative;height:22px">
-                <!-- Budget bar (top) -->
                 <div style="position:absolute;top:0;left:0;display:flex;height:9px;width:100%">
                   ${d.budgetP>0?`<div style="width:${wBP}%;background:${COLORS.budgetP};border-radius:2px 0 0 2px"></div>`:''}
                   ${d.budgetN>0?`<div style="width:${wBN}%;background:${COLORS.budgetN};border-radius:${d.budgetP>0?'0':'2px 0 0 2px'} 2px 2px ${d.budgetP>0?'0':'2px'}"></div>`:''}
                 </div>
-                <!-- Execution bar (bottom, stacked) -->
                 <div style="position:absolute;top:12px;left:0;display:flex;height:9px;width:100%">
                   ${d.shipped>0?`<div style="width:${wShipped}%;background:${COLORS.shipped}"></div>`:''}
                   ${d.forecast>0?`<div style="width:${wForecast}%;background:${COLORS.forecast}"></div>`:''}
@@ -5908,21 +6103,17 @@ function renderMonthlyExecutionChart(){
           }).join('')}
         </div>
 
-        <!-- Right side: Quarter + Semester + Full year cards -->
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;align-items:stretch">
-          <!-- Q column -->
           <div style="display:grid;grid-template-rows:1fr 1fr 1fr 1fr;gap:6px">
             ${periodCard('Q1', 'Abr-Jun', q1, '#185FA5')}
             ${periodCard('Q2', 'Jul-Set', q2, '#3A8C4C')}
             ${periodCard('Q3', 'Out-Dez', q3, '#D97706')}
             ${periodCard('Q4', 'Jan-Mar', q4, '#991B1B')}
           </div>
-          <!-- Semester column -->
           <div style="display:grid;grid-template-rows:1fr 1fr;gap:6px">
             ${periodCard('Semester 1', 'Abr-Set', h1, '#5B2D99')}
             ${periodCard('Semester 2', 'Out-Mar', h2, '#0A7A8C')}
           </div>
-          <!-- Full Year -->
           <div style="display:grid;grid-template-rows:1fr">
             ${periodCard('Ano Fiscal', 'Abr-Mar', fy, '#001423')}
           </div>
@@ -5931,7 +6122,6 @@ function renderMonthlyExecutionChart(){
       </div>
     </div>
 
-    <!-- Rules modal -->
     <div id="exec-rules-modal" style="display:none;position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;align-items:center;justify-content:center;padding:20px"
       onclick="if(event.target===this)this.style.display='none'">
       <div style="background:#fff;border-radius:14px;max-width:550px;width:100%;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)">
