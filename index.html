@@ -8395,40 +8395,40 @@ function renderRiskClassificationMatrix(){
     const list = mode === 'pn' ? agg.topPN : agg.topDealer;
     const maxVal = Math.max(...list.map(x => x.val), 1);
 
-    return `<div style="background:#fff;border:1px solid var(--border);border-top:3px solid ${color};border-radius:var(--r-md);padding:10px 12px;display:flex;flex-direction:column;min-height:280px">
+    return `<div style="background:#fff;border:1px solid var(--border);border-top:4px solid ${color};border-radius:var(--r-md);padding:14px 16px;display:flex;flex-direction:column;min-height:420px">
       <!-- Quadrant header -->
-      <div style="margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;align-items:start;gap:6px;margin-bottom:4px">
-          <span style="font-size:11px;font-weight:700;color:${color}">${cls.icon} ${cls.key}</span>
+      <div style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:6px">
+          <span style="font-size:14px;font-weight:700;color:${color}">${cls.icon} ${cls.key}</span>
           <!-- PN/Dealer toggle -->
           <div style="display:flex;border:1px solid var(--border-md);border-radius:8px;overflow:hidden;flex-shrink:0">
             <button onclick="setRiskMatrixView('${cls.key.replace(/'/g, "\\'")}','pn')"
-              style="padding:2px 8px;font-size:9px;font-weight:600;border:none;cursor:pointer;background:${mode==='pn'?color:'#fff'};color:${mode==='pn'?'#fff':'var(--tm)'}">PN</button>
+              style="padding:4px 12px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:${mode==='pn'?color:'#fff'};color:${mode==='pn'?'#fff':'var(--tm)'}">PN</button>
             <button onclick="setRiskMatrixView('${cls.key.replace(/'/g, "\\'")}','dealer')"
-              style="padding:2px 8px;font-size:9px;font-weight:600;border:none;cursor:pointer;background:${mode==='dealer'?color:'#fff'};color:${mode==='dealer'?'#fff':'var(--tm)'}">Dealer</button>
+              style="padding:4px 12px;font-size:11px;font-weight:600;border:none;cursor:pointer;background:${mode==='dealer'?color:'#fff'};color:${mode==='dealer'?'#fff':'var(--tm)'}">Dealer</button>
           </div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:baseline">
-          <p style="font-size:14px;font-weight:800;color:var(--t1)">${fmt(agg.totalVal)}</p>
-          <p style="font-size:9px;color:var(--tm)">${agg.totalLines} linha(s)</p>
+          <p style="font-size:18px;font-weight:800;color:var(--t1)">${fmt(agg.totalVal)}</p>
+          <p style="font-size:11px;color:var(--tm)">${agg.totalLines} linha(s)</p>
         </div>
       </div>
 
       <!-- Top 10 list -->
       <div style="flex:1">
-        ${list.length === 0 ? '<p style="font-size:10px;color:var(--tm);text-align:center;padding:18px 0">Nada para mostrar</p>' :
+        ${list.length === 0 ? '<p style="font-size:12px;color:var(--tm);text-align:center;padding:24px 0">Nada para mostrar</p>' :
           list.map(item => {
             const w = Math.round(item.val/maxVal*100);
             const label = mode === 'pn'
-              ? `<code style="font-size:9px;font-weight:700">${item.id}</code>`
-              : `<span style="font-size:10px;font-weight:600">${item.id.length > 24 ? item.id.slice(0,22)+'…' : item.id}</span>`;
-            return `<div style="margin-bottom:4px" title="${item.id} · ${item.count} linha(s) · USD ${fmtShort(item.val)}">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1px;font-size:9px">
+              ? `<code style="font-size:12px;font-weight:700;color:var(--t1)">${item.id}</code>`
+              : `<span style="font-size:12px;font-weight:600;color:var(--t1)">${item.id.length > 26 ? item.id.slice(0,24)+'…' : item.id}</span>`;
+            return `<div style="margin-bottom:7px" title="${item.id} · ${item.count} linha(s) · USD ${fmtShort(item.val)}">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;font-size:11px">
                 ${label}
-                <span style="color:var(--tm);font-weight:600">${fmtShort(item.val)}</span>
+                <span style="color:var(--tm);font-weight:600;font-size:11px">${fmtShort(item.val)}</span>
               </div>
-              <div style="height:4px;background:#F3F4F6;border-radius:2px;overflow:hidden">
-                <div style="width:${w}%;height:100%;background:${color};border-radius:2px"></div>
+              <div style="height:7px;background:#F3F4F6;border-radius:3px;overflow:hidden">
+                <div style="width:${w}%;height:100%;background:${color};border-radius:3px"></div>
               </div>
             </div>`;
           }).join('')}
@@ -8438,10 +8438,10 @@ function renderRiskClassificationMatrix(){
 
   // Compose full HTML
   const buildImpactRow = (label, classes, accentColor, bgAccent) => {
-    return `<div style="margin-bottom:14px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <span style="display:inline-block;width:6px;height:18px;background:${accentColor};border-radius:2px"></span>
-        <h4 style="font-size:11px;font-weight:700;color:${accentColor};text-transform:uppercase;letter-spacing:.05em;margin:0">${label}</h4>
+    return `<div style="margin-bottom:18px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="display:inline-block;width:6px;height:20px;background:${accentColor};border-radius:2px"></span>
+        <h4 style="font-size:13px;font-weight:700;color:${accentColor};text-transform:uppercase;letter-spacing:.05em;margin:0">${label}</h4>
       </div>
       <div style="display:grid;grid-template-columns:repeat(${classes.length},1fr);gap:10px">
         ${classes.map(cls => buildQuadrant(cls, CLS_COLOR_MAP[cls.key])).join('')}
