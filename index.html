@@ -240,7 +240,7 @@ input,button{font-family:inherit} button{cursor:pointer} input{outline:none}
   </div>
 
   <div id="view-mybacklog" style="display:none">
-    <div class="page" style="max-width:1000px">
+    <div class="page" style="max-width:1400px">
       <div id="mybacklog-content"></div>
     </div>
   </div>
@@ -1192,10 +1192,20 @@ async function renderMyBacklog(){
       // Collapsible content
       +'<div id="'+blockId+'" style="'+collapsedAttr+'">'
       +'<div style="overflow-x:auto">'
-      +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+      +'<table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">'
+      +'<colgroup>'
+      +'<col style="width:90px">'         // PN
+      +'<col>'                             // Descrição (flex)
+      +'<col style="width:70px">'          // Qtd Pedida
+      +'<col style="width:80px">'          // Despachado
+      +'<col style="width:75px">'          // Em Aberto
+      +'<col style="width:130px">'         // Previsão de Prontidão
+      +'<col style="width:200px">'         // Status
+      +'<col style="width:60px">'          // 💬
+      +'</colgroup>'
       +'<thead><tr style="background:var(--g100)">'
       +['PN','Descrição','Qtd Pedida','Despachado','Em Aberto','Previsão de Prontidão','Status','💬']
-        .map(h=>'<th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--t2);white-space:nowrap">'+h+'</th>').join('')
+        .map(h=>'<th style="padding:8px 8px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--t2);white-space:nowrap">'+h+'</th>').join('')
       +'</tr></thead><tbody>'
       +lines.map((item,rowIdx)=>{
         const open=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
@@ -1209,19 +1219,19 @@ async function renderMyBacklog(){
         const commCount = itemComments.length;
         const hasComm = commCount > 0;
         const commBtn = '<button onclick="openDealerComments(\''+item.id+'\')" '
-          +'style="border:1px solid '+(hasComm?'#1D4ED8':'var(--border-md)')+';background:'+(hasComm?'#EFF6FF':'#fff')+';color:'+(hasComm?'#1D4ED8':'var(--tm)')+';padding:3px 9px;border-radius:14px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap" '
+          +'style="border:1px solid '+(hasComm?'#1D4ED8':'var(--border-md)')+';background:'+(hasComm?'#EFF6FF':'#fff')+';color:'+(hasComm?'#1D4ED8':'var(--tm)')+';padding:3px 8px;border-radius:14px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap" '
           +'title="'+(hasComm?'Ver e adicionar comentários ('+commCount+')':'Adicionar comentário ou dúvida')+'">'
           +'💬'+(hasComm?' '+commCount:'')
           +'</button>';
         return '<tr style="background:'+rowBg+'">'
-          +'<td style="padding:8px 12px;font-family:monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
-          +'<td style="padding:8px 12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+item.description+'">'+item.description+'</td>'
-          +'<td style="padding:8px 12px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
-          +'<td style="padding:8px 12px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
-          +'<td style="padding:8px 12px;text-align:center;font-weight:700;color:'+(open>0?'var(--blue)':'#166534')+'">'+open+'</td>'
-          +'<td style="padding:8px 12px;text-align:center;font-weight:600;color:'+availColor+'">'+(isOverdue?'⚠️ ':'')+availStr+'</td>'
-          +'<td style="padding:8px 12px"><span style="background:'+bg+';color:'+color+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap">'+label+'</span></td>'
-          +'<td style="padding:8px 12px;text-align:center">'+commBtn+'</td>'
+          +'<td style="padding:8px 8px;font-family:monospace;font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+item.pn+'</td>'
+          +'<td style="padding:8px 8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+item.description+'">'+item.description+'</td>'
+          +'<td style="padding:8px 8px;text-align:center;font-weight:600">'+item.qty_ordered+'</td>'
+          +'<td style="padding:8px 8px;text-align:center;color:#166534;font-weight:600">'+Number(item.qty_shipped||0)+'</td>'
+          +'<td style="padding:8px 8px;text-align:center;font-weight:700;color:'+(open>0?'var(--blue)':'#166534')+'">'+open+'</td>'
+          +'<td style="padding:8px 8px;text-align:center;font-weight:600;color:'+availColor+';white-space:nowrap">'+(isOverdue?'⚠️ ':'')+availStr+'</td>'
+          +'<td style="padding:8px 8px"><span style="background:'+bg+';color:'+color+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;display:inline-block">'+label+'</span></td>'
+          +'<td style="padding:8px 8px;text-align:center">'+commBtn+'</td>'
           +'</tr>';
       }).join('')
       +'</tbody></table></div></div></div>';
