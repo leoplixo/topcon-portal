@@ -1070,7 +1070,7 @@ async function renderMyBacklog(){
   (orders||[]).forEach(o=>{if(o.reference)orderDeliveryMap[o.reference]=o.requested_delivery_date;});
 
   const{data:items}=await sb.from('backlog_items')
-    .select('order_reference,pn,description,qty_ordered,qty_shipped,availability_date,classification')
+    .select('id,order_reference,pn,description,qty_ordered,qty_shipped,availability_date,classification')
     .in('order_id',orderIds)
     .order('order_reference');
 
@@ -1080,6 +1080,24 @@ async function renderMyBacklog(){
       +'<div class="empty"><div class="empty-icon">✅</div><p style="font-size:14px;font-weight:500">Nenhum item em processamento no momento.</p></div>';
     return;
   }
+
+  // Fetch comments for these items in one go (RLS filters to: visible_to_dealer=true OR author=client)
+  const itemIds = items.map(i => i.id);
+  const { data: comments } = await sb.from('backlog_comments')
+    .select('id,backlog_item_id,comment,author_name,author_role,created_at,visible_to_dealer')
+    .in('backlog_item_id', itemIds)
+    .order('created_at', { ascending: true });
+
+  // Build map of comments by item id for fast lookup
+  const commentsByItem = {};
+  (comments||[]).forEach(c => {
+    if(!commentsByItem[c.backlog_item_id]) commentsByItem[c.backlog_item_id] = [];
+    commentsByItem[c.backlog_item_id].push(c);
+  });
+
+  // Store globally so the dealer comments modal can access items + comments
+  window._dealerBacklogItems = items;
+  window._dealerCommentsByItem = commentsByItem;
 
   // Summary
   const totalLines=items.length;
@@ -1176,7 +1194,7 @@ async function renderMyBacklog(){
       +'<div style="overflow-x:auto">'
       +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
       +'<thead><tr style="background:var(--g100)">'
-      +['PN','Descrição','Qtd Pedida','Despachado','Em Aberto','Previsão de Prontidão','Status']
+      +['PN','Descrição','Qtd Pedida','Despachado','Em Aberto','Previsão de Prontidão','Status','💬']
         .map(h=>'<th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--t2);white-space:nowrap">'+h+'</th>').join('')
       +'</tr></thead><tbody>'
       +lines.map((item,rowIdx)=>{
@@ -1186,6 +1204,15 @@ async function renderMyBacklog(){
         const isOverdue=item.availability_date&&new Date(item.availability_date)<new Date()&&item.classification!=='Shipped';
         const availColor=isOverdue?'#C0392B':item.availability_date?'var(--blue)':'var(--tm)';
         const rowBg=rowIdx%2===0?'#fff':'#FAFBFC';
+        // Comments cell: button shows count if there are any comments for this item
+        const itemComments = (window._dealerCommentsByItem && window._dealerCommentsByItem[item.id]) || [];
+        const commCount = itemComments.length;
+        const hasComm = commCount > 0;
+        const commBtn = '<button onclick="openDealerComments(\''+item.id+'\')" '
+          +'style="border:1px solid '+(hasComm?'#1D4ED8':'var(--border-md)')+';background:'+(hasComm?'#EFF6FF':'#fff')+';color:'+(hasComm?'#1D4ED8':'var(--tm)')+';padding:3px 9px;border-radius:14px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap" '
+          +'title="'+(hasComm?'Ver e adicionar comentários ('+commCount+')':'Adicionar comentário ou dúvida')+'">'
+          +'💬'+(hasComm?' '+commCount:'')
+          +'</button>';
         return '<tr style="background:'+rowBg+'">'
           +'<td style="padding:8px 12px;font-family:monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
           +'<td style="padding:8px 12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+item.description+'">'+item.description+'</td>'
@@ -1194,6 +1221,7 @@ async function renderMyBacklog(){
           +'<td style="padding:8px 12px;text-align:center;font-weight:700;color:'+(open>0?'var(--blue)':'#166534')+'">'+open+'</td>'
           +'<td style="padding:8px 12px;text-align:center;font-weight:600;color:'+availColor+'">'+(isOverdue?'⚠️ ':'')+availStr+'</td>'
           +'<td style="padding:8px 12px"><span style="background:'+bg+';color:'+color+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap">'+label+'</span></td>'
+          +'<td style="padding:8px 12px;text-align:center">'+commBtn+'</td>'
           +'</tr>';
       }).join('')
       +'</tbody></table></div></div></div>';
@@ -1258,6 +1286,76 @@ function toggleShippedSection(){
     section.style.display = 'none';
     chev.textContent = '▶';
   }
+}
+
+// ── Dealer comments: opens modal for one backlog item ──
+function openDealerComments(itemId){
+  const item = (window._dealerBacklogItems||[]).find(i => i.id === itemId);
+  if(!item){ alert('Item não encontrado.'); return; }
+  const comments = (window._dealerCommentsByItem||{})[itemId] || [];
+
+  // Re-use the same modal slot as admin (or create one if missing)
+  let modal = document.getElementById('dealer-comments-modal');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'dealer-comments-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,20,35,.55);z-index:99999;display:none;align-items:center;justify-content:center;padding:20px';
+    document.body.appendChild(modal);
+  }
+  modal.style.display = 'flex';
+
+  const commentsHtml = comments.length
+    ? comments.map(cm => {
+        const isMine = cm.author_role === 'client';
+        const badge = isMine
+          ? '<span style="font-size:9px;background:#1D4ED8;color:#fff;padding:2px 7px;border-radius:10px;font-weight:600;text-transform:uppercase">Você</span>'
+          : '<span style="font-size:9px;background:#0A7A8C;color:#fff;padding:2px 7px;border-radius:10px;font-weight:600;text-transform:uppercase">Topcon</span>';
+        const cardBg = isMine ? '#EFF6FF' : '#F0FDFA';
+        const borderLeft = isMine ? 'border-left:3px solid #1D4ED8;' : 'border-left:3px solid #0A7A8C;';
+        return '<div style="background:'+cardBg+';border-radius:8px;padding:10px 12px;'+borderLeft+'">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:8px;flex-wrap:wrap">'
+          +'<div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;font-weight:600;color:var(--t1)">'+cm.author_name+'</span>'+badge+'</div>'
+          +'<span style="font-size:10px;color:var(--tm)">'+new Date(cm.created_at).toLocaleString('pt-BR')+'</span>'
+          +'</div>'
+          +'<p style="font-size:13px;color:var(--t1);white-space:pre-wrap">'+cm.comment+'</p>'
+          +'</div>';
+      }).join('')
+    : '<p style="text-align:center;color:var(--tm);font-size:13px;padding:20px">Nenhum comentário ainda. Use o campo abaixo para fazer uma pergunta ou comentário à equipe Topcon.</p>';
+
+  modal.innerHTML = '<div style="background:#fff;border-radius:16px;width:90%;max-width:520px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
+    +'<div style="padding:18px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
+    +'<div><p style="font-size:14px;font-weight:700">💬 Comentários</p>'
+    +'<p style="font-size:11px;color:var(--tm);font-family:\'JetBrains Mono\',monospace">'+item.pn+' · '+item.order_reference+'</p></div>'
+    +'<button onclick="document.getElementById(\'dealer-comments-modal\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--tm)">×</button>'
+    +'</div>'
+    +'<div style="flex:1;overflow-y:auto;padding:14px 20px;display:flex;flex-direction:column;gap:10px">'+commentsHtml+'</div>'
+    +'<div style="padding:14px 20px;border-top:1px solid var(--border)">'
+    +'<textarea id="dealer-new-comment" placeholder="Escreva uma pergunta ou comentário à equipe Topcon…" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box"></textarea>'
+    +'<p style="font-size:10px;color:var(--tm);margin-top:4px;line-height:1.4">Seu comentário será visível à equipe Topcon. Você não pode editar ou apagar após enviar.</p>'
+    +'<button onclick="saveDealerComment(\''+itemId+'\')" style="margin-top:10px;width:100%;background:var(--blue);color:#fff;border:none;border-radius:var(--r-md);padding:9px;font-size:13px;font-weight:600;cursor:pointer">Enviar comentário</button>'
+    +'</div></div>';
+  modal.onclick = e => { if(e.target === modal) modal.style.display = 'none'; };
+}
+
+async function saveDealerComment(itemId){
+  const txt = document.getElementById('dealer-new-comment')?.value?.trim();
+  if(!txt) return;
+  // Dealer comments: author_role='client', visible_to_dealer=true (so dealer keeps seeing his own messages)
+  const { data, error } = await sb.from('backlog_comments').insert({
+    backlog_item_id: itemId,
+    comment:         txt,
+    author_name:     cProfile?.full_name || 'Dealer',
+    author_role:     'client',
+    visible_to_dealer: true,
+  }).select().single();
+  if(error){ alert('Erro ao enviar comentário: ' + error.message); return; }
+  // Update local cache
+  if(!window._dealerCommentsByItem) window._dealerCommentsByItem = {};
+  if(!window._dealerCommentsByItem[itemId]) window._dealerCommentsByItem[itemId] = [];
+  window._dealerCommentsByItem[itemId].push(data);
+  // Close and re-render the page to update the counter on the row
+  document.getElementById('dealer-comments-modal').style.display = 'none';
+  await renderMyBacklog();
 }
 
 async function goDash(){
@@ -1612,7 +1710,7 @@ async function renderAdminBacklog(el){
   el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando backlog…</div></div>';
 
   const{data:items,error}=await sb.from('backlog_items')
-    .select('*,backlog_comments(id,comment,author_name,author_role,created_at),backlog_shipments(id,qty_shipped,ship_date,notes,created_by,created_at)')
+    .select('*,backlog_comments(id,comment,author_name,author_role,created_at,visible_to_dealer),backlog_shipments(id,qty_shipped,ship_date,notes,created_by,created_at)')
     .order('created_at',{ascending:false});
 
   if(error){el.innerHTML='<div class="alert alert-err">Erro: '+error.message+'</div>';return;}
@@ -1648,7 +1746,7 @@ async function renderSalesOpsBacklog(){
   el.innerHTML='<div class="loader-page"><div class="loader-inner"><div class="lspin"></div>Carregando backlog…</div></div>';
 
   const{data:items,error}=await sb.from('backlog_items')
-    .select('*,backlog_comments(id,comment,author_name,author_role,created_at),backlog_shipments(id,qty_shipped,ship_date,notes,created_by,created_at)')
+    .select('*,backlog_comments(id,comment,author_name,author_role,created_at,visible_to_dealer),backlog_shipments(id,qty_shipped,ship_date,notes,created_by,created_at)')
     .order('created_at',{ascending:false});
 
   if(error){el.innerHTML='<div class="alert alert-err">Erro ao carregar: '+error.message+'</div>';return;}
@@ -2639,18 +2737,42 @@ function openBacklogComments(itemId){
     +'<button onclick="document.getElementById(\'bl-comments-modal\').style.display=\'none\'" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--tm)">×</button>'
     +'</div>'
     +'<div style="flex:1;overflow-y:auto;padding:14px 20px;display:flex;flex-direction:column;gap:10px">'
-    +(comments.length?comments.map(cm=>'<div style="background:var(--g50);border-radius:8px;padding:10px 12px">'
-      +'<div style="display:flex;justify-content:space-between;margin-bottom:4px">'
-      +'<span style="font-size:11px;font-weight:600;color:var(--blue)">'+cm.author_name+'</span>'
-      +'<span style="font-size:10px;color:var(--tm)">'+new Date(cm.created_at).toLocaleString('pt-BR')+'</span>'
-      +'</div>'
-      +'<p style="font-size:13px;color:var(--t1)">'+cm.comment+'</p>'
-      +'</div>').join('')
+    +(comments.length?comments.map(cm=>{
+      const isVisible = cm.visible_to_dealer === true;
+      const isClientAuthor = cm.author_role === 'client';
+      // Choose badge & background based on author/visibility
+      let badge, cardBg, borderLeft;
+      if(isClientAuthor){
+        badge = '<span style="font-size:9px;background:#1D4ED8;color:#fff;padding:2px 7px;border-radius:10px;font-weight:600;text-transform:uppercase">💬 Dealer</span>';
+        cardBg = '#EFF6FF';
+        borderLeft = 'border-left:3px solid #1D4ED8;';
+      } else if(isVisible){
+        badge = '<span style="font-size:9px;background:#166534;color:#fff;padding:2px 7px;border-radius:10px;font-weight:600;text-transform:uppercase">👁️ Visível ao dealer</span>';
+        cardBg = '#F0FDF4';
+        borderLeft = 'border-left:3px solid #166534;';
+      } else {
+        badge = '<span style="font-size:9px;background:#6B7280;color:#fff;padding:2px 7px;border-radius:10px;font-weight:600;text-transform:uppercase">🔒 Interno</span>';
+        cardBg = 'var(--g50)';
+        borderLeft = '';
+      }
+      return '<div style="background:'+cardBg+';border-radius:8px;padding:10px 12px;'+borderLeft+'">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:8px;flex-wrap:wrap">'
+        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:11px;font-weight:600;color:var(--blue)">'+cm.author_name+'</span>'+badge+'</div>'
+        +'<span style="font-size:10px;color:var(--tm)">'+new Date(cm.created_at).toLocaleString('pt-BR')+'</span>'
+        +'</div>'
+        +'<p style="font-size:13px;color:var(--t1)">'+cm.comment+'</p>'
+        +'</div>';
+    }).join('')
     :'<p style="text-align:center;color:var(--tm);font-size:13px;padding:20px">Nenhum comentário ainda.</p>')
     +'</div>'
     +'<div style="padding:14px 20px;border-top:1px solid var(--border)">'
     +'<textarea id="bl-new-comment" placeholder="Adicionar comentário…" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit;resize:vertical;box-sizing:border-box"></textarea>'
-    +'<button onclick="saveBacklogComment(\''+itemId+'\')" style="margin-top:8px;width:100%;background:var(--blue);color:#fff;border:none;border-radius:var(--r-md);padding:9px;font-size:13px;font-weight:600;cursor:pointer">Salvar comentário</button>'
+    +'<label style="display:flex;align-items:center;gap:8px;margin-top:10px;padding:8px 10px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;cursor:pointer">'
+    +'<input type="checkbox" id="bl-visible-to-dealer" style="cursor:pointer"/>'
+    +'<span style="font-size:12px;color:#92400E;font-weight:600">👁️ Tornar este comentário <strong>visível ao dealer</strong></span>'
+    +'</label>'
+    +'<p style="font-size:10px;color:var(--tm);margin-top:4px;line-height:1.4">Se desmarcado, o comentário fica apenas para uso interno (admin / sales ops).</p>'
+    +'<button onclick="saveBacklogComment(\''+itemId+'\')" style="margin-top:10px;width:100%;background:var(--blue);color:#fff;border:none;border-radius:var(--r-md);padding:9px;font-size:13px;font-weight:600;cursor:pointer">Salvar comentário</button>'
     +'</div></div>';
   modal.addEventListener('click',e=>{if(e.target===modal)modal.style.display='none';});
 }
@@ -2658,11 +2780,13 @@ function openBacklogComments(itemId){
 async function saveBacklogComment(itemId){
   const txt=document.getElementById('bl-new-comment')?.value?.trim();
   if(!txt)return;
+  const visibleToDealer=document.getElementById('bl-visible-to-dealer')?.checked||false;
   const{data,error}=await sb.from('backlog_comments').insert({
     backlog_item_id: itemId,
     comment:         txt,
     author_name:     cProfile?.full_name||'Admin',
     author_role:     cProfile?.is_admin?'admin':'salesops',
+    visible_to_dealer: visibleToDealer,
   }).select().single();
   if(error){alert('Erro: '+error.message);return;}
   // Update local cache
