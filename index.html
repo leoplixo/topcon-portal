@@ -1131,31 +1131,59 @@ async function renderMyBacklog(){
     +'<p style="font-size:11px;color:var(--tm);text-transform:uppercase;letter-spacing:.05em">Despachados</p></div>'
     +'</div>';
 
-  // Table per order
-  Object.entries(byOrder).forEach(([ref,lines])=>{
-    const reqDelivery=orderDeliveryMap[ref];
-    const delivStr=reqDelivery?new Date(reqDelivery+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}):'—';
-    html+='<div class="dash-card" style="margin-bottom:14px;padding:0;overflow:hidden">'
-      +'<div style="padding:12px 16px;background:var(--g50);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">'
+  // ── Classify orders: "in progress" (any line not shipped) vs "fully shipped" ──
+  const inProgressOrders = [];
+  const fullyShippedOrders = [];
+  Object.entries(byOrder).forEach(([ref, lines]) => {
+    const allShipped = lines.every(l => l.classification === 'Shipped');
+    const entry = { ref, lines, rdd: orderDeliveryMap[ref] || null };
+    if(allShipped) fullyShippedOrders.push(entry);
+    else inProgressOrders.push(entry);
+  });
+
+  // Sort by RDD ascending (oldest first); orders without RDD go to the end
+  const sortByRDD = (a, b) => {
+    if(!a.rdd && !b.rdd) return 0;
+    if(!a.rdd) return 1;
+    if(!b.rdd) return -1;
+    return a.rdd.localeCompare(b.rdd);
+  };
+  inProgressOrders.sort(sortByRDD);
+  fullyShippedOrders.sort(sortByRDD);
+
+  // ── Builder for a single order block (collapsible) ──
+  const buildOrderBlock = (entry, idx, groupKey, startCollapsed) => {
+    const { ref, lines, rdd } = entry;
+    const delivStr = rdd ? new Date(rdd+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+    const blockId = 'order-'+groupKey+'-'+idx;
+    const collapsedAttr = startCollapsed ? 'display:none' : 'display:block';
+    const chevron = startCollapsed ? '▶' : '▼';
+
+    return '<div class="dash-card" style="margin-bottom:14px;padding:0;overflow:hidden">'
+      // Clickable header
+      +'<div onclick="toggleOrderCollapse(\''+blockId+'\')" style="padding:12px 16px;background:var(--g50);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;cursor:pointer;user-select:none" onmouseover="this.style.background=\'#F1F5F9\'" onmouseout="this.style.background=\'var(--g50)\'">'
       +'<div style="display:flex;align-items:center;gap:14px">'
+      +'<span id="'+blockId+'-chev" style="font-size:11px;color:var(--tm);width:14px;display:inline-block">'+chevron+'</span>'
       +'<span style="font-family:monospace;font-size:13px;font-weight:700;color:var(--blue)">'+ref+'</span>'
-      +(reqDelivery?'<span style="font-size:11px;color:var(--tm)">📅 Entrega solicitada: <strong style="color:var(--t2)">'+delivStr+'</strong></span>':'')
+      +(rdd ? '<span style="font-size:12px;color:var(--tm)">📅 Retirada solicitada: <strong style="color:var(--t1)">'+delivStr+'</strong></span>' : '<span style="font-size:11px;color:#C05000;font-style:italic">📅 RDD ainda não definido</span>')
       +'</div>'
       +'<span style="font-size:11px;color:var(--tm)">'+lines.length+' item(s)</span>'
       +'</div>'
+      // Collapsible content
+      +'<div id="'+blockId+'" style="'+collapsedAttr+'">'
       +'<div style="overflow-x:auto">'
       +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
       +'<thead><tr style="background:var(--g100)">'
       +['PN','Descrição','Qtd Pedida','Despachado','Em Aberto','Previsão de Prontidão','Status']
         .map(h=>'<th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);font-size:11px;color:var(--t2);white-space:nowrap">'+h+'</th>').join('')
       +'</tr></thead><tbody>'
-      +lines.map((item,idx)=>{
+      +lines.map((item,rowIdx)=>{
         const open=Math.max(0,Number(item.qty_ordered||0)-Number(item.qty_shipped||0));
         const{label,bg,color}=clientStatus(item.classification);
         const availStr=item.availability_date?new Date(item.availability_date+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}):'—';
         const isOverdue=item.availability_date&&new Date(item.availability_date)<new Date()&&item.classification!=='Shipped';
         const availColor=isOverdue?'#C0392B':item.availability_date?'var(--blue)':'var(--tm)';
-        const rowBg=idx%2===0?'#fff':'#FAFBFC';
+        const rowBg=rowIdx%2===0?'#fff':'#FAFBFC';
         return '<tr style="background:'+rowBg+'">'
           +'<td style="padding:8px 12px;font-family:monospace;font-size:10px;font-weight:600;white-space:nowrap">'+item.pn+'</td>'
           +'<td style="padding:8px 12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+item.description+'">'+item.description+'</td>'
@@ -1166,10 +1194,68 @@ async function renderMyBacklog(){
           +'<td style="padding:8px 12px"><span style="background:'+bg+';color:'+color+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap">'+label+'</span></td>'
           +'</tr>';
       }).join('')
-      +'</tbody></table></div></div>';
-  });
+      +'</tbody></table></div></div></div>';
+  };
+
+  // ── Group 1: "Em andamento" — expanded by default, individual orders expanded ──
+  if(inProgressOrders.length > 0){
+    html += '<div style="display:flex;align-items:center;gap:10px;margin:10px 0 12px">'
+      +'<span style="display:inline-block;width:6px;height:22px;background:#C05000;border-radius:3px"></span>'
+      +'<h2 style="font-size:15px;font-weight:700;color:var(--t1);margin:0">🔄 Em andamento</h2>'
+      +'<span style="font-size:12px;color:var(--tm);background:#FFF0E6;padding:2px 10px;border-radius:12px;font-weight:600">'+inProgressOrders.length+' pedido(s)</span>'
+      +'</div>';
+    inProgressOrders.forEach((entry, idx) => {
+      html += buildOrderBlock(entry, idx, 'ip', false);
+    });
+  }
+
+  // ── Group 2: "Despachados" — section collapsed by default ──
+  if(fullyShippedOrders.length > 0){
+    const sectionId = 'shipped-section';
+    html += '<div onclick="toggleShippedSection()" style="display:flex;align-items:center;gap:10px;margin:24px 0 12px;cursor:pointer;user-select:none;padding:6px 4px;border-radius:6px" onmouseover="this.style.background=\'#F1F5F9\'" onmouseout="this.style.background=\'transparent\'">'
+      +'<span id="shipped-section-chev" style="font-size:11px;color:var(--tm);width:14px;display:inline-block">▶</span>'
+      +'<span style="display:inline-block;width:6px;height:22px;background:#166534;border-radius:3px"></span>'
+      +'<h2 style="font-size:15px;font-weight:700;color:var(--t1);margin:0">✅ Despachados</h2>'
+      +'<span style="font-size:12px;color:var(--tm);background:#E8F5EC;padding:2px 10px;border-radius:12px;font-weight:600">'+fullyShippedOrders.length+' pedido(s)</span>'
+      +'<span style="font-size:11px;color:var(--tm);font-style:italic;margin-left:6px">clique para expandir</span>'
+      +'</div>'
+      +'<div id="'+sectionId+'" style="display:none">';
+    fullyShippedOrders.forEach((entry, idx) => {
+      // Inside the collapsed section, each individual order starts collapsed too — user opens the section AND the order they want
+      html += buildOrderBlock(entry, idx, 'sh', true);
+    });
+    html += '</div>';
+  }
 
   el.innerHTML=html;
+}
+
+// Toggles an individual order's table visibility
+function toggleOrderCollapse(blockId){
+  const block = document.getElementById(blockId);
+  const chev = document.getElementById(blockId+'-chev');
+  if(!block || !chev) return;
+  if(block.style.display === 'none'){
+    block.style.display = 'block';
+    chev.textContent = '▼';
+  } else {
+    block.style.display = 'none';
+    chev.textContent = '▶';
+  }
+}
+
+// Toggles the whole "Despachados" section
+function toggleShippedSection(){
+  const section = document.getElementById('shipped-section');
+  const chev = document.getElementById('shipped-section-chev');
+  if(!section || !chev) return;
+  if(section.style.display === 'none'){
+    section.style.display = 'block';
+    chev.textContent = '▼';
+  } else {
+    section.style.display = 'none';
+    chev.textContent = '▶';
+  }
 }
 
 async function goDash(){
