@@ -497,6 +497,8 @@ const I18N={
     commentsPlaceholder:'Ex: atenção especial ao PN X, contato para entrega, instruções adicionais…',
     deliveryNote:'O mês selecionado representa quando os itens estarão prontos para retirada na Topcon.',
     deliveryPlaceholder:'— Selecione o mês desejado —',
+    deliveryLeadTimeHelp:'⏱️ <strong>Prazo recomendado:</strong> mínimo de 8 semanas. Esse prazo <strong>aumenta a chance</strong> de atendimento, mas <strong>não garante</strong> — toda confirmação depende da disponibilidade em estoque.',
+    deliveryShortLeadWarning:'⚠️ <strong>Atenção:</strong> prazo inferior a 8 semanas reduz a chance de atendimento. A equipe Topcon poderá ajustar a data de retirada conforme disponibilidade em estoque.',
     subtotal:'Subtotal',shipping:'Frete',shippingNote:'A consultar',estimatedTotal:'Total estimado',
     hello:'Olá,',nextWindow:'Próxima janela',
     accProgress:'PROGRESSO ACUMULADO',accGoal:'Objetivo acumulado',
@@ -3158,6 +3160,29 @@ function goQuote(){
 }
 function goBack(){showView('catalog');updBadge();}
 
+// Checks if the delivery date is less than 8 weeks (56 days) from today
+// If so, shows the warning about stock availability dependency
+function checkDeliveryLeadTime(){
+  const input = document.getElementById('delivery-date');
+  const warn = document.getElementById('delivery-leadtime-warning');
+  if(!input || !warn) return;
+  const v = input.value;
+  if(!v){ warn.style.display = 'none'; return; }
+  const selected = new Date(v + 'T12:00:00');
+  const today = new Date();
+  today.setHours(0,0,0,0);
+  const diffDays = Math.floor((selected - today) / (1000 * 60 * 60 * 24));
+  if(diffDays < 56){ // less than 8 weeks
+    warn.style.display = 'block';
+    input.style.borderColor = '#F59E0B';
+    input.style.background = '#FFFBEB';
+  } else {
+    warn.style.display = 'none';
+    input.style.borderColor = 'var(--border-md)';
+    input.style.background = '#fff';
+  }
+}
+
 function renderQuote(){
   const items=getItems();
   const sub=document.getElementById('quote-sub');
@@ -3212,10 +3237,17 @@ function renderQuote(){
       <p style="font-size:11px;color:#92400E;margin-bottom:8px;line-height:1.5">
         Informe a data em que você pretende retirar os itens na Topcon (dia, mês e ano). Esta data é usada pelo nosso time para planejar a disponibilidade.
       </p>
+      <p style="font-size:11px;color:#92400E;margin-bottom:8px;line-height:1.5;padding:8px 10px;background:#FFFBEB;border-radius:6px;border-left:3px solid #F59E0B">
+        ${t('deliveryLeadTimeHelp')}
+      </p>
       <input type="date" id="delivery-date"
         style="padding:9px 12px;border:1px solid var(--border-md);border-radius:var(--r-md);font-size:13px;font-family:inherit;background:#fff;color:var(--t1);width:100%;max-width:320px"
         min="${new Date().toISOString().slice(0,10)}"
+        onchange="checkDeliveryLeadTime()"
       />
+      <div id="delivery-leadtime-warning" style="display:none;margin-top:10px;padding:10px 12px;background:#FEE2E2;border:1px solid #FCA5A5;border-radius:var(--r-md);font-size:12px;color:#991B1B;line-height:1.5">
+        ${t('deliveryShortLeadWarning')}
+      </div>
       <p style="font-size:11px;color:#854F0B;margin-top:8px;line-height:1.5">
         ⚠️ <strong>Atenção ao tempo de logística:</strong> a data selecionada representa quando os itens estarão prontos para <strong>retirada na Topcon</strong>. 
         Considere o tempo de transporte até o seu destino final ao escolher a data.
